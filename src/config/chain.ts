@@ -10,10 +10,32 @@ const hash = z
   .templateLiteral(['0x', z.string()])
   .refine((v) => /^0x[0-9a-fA-F]{64}$/.test(v))
   .transform((v) => v.toLowerCase() as `0x${string}`);
-const historyHint = z.strictObject({
-  poolId: hash,
-  timestampSec: z.number().int().positive().safe(),
-});
+const historyHint = z
+  .strictObject({
+    poolId: hash,
+    timestampSec: z.number().int().positive().safe(),
+    fromBlock: z
+      .string()
+      .regex(/^(?:0|[1-9][0-9]*)$/)
+      .optional(),
+    toBlock: z
+      .string()
+      .regex(/^(?:0|[1-9][0-9]*)$/)
+      .optional(),
+  })
+  .superRefine((hint, context) => {
+    if (
+      (hint.fromBlock === undefined) !== (hint.toBlock === undefined) ||
+      (hint.fromBlock !== undefined &&
+        hint.toBlock !== undefined &&
+        BigInt(hint.fromBlock) > BigInt(hint.toBlock))
+    )
+      context.addIssue({
+        code: 'custom',
+        message: 'Expected paired ordered hint bounds',
+        path: ['fromBlock'],
+      });
+  });
 const schema = z
   .strictObject({
     version: z.string(),

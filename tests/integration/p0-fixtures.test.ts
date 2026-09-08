@@ -19,6 +19,12 @@ test.skipIf(!runs.length)(
     const interfaces = { v3: new Interface(v3PoolAbi), v4: new Interface(v4ManagerAbi) };
     for (const run of runs) {
       const manifest = JSON.parse(readFileSync(join(root, run, 'manifest.json'), 'utf8'));
+      expect([
+        'repository',
+        'artifact-directory',
+        'manifest-directory',
+        'report-directory',
+      ]).toContain(manifest.pathBase);
       expect(manifest.chainId).toBe(4663);
       expect(manifest.synthetic).toBe(false);
       expect(manifest.sourceAlias).toMatch(/^[\w-]+$/);
@@ -27,7 +33,7 @@ test.skipIf(!runs.length)(
           sha256(
             readFileSync(
               resolveEvidencePath(
-                manifest.pathBase === 'manifest-directory' ? join(root, run) : process.cwd(),
+                manifest.pathBase === 'repository' ? process.cwd() : join(root, run),
                 file.path,
               ),
             ),

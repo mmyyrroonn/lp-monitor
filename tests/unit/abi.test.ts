@@ -114,3 +114,34 @@ test('cross-checks nonzero hooks and dynamic fees with official SDK', () => {
     Pool.getPoolId(token0, token1, dynamicKey.fee, dynamicKey.tickSpacing, dynamicKey.hooks),
   );
 });
+
+import { readFileSync } from 'node:fs';
+import { Interface } from 'ethers';
+import { Ether } from '@uniswap/sdk-core';
+test('archived V3 Swap preserves negative int256 amount and signed int24 tick independently of ethers', () => {
+  const logs = JSON.parse(
+    readFileSync('artifacts/p0/raw/2026-09-08T06-10-51-129Z/logs.json', 'utf8'),
+  ) as { address: string; topics: Hex[]; data: Hex }[];
+  const topic = toEventSelector(v3PoolAbi.find((e) => e.type === 'event' && e.name === 'Swap')!);
+  const log = logs.find((l) => l.topics[0] === topic)!;
+  const decoded = decodeV3PoolEvent(log);
+  expect(decoded.eventName).toBe('Swap');
+  if (decoded.eventName !== 'Swap') throw new Error('Expected Swap');
+  expect(decoded.args.amount0).toBe(-186644829477990813964n);
+  expect(decoded.args.tick).toBe(-266716);
+  const independent = new Interface(v3PoolAbi).parseLog(log)!;
+  expect(decoded.args.amount0).toBe(independent.args.amount0);
+  expect(BigInt(decoded.args.tick)).toBe(independent.args.tick);
+});
+test('native currency zero address is the first V4 currency with SDK parity', () => {
+  const native = Ether.onChain(4663);
+  const token = new Token(4663, currency1, 18);
+  const nativeKey = { ...key, currency0: hooks };
+  expect(computeV4PoolId(nativeKey)).toBe(
+    Pool.getPoolId(native, token, key.fee, key.tickSpacing, key.hooks),
+  );
+  expect(() => computeV4PoolId({ ...nativeKey, currency0: currency1, currency1: hooks })).toThrow(
+    /sorted/i,
+  );
+  expect(() => computeV4PoolId({ ...nativeKey, currency1: hooks })).toThrow(/sorted/i);
+});

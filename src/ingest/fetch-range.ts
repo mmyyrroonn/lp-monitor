@@ -22,7 +22,7 @@ export async function fetchBoundedLogs(
       result.ranges.push({ fromBlock: f.fromBlock, toBlock: f.toBlock, count: logs.length });
     } catch (error) {
       const e = classifyRpcError(error);
-      if (e.kind === 'budget' || e.kind === 'rate-limit') throw e;
+      if (e.evidenceFailure || e.kind === 'budget' || e.kind === 'rate-limit') throw e;
       if (e.kind === 'range-limit' && f.fromBlock < f.toBlock) {
         const mid = (f.fromBlock + f.toBlock) / 2n;
         await fetch({ ...f, toBlock: mid });

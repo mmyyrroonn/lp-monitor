@@ -77,3 +77,31 @@ test('runtime config permits explicit long-run quota and provider limits', () =>
     (path) => expect(loadChainConfig(path).maxRpcCalls).toBeNull(),
   );
 });
+
+test('history hint search bounds must be paired and ordered', () => {
+  withConfig(
+    (c) => {
+      c.v4PoolHistoryHints[0].fromBlock = '10';
+      c.v4PoolHistoryHints[0].toBlock = '11';
+    },
+    (path) =>
+      expect(loadChainConfig(path).v4PoolHistoryHints[0]).toMatchObject({
+        fromBlock: '10',
+        toBlock: '11',
+      }),
+  );
+  withConfig(
+    (c) => {
+      c.v4PoolHistoryHints[0].fromBlock = '10';
+      delete c.v4PoolHistoryHints[0].toBlock;
+    },
+    (path) => expect(() => loadChainConfig(path)).toThrow(),
+  );
+  withConfig(
+    (c) => {
+      c.v4PoolHistoryHints[0].fromBlock = '12';
+      c.v4PoolHistoryHints[0].toBlock = '11';
+    },
+    (path) => expect(() => loadChainConfig(path)).toThrow(),
+  );
+});

@@ -1,6 +1,6 @@
 # Robinhood RWA 短时 LP 机会监控：实施入口
 
-更新：2026-09-08。**P0 已通过官方公共 RPC 验收，下一窗口只实现 P1。** P0 review 修正已完成，149 个测试通过；[逐项处理](docs/reviews/2026-09-08-p0-review-resolution.md)。已有可运行只读 CLI、官方 ABI、能力/身份报告及真实样本；细节与限制见 [实施状态](docs/implementation-status.md)和 [运行说明](README.md)。
+更新：2026-09-08。**P0 已通过官方公共 RPC 验收，下一窗口只实现 P1。** P0 review 及复验遗留已修正，188 个测试通过；[复验处理](docs/reviews/2026-09-08-p0-review-acceptance-resolution.md)。已有可运行只读 CLI、官方 ABI、能力/身份报告及真实样本；细节与限制见 [实施状态](docs/implementation-status.md)和 [运行说明](README.md)。
 
 目标：直接解析 Robinhood Chain 的 Uniswap V3/V4 链上事件，持续观察有限的 RWA 集合，发现关联新 Meme、老 Meme 再次放量，以及具体 RWA/USDG 池的短时成交热度。首版以热度排名与提醒为核心，不做精确 LP 模拟。通知要及时，机会可以只持续几个小时。
 

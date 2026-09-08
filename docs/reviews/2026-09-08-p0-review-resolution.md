@@ -10,7 +10,7 @@
 | B2 | 通用配置/计量支持 number 或 null 配额、可变轮询/超时。计量窗口固定 1000 槽，summary 不扫描历史，剩余额度直接读取。P0 CLI 独立保留 150 次、10 秒超时、最多 2 次重试，不能通过 null 绕过单次验收预算。 |
 | B3 | saveJson 支持显式根目录；capture 的文件引用相对 manifest 所在目录，probe 相对报告目录。旧归档采用 repository 基准并留存迁移前后哈希。异地临时 checkout 离线验收通过。拒绝绝对路径、目录逃逸及符号链接越界。 |
 | B4 | 结构化 HTTP/code 优先，剔除 URL 对分类的影响；真实 viem 503/429/超时/CU 超限回归覆盖。-32005 按明确语义区分 range-limit、rate-limit、unknown-limit，模糊限制不再盲目二分放大。 |
-| B5 | 异步写入并等待完成形成背压；full/sample/off 策略（CLI 拼写 sampled）；16 MiB × 8 个分片默认上限。full 满后明确失败并保留旧记录，sampled 才轮转淘汰。flush/close 等待在途请求与落盘。 |
+| B5 | 异步写入并等待完成形成背压；full/sampled/off 策略；16 MiB × 8 个分片默认上限。full 满后明确失败并保留旧记录，sampled 才轮转淘汰。flush/close 等待在途请求与落盘。 |
 | B6 | 复查 registry：@types/better-sqlite3 最新仍为 9.6.0，运行时 13.0.3 无内置类型，不能升到不存在的 v13 类型包。保留版本并补事务、pragma、safeIntegers、bind/all/iterate 的类型与运行契约测试，见兼容性证据。 |
 | H1 | capture 共享可注入时间缓存，已有稀疏 anchor 缩小后续搜索；显式返回 before/at 的分钟边界。缓存及外部观察均验证时间单调性；采集前后端点仍直读 RPC 检测重组。跨运行持久化索引由 P1 建表实现。 |
 | H2 | RPC 传输出口及配置地址/hash 归一为小写，topic filter、eventKey、configuredSeed 比较一致，新增混合大小写回归。 |
@@ -44,8 +44,12 @@
 ## 验证与证据边界
 
 - 回归先复现了配置静默 strip、大小写差异、重复样本、RPC 分类、429 永久降速、身份预算吞掉、并发额度白等和异地证据失败，再实施修复。
-- 测试涵盖 review 的退出码矩阵、真实 viem 错误、预算/限流不分裂放大、解码负值、hooks/动态费率、过滤校验、缓存/reorg 与 SQLite 合同。
+- 测试涵盖 review 的退出码矩阵、真实 viem 错误、预算/限流不分裂放大、hooks/动态费率、过滤校验、缓存/reorg 与 SQLite 合同。
 - 本轮最终检查记录见 [review 验证汇总](../../artifacts/p0/review-validation.json)。原 P0 tests/fixture-tests 的运行时间及结果保留为历史，不冒充本轮执行结果。
 - 8 个已跟踪原始日志/请求文件保持字节一致；元数据迁移记录见 [path migration](../../artifacts/p0/path-migration-2026-09-08.json)。类型核实见 [SQLite compatibility](../../artifacts/p0/sqlite-type-compatibility.json)。
 - 本轮使用本地模拟 HTTP、单元测试和原有真实链上 fixtures，未重新采集公共 RPC，也未启动常驻程序。既有真实证据只有一条分钟边界，不能作为 P1 分钟索引的实链验收。
 - P1 从 Task 1.1 开始，仍须实现 SQLite 存储、跨运行 anchor/minute 索引、follow 任务预算与 live/backfill 调度、重扫恢复；验收需明确覆盖至少 3–5 个真实分钟边界。未用 P0 的短跑测试代替这些交付。
+
+## 复验更正
+
+上一轮“测试涵盖解码负值”的陈述不实：be8d44f 尚无 V3 负值断言，本次已删除该陈述，并在后续提交补上归档 Swap 的 amount0=-186644829477990813964 与 tick=-266716 及 ethers 独立对照。其余 R1–R9 的后续处理见 [复验处理记录](2026-09-08-p0-review-acceptance-resolution.md)。原 149 测试记录仍只描述上一轮。

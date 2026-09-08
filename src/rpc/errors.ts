@@ -1,5 +1,6 @@
 export type Support = 'supported' | 'unsupported' | 'unknown';
 export class RpcFailure extends Error {
+  evidenceFailure?: RpcFailure;
   constructor(
     public readonly kind: string,
     public readonly status: Support = 'unknown',

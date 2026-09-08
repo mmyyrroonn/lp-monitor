@@ -31,12 +31,22 @@ export function validateTimeAnchor(
 export function createTimeResolver(
   reader: ChainReader,
   cache: Map<bigint, BlockAnchor> = new Map(),
+  onAnchor?: (anchor: BlockAnchor) => void,
 ): TimeResolver {
+  let validatedInitialCache = false;
   async function query(block: bigint | 'latest'): Promise<BlockAnchor> {
+    if (!validatedInitialCache) {
+      const initial = [...cache.values()].sort((a, b) =>
+        a.number < b.number ? -1 : a.number > b.number ? 1 : 0,
+      );
+      for (const [index, anchor] of initial.entries())
+        validateTimeAnchor(anchor, index ? [initial[index - 1]!] : []);
+      validatedInitialCache = true;
+    }
     if (block !== 'latest') {
       const cached = cache.get(block);
       if (cached) {
-        validateTimeAnchor(cached, cache.values());
+        validateTimeAnchor(cached);
         return cached;
       }
     }
@@ -57,6 +67,7 @@ export function createTimeResolver(
     const existing = cache.get(anchor.number);
     if (existing) {
       if (existing.hash !== anchor.hash || existing.timestampSec !== anchor.timestampSec) {
+        onAnchor?.(anchor);
         throw new Error(`Conflicting block anchor for block ${anchor.number}`);
       }
       return existing;
@@ -73,6 +84,7 @@ export function createTimeResolver(
       }
     }
     cache.set(anchor.number, anchor);
+    onAnchor?.(anchor);
     return anchor;
   }
 
@@ -87,8 +99,28 @@ export function createTimeResolver(
       throw new Error('Block bounds must be nonnegative and ordered');
     }
 
-    const fromBlock = bounds?.fromBlock ?? 0n;
-    const toAnchor = bounds ? await query(bounds.toBlock) : await query('latest');
+    // Only sampled timestamps can establish safe bounds; a deployment candidate alone cannot.
+    let cachedLower: BlockAnchor | undefined;
+    let cachedUpper: BlockAnchor | undefined;
+    if (!bounds)
+      for (const sampled of cache.values()) {
+        if (
+          sampled.timestampSec < timestampSec &&
+          (!cachedLower || sampled.number > cachedLower.number)
+        )
+          cachedLower = sampled;
+        if (
+          sampled.timestampSec >= timestampSec &&
+          (!cachedUpper || sampled.number < cachedUpper.number)
+        )
+          cachedUpper = sampled;
+      }
+    const fromBlock = bounds?.fromBlock ?? cachedLower?.number ?? 0n;
+    const toAnchor = bounds
+      ? await query(bounds.toBlock)
+      : cachedUpper
+        ? await query(cachedUpper.number)
+        : await query('latest');
     if (toAnchor.number < fromBlock) {
       throw new Error('Block bounds must be nonnegative and ordered');
     }
@@ -103,8 +135,9 @@ export function createTimeResolver(
     // Existing sparse anchors narrow subsequent seed/minute searches.
     for (const sampled of cache.values()) {
       if (sampled.number < low || sampled.number > high) continue;
-      if (sampled.timestampSec < timestampSec) low = sampled.number + 1n;
-      else high = sampled.number;
+      if (sampled.timestampSec < timestampSec)
+        low = low > sampled.number + 1n ? low : sampled.number + 1n;
+      else high = high < sampled.number ? high : sampled.number;
     }
     while (low < high) {
       const middle = low + (high - low) / 2n;

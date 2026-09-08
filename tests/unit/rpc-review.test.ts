@@ -221,7 +221,7 @@ test('anchor hash normalizes and reader does not accumulate unused anchors', asy
       ),
   });
   expect((await reader.getAnchor(1n)).hash).toBe('0x' + 'ab'.repeat(32));
-  expect(reader.anchors.size).toBe(0);
+  expect('anchors' in reader).toBe(false);
 });
 test('meter peak uses a bounded sliding second including exact expiration', () => {
   vi.useFakeTimers();
@@ -261,6 +261,34 @@ test('concurrent budget exhaustion does not wait for a queued rate slot', async 
     expect(networkCalls).toBe(1);
     expect(result[1]).toMatchObject({ status: 'rejected', reason: { kind: 'budget' } });
     expect(Date.now() - start).toBeLessThan(100);
+    await reader.close();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test('actual HTTP 429 penalizes client requests and sustained success restores baseline', async () => {
+  vi.useFakeTimers();
+  try {
+    const times: number[] = [];
+    const reader = createChainReader(env, {
+      perSecond: 10,
+      fetchFn: async () => {
+        times.push(Date.now());
+        return times.length === 1
+          ? new Response('too many requests', { status: 429 })
+          : new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: '0x1' }));
+      },
+    });
+    for (let i = 0; i < 14; i++) {
+      const request = reader.request('eth_chainId', []);
+      await vi.runAllTimersAsync();
+      expect(await request).toBe('0x1');
+    }
+    expect(times[1]! - times[0]!).toBe(1000);
+    expect(times[2]! - times[1]!).toBe(1000);
+    expect(times.at(-1)! - times.at(-2)!).toBe(100);
+    expect(reader.meter.summary()).toMatchObject({ calls: 15, retries: 1 });
     await reader.close();
   } finally {
     vi.useRealTimers();

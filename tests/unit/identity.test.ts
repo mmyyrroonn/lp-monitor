@@ -40,7 +40,6 @@ function fixtureReader(options: FixtureOptions = {}): EvidenceReader {
   const deployedAt = options.deployedAt ?? 9_070n;
   return {
     meter,
-    anchors: new Map(),
     sourceAlias: 'unit',
     async flush() {},
     async close() {},

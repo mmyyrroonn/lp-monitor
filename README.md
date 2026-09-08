@@ -65,3 +65,9 @@ P0 `probe`/`capture` 仍为单次运行，最多 150 次 RPC、5 RPS、10 秒超
 `pollIntervalMs`、`overlapBlocks` 为 P1 预留；`historyTimestampSec` 为后续历史范围入口预留；P0 使用逐池 `v4PoolHistoryHints`。`RH_RPC_WS` 尚不发起 WS 请求，`config/watchlist.amc.json` 留待 P1 动态池发现使用。底层 ReaderOptions 可配置并发和证据容量，P1 长跑策略尚未实现。
 
 本轮 review 的全部编号、处理依据及验证边界见 [处理记录](docs/reviews/2026-09-08-p0-review-resolution.md)。
+
+### 历史归档与当前源码
+
+`node scripts/audit-p0-archive.mjs artifacts/p0/raw/2026-09-08T06-10-51-129Z/manifest.json` 只审计历史证据哈希，另写 `archive-audit.json`，不验证当前源码或当前链状态。旧 `p0-acceptance.mjs` 仅为兼容入口，不再覆盖历史 `acceptance.json`。当前源码用 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 独立验证；本轮结果与源码哈希见 `artifacts/p0/acceptance-followup-validation.json`。
+
+新证据的路径基准统一为 `repository` 或 `artifact-directory`；读取保留旧别名兼容。`v4PoolHistoryHints` 可给出成对十进制 `fromBlock` / `toBlock` 提示，采集时会重新读取两端并验证第一个匹配块；无效提示输出 incomplete。当前配置中的两组紧界限来自已有真实归档，不把部署候选块当可靠下界。

@@ -1,6 +1,6 @@
 import { createPublicClient, http, toHex, type Hex } from 'viem';
 import type { RuntimeEnv } from '../config/env.js';
-import type { BlockAnchor, ChainReader, RawLog } from '../domain/types.js';
+import type { ChainReader, RawLog } from '../domain/types.js';
 import { checkedNumber } from '../domain/json.js';
 import { RequestMeter } from './request-meter.js';
 import { classifyRpcError, RpcFailure } from './errors.js';
@@ -28,7 +28,6 @@ export interface EvidenceReader extends ChainReader {
   flush?(): Promise<void>;
   close?(): Promise<void>;
   meter: RequestMeter;
-  anchors: Map<string, BlockAnchor>;
   sourceAlias: string;
 }
 const hex = (value: unknown, bytes?: number): Hex => {
@@ -48,7 +47,6 @@ export function createChainReader(
   const limiter = new RateLimiter(options.perSecond ?? 5, options.maxConcurrentRpc ?? 2);
   const writer = new EvidenceWriter(options);
   let closed = false;
-  const anchors = new Map<string, BlockAnchor>();
   const client = createPublicClient({
     transport: http(env.httpRpcUrl, {
       retryCount: 0,
@@ -95,15 +93,23 @@ export function createChainReader(
           const failure = classifyRpcError(error);
           if (failure.kind === 'rate-limit') limiter.penalize();
           else if (failure.retryable) limiter.defer(500 * 2 ** attempt);
-          await writer.write({
-            sourceAlias: env.providerAlias,
-            at,
-            method,
-            params,
-            attempt,
-            elapsedMs: Date.now() - started,
-            error: { kind: failure.kind, status: failure.status },
-          });
+          try {
+            await writer.write({
+              sourceAlias: env.providerAlias,
+              at,
+              method,
+              params,
+              attempt,
+              elapsedMs: Date.now() - started,
+              error: { kind: failure.kind, status: failure.status },
+            });
+          } catch (evidenceError) {
+            // Evidence failure must not change the transport classification or retry budget.
+            failure.evidenceFailure =
+              evidenceError instanceof RpcFailure
+                ? evidenceError
+                : new RpcFailure('evidence-write');
+          }
           if (!failure.retryable || attempt >= (options.maxRetries ?? 2)) throw failure;
           continue;
         }
@@ -147,7 +153,6 @@ export function createChainReader(
       await writer.close();
     },
     meter,
-    anchors,
     sourceAlias: env.providerAlias,
     async getAnchor(block) {
       const result = (await request('eth_getBlockByNumber', [

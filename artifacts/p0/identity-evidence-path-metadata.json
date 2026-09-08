@@ -1,0 +1,8 @@
+{
+  "at": "2026-09-08T08:52:21.770Z",
+  "scope": "historical archive path metadata",
+  "pathBase": "repository",
+  "path": "artifacts/p0/identity-evidence.json",
+  "sha256": "26a5945235bdfa0d6b747c8a9f47f4955fbe95b46c320505ffbac56336fda4c3",
+  "reason": "Declares the repository base for historical identity evidence paths without changing identity-evidence.json or its retained acceptance hash chain."
+}

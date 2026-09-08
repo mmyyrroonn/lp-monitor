@@ -1,0 +1,99 @@
+{
+  "at": "2026-09-08T09:04:55.485Z",
+  "baselineCommit": "be8d44f",
+  "scope": "P0 acceptance followup current-source verification; no new public RPC capture",
+  "passed": true,
+  "tests": {
+    "passed": 188,
+    "failed": 0,
+    "files": 18
+  },
+  "checks": [
+    {
+      "name": "lint",
+      "command": "pnpm lint",
+      "exitCode": 0,
+      "log": "artifacts/p0/acceptance-followup-checks/lint.txt"
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm typecheck",
+      "exitCode": 0,
+      "log": "artifacts/p0/acceptance-followup-checks/typecheck.txt"
+    },
+    {
+      "name": "test",
+      "command": "node node_modules/vitest/vitest.mjs run --reporter=json --outputFile=artifacts/p0/acceptance-followup-tests.json",
+      "exitCode": 0,
+      "log": "artifacts/p0/acceptance-followup-checks/test.txt"
+    },
+    {
+      "name": "build",
+      "command": "pnpm build",
+      "exitCode": 0,
+      "log": "artifacts/p0/acceptance-followup-checks/build.txt"
+    },
+    {
+      "name": "archive",
+      "command": "node scripts/audit-p0-archive.mjs artifacts/p0/raw/2026-09-08T06-10-51-129Z/manifest.json",
+      "exitCode": 0,
+      "log": "artifacts/p0/acceptance-followup-checks/archive.txt"
+    },
+    {
+      "name": "diff",
+      "command": "git diff --check",
+      "exitCode": 0,
+      "log": "artifacts/p0/acceptance-followup-checks/diff.txt"
+    }
+  ],
+  "sourceUnchangedDuringVerification": true,
+  "sourceSnapshot": {
+    "path": "artifacts/p0/acceptance-followup-source-snapshot.json",
+    "sha256": "b77210bbb1071913e9753a70a947c4769aa979d3cc53f4c2b9b9466d10b84398"
+  },
+  "ci": "configured, not run remotely",
+  "nextStage": "P1 Task 1.1; not started",
+  "retainedEvidence": [
+    {
+      "path": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/anchors.json",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/logs.json",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/primary.logs.json",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/requests.jsonl",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/seed-1-supplement.logs.json",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/seed-2-supplement.logs.json",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/time-boundaries.json",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/acceptance.json",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/identity-evidence.json",
+      "unchanged": true
+    }
+  ],
+  "sourceHashMismatches": 0
+}

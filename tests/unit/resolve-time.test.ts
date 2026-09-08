@@ -166,3 +166,66 @@ test('rejects nonmonotonic injected anchors', async () => {
     createTimeResolver(reader, store).resolveBlockAtOrAfter(60, { fromBlock: 1n, toBlock: 2n }),
   ).rejects.toThrow(/nonmonotonic/i);
 });
+
+test('out-of-order sparse samples retain the tightest bounds', async () => {
+  const anchors = Array.from({ length: 201 }, (_, n) => anchor(BigInt(n), 1000 + n));
+  for (const order of [
+    [100, 50, 151, 180],
+    [50, 180, 100, 151],
+  ]) {
+    const { reader, calls } = readerFrom(anchors);
+    const cache = new Map(order.map((n) => [BigInt(n), anchors[n]!]));
+    await expect(
+      createTimeResolver(reader, cache).resolveBlockAtOrAfter(1150, {
+        fromBlock: 0n,
+        toBlock: 200n,
+      }),
+    ).resolves.toEqual(anchors[150]);
+    expect(calls.slice(2).every((n) => n !== 'latest' && n >= 101n && n <= 150n)).toBe(true);
+    expect(calls.length).toBeLessThanOrEqual(9);
+  }
+});
+
+test('verified cache brackets avoid both genesis and latest for the first seed search', async () => {
+  const { reader, calls } = readerFrom(
+    Array.from({ length: 1001 }, (_, n) => anchor(BigInt(n), 1000 + n)),
+  );
+  const resolver = createTimeResolver(
+    reader,
+    new Map([
+      [600n, anchor(600n, 1600)],
+      [800n, anchor(800n, 1800)],
+    ]),
+  );
+  await expect(resolver.resolveBlockAtOrAfter(1700)).resolves.toEqual(anchor(700n, 1700));
+  expect(calls).not.toContain(0n);
+  expect(calls).not.toContain('latest');
+  expect(calls.length).toBeLessThanOrEqual(9);
+});
+
+test('cold first-seed lookup has logarithmic cost at a 57-million-block head', async () => {
+  const calls: Array<bigint | 'latest'> = [];
+  const reader: ChainReader = {
+    async getLogs() {
+      return [];
+    },
+    async getAnchor(block) {
+      calls.push(block);
+      const number = block === 'latest' ? 57_000_000n : block;
+      return anchor(number, Number(number));
+    },
+  };
+  await expect(createTimeResolver(reader).resolveBlockAtOrAfter(45_000_000)).resolves.toEqual(
+    anchor(45_000_000n, 45_000_000),
+  );
+  expect(calls).toContain(0n);
+  expect(calls).toContain('latest');
+  expect(calls.length).toBeLessThanOrEqual(30);
+});
+
+test('hint bounds cannot skip an earlier block with the same target timestamp', async () => {
+  const { reader } = readerFrom([anchor(58n, 590), anchor(59n, 600), anchor(60n, 600)]);
+  await expect(
+    createTimeResolver(reader).resolveBlockAtOrAfter(600, { fromBlock: 60n, toBlock: 60n }),
+  ).rejects.toThrow(/first block/);
+});

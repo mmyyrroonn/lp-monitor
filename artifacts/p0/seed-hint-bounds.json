@@ -1,0 +1,37 @@
+{
+  "scope": "Historical search hints only; endpoints and predecessor must be revalidated by RPC on every capture",
+  "source": {
+    "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/anchors.json",
+    "sha256": "85bb0d1a0e2db981a7b78ca87681bfbb376188b0e193ad5f2055b344147756ea"
+  },
+  "hints": [
+    {
+      "poolId": "0x7499938c352d5b5b8f0c648722aca5ee964ef9b85c3a3041f1ec379726291d9d",
+      "timestampSec": 1788496435,
+      "before": {
+        "number": "53983884",
+        "hash": "0x6506ed2e9a8abcc4e8a42de2b92886b8ddcae373d4a4e5a998e1d39fb6e75485",
+        "timestampSec": 1788496434
+      },
+      "at": {
+        "number": "53983885",
+        "hash": "0x286156aed4868657754433fadfe14c0f279aeb1255b52a305484575e995838dd",
+        "timestampSec": 1788496435
+      }
+    },
+    {
+      "poolId": "0x27ccf0a6d1ee74840220715bcca7d3b01e0d33aa30d0259b47ae1585b3f4c071",
+      "timestampSec": 1788467405,
+      "before": {
+        "number": "53697162",
+        "hash": "0x39106cd702137830bcd0625f5b982df0334a24eca8024a27a303a06eec8cc74f",
+        "timestampSec": 1788467404
+      },
+      "at": {
+        "number": "53697163",
+        "hash": "0x722299d22f8a3e7c3d735dbd91db5daf8d698b7d43b4d5bad3d3a2c870bb65ca",
+        "timestampSec": 1788467405
+      }
+    }
+  ]
+}

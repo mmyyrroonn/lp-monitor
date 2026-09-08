@@ -1,5 +1,5 @@
 import { CHAIN_ID } from '../domain/chain.js';
-import { parseRpcQuantity } from '../domain/hex.js';
+import { parseRpcQuantity } from '../rpc/quantity.js';
 import {
   decodeFunctionResult,
   encodeFunctionData,
@@ -75,7 +75,7 @@ const safeRpcReason = (error: unknown): string => {
   const failure = classifyRpcError(error);
   // Exhaustion is incomplete data, never an unsupported identity or history result.
   // optional-budget-reserved remains a reportable optional deployment outcome.
-  if (failure.kind === 'budget') throw failure;
+  if (failure.kind === 'budget' || failure.evidenceFailure) throw failure;
   return failure.message;
 };
 const normalizedAddress = (address: Address) => address.toLowerCase() as Address;
@@ -416,7 +416,7 @@ export async function verifyIdentity(
     recheckedAnchor = await reader.getAnchor(anchor.number);
   } catch (error) {
     const failure = classifyRpcError(error);
-    if (failure.kind === 'budget') throw failure;
+    if (failure.kind === 'budget' || failure.evidenceFailure) throw failure;
     throw new RpcFailure('anchor-recheck-failed');
   }
   if (

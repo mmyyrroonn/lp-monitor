@@ -1,5 +1,5 @@
 import { CHAIN_ID } from '../domain/chain.js';
-import { parseRpcQuantity } from '../domain/hex.js';
+import { parseRpcQuantity } from '../rpc/quantity.js';
 import { resolve } from 'node:path';
 import { toEventSelector, type Hex } from 'viem';
 import type { ChainConfig } from '../config/chain.js';
@@ -118,24 +118,41 @@ export async function captureFixture(
   const rangeEvidence: unknown[] = [];
   const allLogs: RawLog[] = [];
   const failures: string[] = [];
+  function recordFailure(label: string, error: unknown): string {
+    const failure = classifyRpcError(error);
+    failures.push(label + ':' + failure.kind);
+    if (failure.evidenceFailure) failures.push(label + ':evidence:' + failure.evidenceFailure.kind);
+    return failure.kind;
+  }
   const timeEvidence: unknown[] = [];
   const observedAnchors: BlockAnchor[] = [];
   const anchorByBlock = new Map<bigint, BlockAnchor>();
-  const resolver = createTimeResolver(reader, anchorByBlock);
+  const observedVersions = new Map<string, boolean>();
+  const resolver = createTimeResolver(reader, anchorByBlock, (anchor) =>
+    observeAnchor(anchor, 'time-resolution'),
+  );
   function observeAnchor(anchor: BlockAnchor, label: string): boolean {
+    const version = anchor.number + ':' + anchor.hash + ':' + anchor.timestampSec;
+    if (observedVersions.has(version)) return observedVersions.get(version)!;
+    observedVersions.set(version, false);
     observedAnchors.push(anchor);
+    const prior = anchorByBlock.get(anchor.number);
+    if (prior && (prior.hash !== anchor.hash || prior.timestampSec !== anchor.timestampSec)) {
+      if (!failures.includes(label + ':anchor-conflict')) failures.push(label + ':anchor-conflict');
+      return false;
+    }
+    if (prior) {
+      observedVersions.set(version, true);
+      return true;
+    }
     try {
       validateTimeAnchor(anchor, anchorByBlock.values());
     } catch {
       failures.push(`${label}:invalid-time-anchors`);
       return false;
     }
-    const prior = anchorByBlock.get(anchor.number);
-    if (prior && (prior.hash !== anchor.hash || prior.timestampSec !== anchor.timestampSec)) {
-      if (!failures.includes(`${label}:anchor-conflict`)) failures.push(`${label}:anchor-conflict`);
-      return false;
-    }
     anchorByBlock.set(anchor.number, anchor);
+    observedVersions.set(version, true);
     return true;
   }
   async function captureRange(filter: Filter, label: string) {
@@ -144,8 +161,9 @@ export async function captureFixture(
     try {
       before = await reader.getAnchor(filter.toBlock);
       start = await reader.getAnchor(filter.fromBlock);
-      if (!observeAnchor(before, label) || !observeAnchor(start, label))
-        throw new RpcFailure('invalid-time-anchors');
+      const validEnd = observeAnchor(before, label);
+      const validStart = observeAnchor(start, label);
+      if (!validEnd || !validStart) throw new RpcFailure('invalid-time-anchors');
       if (
         start.timestampSec < 0 ||
         (start.timestampSec === 0 && start.number !== 0n) ||
@@ -153,7 +171,7 @@ export async function captureFixture(
       )
         throw new RpcFailure('invalid-time-anchors');
     } catch (e) {
-      failures.push(`${label}:${classifyRpcError(e).kind}`);
+      recordFailure(label, e);
       return;
     }
     let fetched: FetchResult;
@@ -165,8 +183,7 @@ export async function captureFixture(
         BigInt(config.maxRangeBlocks),
       );
     } catch (error) {
-      const reason = classifyRpcError(error).kind;
-      failures.push(`${label}:${reason}`);
+      const reason = recordFailure(label, error);
       fetched = {
         logs: [],
         complete: false,
@@ -187,20 +204,21 @@ export async function captureFixture(
         });
         timeEvidence.push({ ...boundary, source: 'minute-boundary' });
       }
-      for (const anchor of resolver.queriedAnchors) observeAnchor(anchor, label);
     } catch (e) {
-      failures.push(`${label}:time-unresolved:${classifyRpcError(e).kind}`);
+      recordFailure(label + ':time-unresolved', e);
     }
     let stable = false;
     try {
       const finalEnd = await reader.getAnchor(filter.toBlock);
       const finalStart = await reader.getAnchor(filter.fromBlock);
-      const consistent = observeAnchor(finalEnd, label) && observeAnchor(finalStart, label);
+      const consistentEnd = observeAnchor(finalEnd, label);
+      const consistentStart = observeAnchor(finalStart, label);
+      const consistent = consistentEnd && consistentStart;
       stable = consistent && finalEnd.hash === before.hash && finalStart.hash === start.hash;
       if (!stable && !failures.includes(`${label}:anchor-conflict`))
         failures.push(`${label}:anchor-conflict`);
     } catch (e) {
-      failures.push(`${label}:${classifyRpcError(e).kind}`);
+      recordFailure(label, e);
     }
     const complete = stable && fetched.complete;
     if (!complete) failures.push(`${label}:incomplete-range`);
@@ -226,9 +244,20 @@ export async function captureFixture(
     for (const [index, hint] of config.v4PoolHistoryHints.entries()) {
       const label = `seed-${index + 1}-supplement`;
       try {
-        const at = await resolver.resolveBlockAtOrAfter(hint.timestampSec);
+        const bounds =
+          hint.fromBlock !== undefined && hint.toBlock !== undefined
+            ? { fromBlock: BigInt(hint.fromBlock), toBlock: BigInt(hint.toBlock) }
+            : undefined;
+        if (bounds) {
+          // Archived bounds are hints. Re-read both endpoints before trusting this bracket.
+          const lower = await reader.getAnchor(bounds.fromBlock);
+          const upper = await reader.getAnchor(bounds.toBlock);
+          const validLower = observeAnchor(lower, label);
+          const validUpper = observeAnchor(upper, label);
+          if (!validLower || !validUpper) throw new RpcFailure('invalid-time-anchors');
+        }
+        const at = await resolver.resolveBlockAtOrAfter(hint.timestampSec, bounds);
         resolvedSeeds.set(hint.poolId.toLowerCase(), at);
-        for (const anchor of resolver.queriedAnchors) observeAnchor(anchor, label);
         await captureRange(
           {
             fromBlock: at.number > 20n ? at.number - 20n : 0n,
@@ -239,7 +268,7 @@ export async function captureFixture(
           label,
         );
       } catch (e) {
-        failures.push(`${label}:${classifyRpcError(e).kind}`);
+        recordFailure(label, e);
       }
     }
     if (
@@ -283,7 +312,7 @@ export async function captureFixture(
   files.push(saveJson(resolve(runDir, 'time-boundaries.json'), timeEvidence, runDir));
   const manifest = {
     schemaVersion: 'p0.1',
-    pathBase: 'manifest-directory',
+    pathBase: 'artifact-directory',
     chainId: CHAIN_ID,
     configVersion: config.version,
     sourceAlias: reader.sourceAlias,

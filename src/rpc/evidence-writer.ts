@@ -34,7 +34,7 @@ export class EvidenceWriter {
     if (this.failure) throw this.failure;
     if (!this.options.evidenceFile || this.mode === 'off') return;
     let saved = entry;
-    if (this.mode === 'sampled' && this.count++ % this.sampleEvery !== 0 && 'result' in entry) {
+    if (this.mode === 'sampled' && 'result' in entry && this.count++ % this.sampleEvery !== 0) {
       const { result, ...metadata } = entry;
       saved = {
         ...metadata,

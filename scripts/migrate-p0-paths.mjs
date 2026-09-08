@@ -35,7 +35,14 @@ for (const path of files.filter((path) => !path.endsWith('/acceptance.json'))) {
   const original = readFileSync(path);
   const parsed = JSON.parse(original.toString());
   const result = migrate(parsed);
-  if (path.endsWith('/manifest.json') || path.endsWith('/capabilities.json'))
+  if (
+    [
+      '/manifest.json',
+      '/capabilities.json',
+      '/identity-evidence.json',
+      '/official-source-evidence.json',
+    ].some((suffix) => path.endsWith(suffix))
+  )
     result.pathBase = 'repository';
   if (path.endsWith('/dependency-evidence.json'))
     for (const entry of result.entries)

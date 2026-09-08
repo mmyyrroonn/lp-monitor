@@ -1,3 +1,4 @@
+import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 import { dirname, resolve } from 'node:path';
 import { ConfigError, loadEnv } from './config/env.js';
@@ -20,10 +21,14 @@ Environment: RH_RPC_HTTP (required), RH_RPC_WS (optional), RH_PROVIDER_ALIAS, LP
 Capture runs once, bounded to 150 method calls. Output contains a new timestamped run folder.
 Exit codes: 0 success, 1 internal error, 2 configuration, 3 required RPC/identity failure, 4 incomplete data.
 `;
-async function main(): Promise<number> {
+export async function runCli(
+  args = process.argv.slice(2),
+  options: { environment?: NodeJS.ProcessEnv; readerFactory?: typeof createChainReader } = {},
+): Promise<number> {
   let parsed: ReturnType<typeof parseArgs>;
   try {
     parsed = parseArgs({
+      args,
       allowPositionals: true,
       strict: true,
       options: {
@@ -66,7 +71,7 @@ async function main(): Promise<number> {
     throw new ConfigError('Invalid block range');
   if (command === 'probe' && [from, to, last].some((x) => x !== undefined))
     throw new ConfigError('Block arguments require capture');
-  const env = loadEnv(process.env);
+  const env = loadEnv(options.environment ?? process.env);
   const config = loadChainConfig(String(values.config ?? 'config/robinhood.json'));
   const evidenceMode = values.evidence ?? 'full';
   if (!['full', 'sampled', 'off'].includes(String(evidenceMode)))
@@ -86,7 +91,7 @@ async function main(): Promise<number> {
   const evidenceDir =
     command === 'probe' ? resolve(dirname(output), `probe-${runId}`) : resolve(output, runId);
   const evidenceFile = resolve(evidenceDir, 'requests.jsonl');
-  const reader = createChainReader(env, {
+  const reader = (options.readerFactory ?? createChainReader)(env, {
     maxCalls: Math.min(config.maxRpcCalls ?? 150, 150),
     perSecond: Math.min(config.rpcPerSecond, 5),
     timeoutMs: Math.min(config.timeoutMs, 10000),
@@ -94,6 +99,9 @@ async function main(): Promise<number> {
     evidenceFile,
     evidenceMode: evidenceMode as 'full' | 'sampled' | 'off',
   });
+  let primaryError: unknown;
+  let failed = false;
+  let incompleteCapture = false;
   try {
     if (command === 'probe') {
       const report = await probeCapabilities(reader, { config, evidenceFile });
@@ -107,7 +115,8 @@ async function main(): Promise<number> {
           identities = result;
           identityPassed = result.requiredPassed;
         } catch (error) {
-          if (error instanceof RpcFailure && error.kind === 'budget') throw error;
+          if (error instanceof RpcFailure && (error.kind === 'budget' || error.evidenceFailure))
+            throw error;
           identities = {
             status: 'unverified',
             requiredPassed: false,
@@ -120,7 +129,7 @@ async function main(): Promise<number> {
           evidenceMode === 'off' ? '' : repositoryRelativePath(evidenceFile, base);
         return {
           ...report,
-          pathBase: 'report-directory',
+          pathBase: 'artifact-directory',
           identityPassed,
           evidenceMode,
           meter: reader.meter.summary(),
@@ -135,7 +144,7 @@ async function main(): Promise<number> {
       };
       for (const base of [dirname(output), evidenceDir]) {
         const identityEvidence = {
-          pathBase: 'report-directory',
+          pathBase: 'artifact-directory',
           sourceAlias: env.providerAlias,
           evidenceFile: evidenceMode === 'off' ? '' : repositoryRelativePath(evidenceFile, base),
           report: identities,
@@ -178,24 +187,40 @@ async function main(): Promise<number> {
         meter: manifest.meter,
       }),
     );
+    incompleteCapture = !manifest.acceptancePassed;
     return manifest.acceptancePassed ? 0 : 4;
+  } catch (error) {
+    failed = true;
+    primaryError = error;
+    throw error;
   } finally {
-    await reader.close?.();
+    try {
+      await reader.close?.();
+    } catch (closeError) {
+      if (!failed && !incompleteCapture) throw closeError;
+      if (incompleteCapture)
+        console.error(encodeJson({ evidenceFailure: classifyRpcError(closeError).kind }));
+      if (primaryError instanceof RpcFailure && primaryError !== closeError)
+        primaryError.evidenceFailure ??= classifyRpcError(closeError);
+    }
   }
 }
-main()
-  .then((code) => {
-    process.exitCode = code;
-  })
-  .catch((error: unknown) => {
-    if (error instanceof ConfigError) {
-      console.error(error.message);
-      process.exitCode = 2;
-    } else if (error instanceof RpcFailure) {
-      console.error(`RPC ${error.kind}`);
-      process.exitCode = error.kind === 'budget' ? 4 : 3;
-    } else {
-      console.error('Internal error; no provider details emitted');
-      process.exitCode = 1;
-    }
-  });
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
+  runCli()
+    .then((code) => {
+      process.exitCode = code;
+    })
+    .catch((error: unknown) => {
+      if (error instanceof ConfigError) {
+        console.error(error.message);
+        process.exitCode = 2;
+      } else if (error instanceof RpcFailure) {
+        console.error(`RPC ${error.kind}`);
+        if (error.evidenceFailure)
+          console.error(encodeJson({ evidenceFailure: error.evidenceFailure.kind }));
+        process.exitCode = error.kind === 'budget' ? 4 : 3;
+      } else {
+        console.error('Internal error; no provider details emitted');
+        process.exitCode = 1;
+      }
+    });

@@ -46,3 +46,12 @@ export function safeDiagnostic(error) {
     return 'invalid evidence path';
   return 'validation failure';
 }
+/** Resolve canonical path bases; legacy aliases remain readable without rewriting archives.
+ * @param {unknown} pathBase @param {string} artifactPath @param {string} [repositoryRoot]
+ */
+export function evidencePathRoot(pathBase, artifactPath, repositoryRoot = process.cwd()) {
+  if (pathBase === 'repository') return resolve(repositoryRoot);
+  if (['artifact-directory', 'manifest-directory', 'report-directory'].includes(String(pathBase)))
+    return dirname(resolve(artifactPath));
+  throw new TypeError('missing or unsupported pathBase');
+}

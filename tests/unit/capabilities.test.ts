@@ -49,7 +49,6 @@ test.each([10, 20])(
     const reader: EvidenceReader = {
       sourceAlias: 'limited-test',
       meter,
-      anchors: new Map(),
       async request(method) {
         meter.begin(method, false);
         if (method === 'eth_chainId') return '0x1237';
@@ -113,7 +112,6 @@ test('single timestamp sample is inspected once', async () => {
   const reader = {
     sourceAlias: 'test',
     meter: new RequestMeter(),
-    anchors: new Map(),
     request: async (method: string) =>
       method === 'eth_chainId' ? '0x1237' : method === 'eth_getCode' ? '0x6000' : '0x06',
     getAnchor: async (block: bigint | 'latest') => {
@@ -129,4 +127,64 @@ test('single timestamp sample is inspected once', async () => {
   const report = await probeCapabilities(reader, { config, evidenceFile: 'requests.jsonl' });
   expect(report.logTimestamp.sampled).toBe(1);
   expect(timestampQueries).toBe(1);
+});
+
+test.each([0n, 1n, 9n, 19n, 99n])(
+  'young chain %s never requests a negative or future block range',
+  async (head) => {
+    const ranges: { fromBlock: bigint; toBlock: bigint }[] = [];
+    const reader = {
+      sourceAlias: 'young-chain',
+      meter: new RequestMeter(),
+      request: async (method: string) =>
+        method === 'eth_chainId' ? '0x1237' : method === 'eth_getCode' ? '0x6000' : '0x06',
+      getAnchor: async (block: bigint | 'latest') => ({
+        number: block === 'latest' ? head : block,
+        hash: '0xabc' as Hex,
+        timestampSec: Number(block === 'latest' ? head : block),
+      }),
+      getLogs: async (f: { fromBlock: bigint; toBlock: bigint }) => {
+        ranges.push(f);
+        return [];
+      },
+    } as EvidenceReader;
+    await probeCapabilities(reader, {
+      config: loadChainConfig('config/robinhood.json'),
+      evidenceFile: 'requests.jsonl',
+    });
+    expect(ranges.length).toBeGreaterThan(0);
+    for (const f of ranges) {
+      expect(f.fromBlock).toBeGreaterThanOrEqual(0n);
+      expect(f.toBlock).toBeGreaterThanOrEqual(f.fromBlock);
+      expect(f.toBlock).toBeLessThanOrEqual(head);
+    }
+  },
+);
+
+test('probe does not adapt a range-limit carrying evidence failure', async () => {
+  let calls = 0;
+  const error = new RpcFailure('range-limit');
+  error.evidenceFailure = new RpcFailure('evidence-capacity');
+  const reader: EvidenceReader = {
+    sourceAlias: 'secondary-failure',
+    meter: new RequestMeter(null),
+    async request(method) {
+      return method === 'eth_chainId' ? '0x1237' : '0x12';
+    },
+    async getAnchor(block) {
+      return { number: block === 'latest' ? 200n : block, hash: '0xaa', timestampSec: 2000 };
+    },
+    async getLogs() {
+      calls++;
+      if (calls === 1) throw error;
+      return [];
+    },
+  };
+  await expect(
+    probeCapabilities(reader, {
+      config: loadChainConfig('config/robinhood.json'),
+      evidenceFile: '',
+    }),
+  ).rejects.toBe(error);
+  expect(calls).toBe(1);
 });

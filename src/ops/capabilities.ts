@@ -1,4 +1,4 @@
-import { parseRpcQuantity } from '../domain/hex.js';
+import { parseRpcQuantity } from '../rpc/quantity.js';
 import { formatLog, keccak256, type Hex } from 'viem';
 import type { ChainConfig } from '../config/chain.js';
 import type { BlockAnchor, RawLog } from '../domain/types.js';
@@ -84,7 +84,7 @@ export async function probeCapabilities(
       return detail;
     } catch (error) {
       const e = classifyRpcError(error);
-      if (e.kind === 'budget') throw e;
+      if (e.kind === 'budget' || e.evidenceFailure) throw e;
       capabilities[name] = {
         status: e.status,
         required,
@@ -106,7 +106,7 @@ export async function probeCapabilities(
   const samples: RawLog[] = [];
   if (head) {
     for (const size of [10, 20, 100]) {
-      const fromBlock = head.number - BigInt(size) + 1n;
+      const fromBlock = head.number >= BigInt(size) ? head.number - BigInt(size) + 1n : 0n;
       await probe(`rangeLogs${size}`, true, async () => {
         const filter = {
           fromBlock,
@@ -119,6 +119,8 @@ export async function probeCapabilities(
           if (logs.length >= config.logResponseGuard) throw new RpcFailure('range-limit');
           if (size === 20) samples.push(...logs);
           return {
+            requestedBlocks: size,
+            testedBlocks: Number(head!.number - fromBlock + 1n),
             fromBlock,
             toBlock: head!.number,
             count: logs.length,
@@ -128,7 +130,7 @@ export async function probeCapabilities(
           };
         } catch (error) {
           const direct = classifyRpcError(error);
-          if (direct.kind !== 'range-limit') throw direct;
+          if (direct.evidenceFailure || direct.kind !== 'range-limit') throw direct;
           const adaptive = await fetchBoundedLogs(reader, filter, config.logResponseGuard);
           if (!adaptive.complete)
             throw new RpcFailure(adaptive.failures[0]?.reason ?? 'incomplete-range');
@@ -145,21 +147,23 @@ export async function probeCapabilities(
       });
     }
     await probe('rangeUnionConsistency', true, async () => {
+      if (head!.number === 0n) throw new RpcFailure('insufficient-chain-range');
       const f = {
-        fromBlock: head!.number - 19n,
+        fromBlock: head!.number >= 19n ? head!.number - 19n : 0n,
         toBlock: head!.number,
         address: [config.v4Manager],
         topics: [],
       };
+      const middle = f.fromBlock + (f.toBlock - f.fromBlock) / 2n;
       const full = await fetchBoundedLogs(reader, f, config.logResponseGuard);
       const left = await fetchBoundedLogs(
         reader,
-        { ...f, toBlock: head!.number - 10n },
+        { ...f, toBlock: middle },
         config.logResponseGuard,
       );
       const right = await fetchBoundedLogs(
         reader,
-        { ...f, fromBlock: head!.number - 9n },
+        { ...f, fromBlock: middle + 1n },
         config.logResponseGuard,
       );
       const after = await reader.getAnchor(head!.number);
@@ -201,15 +205,16 @@ export async function probeCapabilities(
     const historical = head.number > 1_000_000n ? head.number - 1_000_000n : 0n;
     await probe('historicalAnchor', false, () => reader.getAnchor(historical));
     await probe('historicalLogs', false, async () => {
+      const historicalEnd = historical + 19n < head!.number ? historical + 19n : head!.number;
       const logs = await reader.getLogs({
         fromBlock: historical,
-        toBlock: historical + 19n,
+        toBlock: historicalEnd,
         address: [config.v4Manager],
         topics: [],
       });
       return {
         fromBlock: historical,
-        toBlock: historical + 19n,
+        toBlock: historicalEnd,
         count: logs.length,
         scope: 'one sampled range; not full P5 coverage',
       };

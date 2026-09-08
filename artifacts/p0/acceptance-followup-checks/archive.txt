@@ -1,0 +1,59 @@
+{
+  "at": "2026-09-08T09:04:55.405Z",
+  "scope": "historical archive audit",
+  "currentSourceValidation": "not performed",
+  "historicalAcceptanceAt": "2026-09-08T06:15:29.084Z",
+  "pathBase": "repository",
+  "passed": true,
+  "gates": {
+    "identityPathMetadata": true,
+    "historicalAcceptanceRecordedPassed": true,
+    "manifestBoundToHistoricalAcceptance": true,
+    "archivedEvidenceHashes": true,
+    "archivedFixtureHashes": true,
+    "archivedOfficialSourceHashes": true
+  },
+  "evidence": [
+    {
+      "path": "artifacts/p0/acceptance.json",
+      "sha256": "2e0fc94ec6583e7cfae79b9699eec3d643b31e3ba5e6ff431d27ba9156846426"
+    },
+    {
+      "path": "artifacts/p0/identity-evidence-path-metadata.json",
+      "sha256": "88ffff76ac01c84532bdf087457441bf2bb3528d875fa737e508c66117d5357d"
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/manifest.json",
+      "sha256": "e826525b76b48ca3d79ea37ed3d044f225b52d009a36b47fb1029aa88b218678"
+    },
+    {
+      "path": "artifacts/p0/capabilities.json",
+      "sha256": "bb82e177484897c53f2876553389a30f3663d65dcdce22ef66faa03726821def"
+    },
+    {
+      "path": "artifacts/p0/identity-evidence.json",
+      "sha256": "26a5945235bdfa0d6b747c8a9f47f4955fbe95b46c320505ffbac56336fda4c3"
+    },
+    {
+      "path": "artifacts/p0/official-source-evidence.json",
+      "sha256": "ebb1fac97f525a3dfe915987a5d0175ee699199ca0e5601f4964669f814a73c8"
+    },
+    {
+      "path": "artifacts/p0/tests.json",
+      "sha256": "8061bab13f1b13dbb9b24909210dcb31241f5d720442e5c4571da59d52a5a777"
+    },
+    {
+      "path": "artifacts/p0/fixture-tests.json",
+      "sha256": "47677f0ede7698f197081b0aa96cce643ca413f2d32267e525b37cfa8cce013d"
+    },
+    {
+      "path": "artifacts/p0/verification.json",
+      "sha256": "190eaeb4e1f6812165204717d283d1befd6b4053bc5609723034ce8853e8de56"
+    }
+  ],
+  "limitations": [
+    "Passing means archived evidence matches the retained historical acceptance and referenced file hashes.",
+    "Historical tests, engineering results, identity and configuration claims are not rerun or validated against current source.",
+    "No new RPC collection or permission to start P1. Current-source checks must be recorded separately with source hashes."
+  ]
+}

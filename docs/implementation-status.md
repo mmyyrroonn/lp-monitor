@@ -101,3 +101,11 @@ P0 验收结束后，按用户明确要求初始化本地 Git 并提交 P0 工�
 验证使用本地 HTTP 模拟及归档真实 fixtures，包含跨目录离线验收；本轮没有重新调用公共 RPC。8 个已跟踪 raw/request 原始证据字节保持不变，历史元数据相对路径迁移有前后哈希记录。原 P0 单次实链验收仍作为历史证据，不代表 P1 长期运行或多分钟实链归桶通过。
 
 P1 尚未开始：下一步按 docs/superpowers/plans/2026-09-08-p1-recorder.md Task 1.1 建 SQLite store。已有 ingest/fetch-range、registry/identity、双向 codec 和共享时间解析可复用；仍需实现持久化分钟索引、follow 调度、重扫恢复，实链验收显式跨至少 3–5 个分钟边界。
+
+## P0 复验遗留修正 — 2026-09-08
+
+本轮依据 CC 的修复验收，完成 R1–R9 和其他小项，详见 [复验处理记录](reviews/2026-09-08-p0-review-acceptance-resolution.md)。修复 RPC/证据/关闭异常优先级、anchor 增量去重、可信提示界限，删除恒空接口，补完整 CLI 成功路径、429 恢复、V3 负值等测试。上一轮负值覆盖陈述已明确更正。
+
+本轮 18 文件、188 测试通过，lint/typecheck/build/历史审计/diff 检查均退出 0；当前结果绑定源码 SHA256 快照，见 [验证记录](../artifacts/p0/acceptance-followup-validation.json)。历史归档审计另立入口并明确不验证当前源码，不覆盖原验收。配置版本升为 2026-09-08.p0-review2，为两枚 seed 加入归档真实相邻块提示；每次运行仍强制 RPC 验证这些界限。无新依赖，无本轮公共 RPC 采集。
+
+P1 未开始，仍从 Task 1.1 开始；未实现 store/follow/恢复，未执行远端 CI。
