@@ -3,10 +3,11 @@ import { PoolRegistry, poolRegistrationId } from '../registry/pools.js';
 import { decodeV3 } from '../protocols/uniswap-v3/decode.js';
 import { decodeV4 } from '../protocols/uniswap-v4/decode.js';
 import { PoolEventDecodeError } from '../domain/events.js';
+import { CHAIN_ID } from '../domain/chain.js';
 import { rawLogKey } from '../storage/manifest.js';
 import { comparePosition, observePool } from './observations.js';
 
-export const PROJECTION_VERSION = 'p2-v1';
+export const PROJECTION_VERSION = 'p2-v2';
 export type ProjectionBatch = Pick<RangeBatch, 'id' | 'scopeId' | 'end' | 'completeness'>;
 export interface ProjectionQualityError {
   code: string;
@@ -58,9 +59,21 @@ export function projectRange(
     if (seen.has(key)) continue;
     seen.add(key);
     const time = logTimes.get(key) ?? unresolved;
-    const v3Id = '4663:v3:' + log.address.toLowerCase();
-    const v4Id = '4663:v4:' + log.address.toLowerCase() + ':' + log.topics[1]?.toLowerCase();
-    const registration = byId.get(v3Id) ?? byId.get(v4Id);
+    const v3Id = poolRegistrationId({
+      pool: { chainId: CHAIN_ID, protocol: 'v3', address: log.address },
+    });
+    const v4Id =
+      log.topics[1] === undefined
+        ? null
+        : poolRegistrationId({
+            pool: {
+              chainId: CHAIN_ID,
+              protocol: 'v4',
+              manager: log.address,
+              poolId: log.topics[1],
+            },
+          });
+    const registration = byId.get(v3Id) ?? (v4Id === null ? undefined : byId.get(v4Id));
     if (!registration) {
       // Factory PoolCreated is discovery evidence, never a pool operation.
       const discovery = registrations.some(

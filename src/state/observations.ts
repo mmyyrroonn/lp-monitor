@@ -8,13 +8,11 @@ export function comparePosition(a: LogRef, b: LogRef): number {
 
 /** Event observations only: liquidity actions never extrapolate the latest pool L. */
 export function observePool(previous: PoolObservation, event: PoolEvent): PoolObservation {
+  if (event.kind !== 'swap' && event.kind !== 'liquidity') return previous;
+  const field = event.kind === 'swap' ? 'lastSwap' : 'lastLiquidityAction';
   if (!event.pool || poolRegistrationId(previous) !== poolRegistrationId({ pool: event.pool }))
     throw new Error('Observation pool mismatch');
-  const field =
-    event.kind === 'swap' ? 'lastSwap' : event.kind === 'liquidity' ? 'lastLiquidityAction' : null;
-  if (!field) return previous;
   const old = previous[field];
-  if (old && comparePosition(event.ref, old.ref) < 0) return previous;
   for (const prior of [previous.lastSwap, previous.lastLiquidityAction]) {
     if (
       prior &&
@@ -23,11 +21,10 @@ export function observePool(previous: PoolObservation, event: PoolEvent): PoolOb
     )
       throw new Error('Conflicting history: rebuild observations from active logs');
   }
+  if (old && comparePosition(event.ref, old.ref) < 0) return previous;
   return event.kind === 'swap'
     ? { ...previous, lastSwap: event }
-    : event.kind === 'liquidity'
-      ? { ...previous, lastLiquidityAction: event }
-      : previous;
+    : { ...previous, lastLiquidityAction: event };
 }
 
 export function observationFreshness(

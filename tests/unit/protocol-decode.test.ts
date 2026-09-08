@@ -1,5 +1,14 @@
 import { Interface } from 'ethers';
-import { expect, test } from 'vitest';
+import { expect, test, vi } from 'vitest';
+import * as eventLog from '../../src/protocols/event-log.js';
+import { UniswapEventDecodeError as LegacyDecodeError } from '../../src/protocols/uniswap-v4/pool-key.js';
+import { decodeV3PoolEvent } from '../../src/protocols/uniswap-v3/decode.js';
+import { decodeV4ManagerEvent } from '../../src/protocols/uniswap-v4/pool-key.js';
+import * as viem from 'viem';
+vi.mock('viem', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('viem')>();
+  return { ...actual, decodeEventLog: vi.fn(actual.decodeEventLog) };
+});
 import type { Address, Hex } from 'viem';
 import { PoolEventDecodeError } from '../../src/domain/events.js';
 import type { RawLog, LogTime } from '../../src/domain/types.js';
@@ -81,7 +90,7 @@ for (const v of ['v3', 'v4'] as const) {
     });
   });
   test.each([
-    [0n, 1n],
+    [-1n, -1n],
     [1n, 1n],
   ])(`${v} retains non-trade raw evidence %s %s`, (a, b) => {
     const raw = swapLog(v, a, b);
@@ -101,6 +110,7 @@ for (const v of ['v3', 'v4'] as const) {
       if (variant === 'truncated') raw.data = '0x';
       if (variant === 'extra-topic') raw.topics = [...raw.topics, id];
       if (variant === 'extra-data') raw.data = `${raw.data}${'00'.repeat(32)}`;
+      const snapshot = structuredClone(raw);
       try {
         decoders[v](raw, time, registration(v));
         throw new Error('Expected failure');
@@ -108,8 +118,9 @@ for (const v of ['v3', 'v4'] as const) {
         expect(error).toBeInstanceOf(PoolEventDecodeError);
         expect(error).toMatchObject({
           code: variant === 'unknown' ? 'unknown-topic' : 'invalid-data',
-          raw,
+          raw: snapshot,
         });
+        expect(raw).toEqual(snapshot);
         expect((error as Error).cause).toBeDefined();
       }
     },
@@ -236,4 +247,172 @@ test('V4 ProtocolFeeUpdated rejects mismatched pool identity', () => {
   expect(() => decodeV4(raw, time, registration('v4'))).toThrow(
     expect.objectContaining({ code: 'registration-mismatch', raw }),
   );
+});
+
+for (const v of ['v3', 'v4'] as const) {
+  test.each([
+    [0n, 1n],
+    [-1n, 0n],
+    [0n, 0n],
+  ])(`${v} zero-sided swap retains decimal post-state %s %s`, (a, b) => {
+    const raw = swapLog(v, a, b);
+    const snapshot = structuredClone(raw);
+    const event = decoders[v](raw, time, registration(v));
+    expect(event).toEqual({
+      kind: 'swap-nontrade',
+      ref,
+      time,
+      pool: registration(v).pool,
+      decoded: {
+        eventName: 'Swap',
+        amount0: a.toString(),
+        amount1: b.toString(),
+        sqrtPriceX96: (1n << 96n).toString(),
+        liquidity: '12345',
+        tick: '-80',
+        fee: v === 'v3' ? '3000' : '700',
+      },
+    });
+    expect(event).not.toHaveProperty('tokenIn');
+    expect(event).not.toHaveProperty('amountIn');
+    expect(raw).toEqual(snapshot);
+  });
+  test(`${v} propagates internal ancillary TypeError unchanged`, () => {
+    const error = new TypeError('test injected internal bug');
+    const spy = vi.spyOn(eventLog, 'ancillaryFields').mockImplementationOnce(() => {
+      throw error;
+    });
+    try {
+      const raw =
+        v === 'v3'
+          ? log(v, 'Collect', [actor, token1, -120, 120, 1n, 2n])
+          : log(v, 'Donate', [id, actor, 1n, 2n]);
+      let caught: unknown;
+      const snapshot = structuredClone(raw);
+      try {
+        decoders[v](raw, time, registration(v));
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBe(error);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  test(`${v} low-level ABI helper propagates arbitrary internal TypeError`, () => {
+    const error = new TypeError('test ABI runtime bug');
+    const spy = vi.spyOn(viem, 'decodeEventLog').mockImplementationOnce(() => {
+      throw error;
+    });
+    try {
+      let caught: unknown;
+      try {
+        (v === 'v3' ? decodeV3PoolEvent : decodeV4ManagerEvent)(swapLog(v));
+      } catch (e) {
+        caught = e;
+      }
+      expect(caught).toBe(error);
+    } finally {
+      spy.mockRestore();
+    }
+  });
+  test.each([
+    ['token0', undefined],
+    ['token1', 'bad'],
+    ['feePips', '3000'],
+    ['feePips', NaN],
+    ['pool', undefined],
+  ] as const)(`${v} rejects invalid registration %s=%s`, (key, value) => {
+    const raw = swapLog(v);
+    const bad = { ...registration(v), [key]: value } as unknown as PoolRegistration;
+    expect(() => decoders[v](raw, time, bad)).toThrow(
+      expect.objectContaining({ code: 'registration-mismatch', raw }),
+    );
+  });
+  test(`${v} copies registration token and pool identities in lowercase`, () => {
+    const source = registration(v);
+    source.token0 = '0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+    source.token1 = '0xBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB';
+    const emitter = '0xCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC' as Address;
+    source.pool =
+      v === 'v3'
+        ? { chainId: 4663, protocol: v, address: emitter }
+        : { chainId: 4663, protocol: v, manager: emitter, poolId: `0x${'AB'.repeat(32)}` };
+    const raw = swapLog(v);
+    raw.address = emitter;
+    if (v === 'v4') raw.topics = [raw.topics[0]!, `0x${'ab'.repeat(32)}`, raw.topics[2]!];
+    const snapshot = structuredClone(source);
+    const event = decoders[v](raw, time, source);
+    expect(event).toMatchObject({
+      tokenIn: source.token0.toLowerCase(),
+      tokenOut: source.token1.toLowerCase(),
+      pool:
+        v === 'v3'
+          ? { address: emitter.toLowerCase() }
+          : { manager: emitter.toLowerCase(), poolId: `0x${'ab'.repeat(32)}` },
+    });
+    expect(source).toEqual(snapshot);
+    expect(event.pool).not.toBe(source.pool);
+  });
+  test.each(['odd-data', 'nonhex-data', 'short-topic'])(
+    `${v} rejects malformed raw hex %s`,
+    (variant) => {
+      const raw = swapLog(v);
+      if (variant === 'odd-data') raw.data = '0x0';
+      if (variant === 'nonhex-data') raw.data = '0xzz';
+      if (variant === 'short-topic') raw.topics = [raw.topics[0]!, '0x01'];
+      const snapshot = structuredClone(raw);
+      expect(() => decoders[v](raw, time, registration(v))).toThrow(
+        expect.objectContaining({ code: 'invalid-data', raw: snapshot }),
+      );
+    },
+  );
+  test.each([
+    [-887273, 120],
+    [-120, 887273],
+    [120, 120],
+    [120, -120],
+  ])(`${v} rejects invalid liquidity tick range %s..%s`, (lower, upper) => {
+    const raw =
+      v === 'v3'
+        ? log(v, 'Mint', [token1, actor, lower, upper, 123n, 1n, 2n])
+        : log(v, 'ModifyLiquidity', [id, actor, lower, upper, 123n, id]);
+    expect(() => decoders[v](raw, time, registration(v))).toThrow(
+      expect.objectContaining({ code: 'invalid-data', raw }),
+    );
+  });
+}
+test.each([1000001, 0x800000])('V4 rejects Swap fee %s above one million', (fee) => {
+  const raw = log('v4', 'Swap', [id, actor, -100n, 90n, 1n << 96n, 12345n, -80, fee]);
+  expect(() => decodeV4(raw, time, registration('v4'))).toThrow(
+    expect.objectContaining({ code: 'invalid-data', raw }),
+  );
+});
+test.each([0, 1000000])('V4 accepts Swap fee endpoint %s', (fee) => {
+  expect(
+    decodeV4(
+      log('v4', 'Swap', [id, actor, -100n, 90n, 1n << 96n, 12345n, -80, fee]),
+      time,
+      registration('v4'),
+    ),
+  ).toMatchObject({ effectiveSwapFeePips: fee });
+});
+test('CollectProtocol remains distinct from LP Collect', () => {
+  expect(
+    decodeV3(log('v3', 'CollectProtocol', [actor, token1, 1n, 2n]), time, registration('v3')),
+  ).toMatchObject({ kind: 'other', decoded: { eventName: 'CollectProtocol' } });
+});
+test('canonical validator matches overloaded events by selector', () => {
+  const abi = viem.parseAbi(['event Example(uint256 first)', 'event Example(address second)']);
+  const iface = new Interface(abi);
+  const encoded = iface.encodeEventLog(iface.getEvent('Example(address)')!, [actor]);
+  const raw = { ...swapLog('v3'), topics: encoded.topics as Hex[], data: encoded.data as Hex };
+  expect(() => eventLog.assertCanonicalEvent(raw, abi, 'Example', { second: actor })).not.toThrow();
+});
+test('missing decoded ABI fields remain internal TypeError, not malformed chain data', () => {
+  const raw = swapLog('v3');
+  expect(() => eventLog.assertCanonicalEvent(raw, v3PoolAbi, 'Swap', {})).toThrow(TypeError);
+});
+test('shared Uniswap decode error preserves legacy export identity', () => {
+  expect(eventLog.UniswapEventDecodeError).toBe(LegacyDecodeError);
 });

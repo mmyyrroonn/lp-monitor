@@ -141,9 +141,18 @@ pnpm exec vitest run tests/unit/protocol-decode.test.ts tests/unit/swap-directio
 离线 CLI 复核（`data/p2-acceptance.sqlite` 只读，不要改它；先复制到临时路径）：
 
 ```powershell
-Copy-Item data/p2-acceptance.sqlite $env:TEMP/p2-fix.sqlite
-pnpm lp project --db $env:TEMP/p2-fix.sqlite --rebuild
-pnpm lp inspect-pool --config config/robinhood.json --db $env:TEMP/p2-fix.sqlite --pool amc-usdg-v3
+$p2FixDb = @'
+import Database from 'better-sqlite3';
+import { mkdtempSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+const target = join(mkdtempSync(join(tmpdir(), 'p2-fix-')), 'copy.sqlite');
+const source = new Database('data/p2-acceptance.sqlite', { readonly: true, fileMustExist: true });
+try { await source.backup(target); } finally { source.close(); }
+console.log(target);
+'@ | node --input-type=module
+pnpm lp project --db $p2FixDb --rebuild
+pnpm lp inspect-pool --config config/robinhood.json --db $p2FixDb --pool amc-usdg-v3
 ```
 
 F3 选方案 1 时，如实记录 `project` 输出的事件数与质量错误数相对验收值（650 / 0）的变化并解释。那条真实零侧样本来自 P0 归档，是否落在 P1 录制段内需实测；不在段内则数字不变。
@@ -155,4 +164,91 @@ F3 选方案 1 时，如实记录 `project` 输出的事件数与质量错误数
 
 ## 修复记录
 
-（由执行修复的 agent 填写：分支名、每条 F/S 的处理状态与关键改动、更新过期望值的测试及理由、验证命令真实输出、未做项。）
+修复日期：2026-09-08；分支：`fix/p2-review`；修复基线：`484079c`。原 P2 已于验收后提交为 `ffc8b54`。本批在任务分支提交，不合入 main、不 push。按 S18 的明确要求，除上述代码/测试/本文范围，另仅对原 P2 验收报告和 implementation-status 补充时点说明及本批链接。
+
+### 必修结果
+
+| 项目 | 状态与关键改动 | 回归证据 |
+|---|---|---|
+| F1 | 完成。通过 CHAIN_ID + poolRegistrationId 生成 V3/V4 查找键。 | project-keys 将 CHAIN_ID mock 为 9999，两协议仍成功投影。 |
+| F2 | 完成。仅明确的 topic/方向/ABI/canonical 错误归入质量错误；自有逻辑或底层帮助函数的任意 TypeError 原样抛出。共享错误类保留旧导出兼容。 | 解码错误对象身份测试；投影中注入内部异常，旧游标和事件行保留。 |
+| F3 | 完成，采用保留事件方案，但仅适用于至少一侧为零。增加 swap-nontrade，原始金额和价格/L/tick/fee 为十进制字符串，不产生规范成交字段，不替换 lastSwap。非零同号仍是 invalid-direction。 | 真实 block 57465603 / logIndex 3 解码、完整投影和 SQLite 往返；直接 normalizeCoreDeltas 原有严格测试不变。 |
+| F4 | 完成。inspect 使用真实 readonly/fileMustExist 连接；不建目录、不切 WAL、不迁移、不 backfill；失败关闭连接。只有缺表/缺列映射 ConfigError，临时锁错误原样抛出。 | 只读属性拒绝写入；并发 WAL writer；只读 DELETE 快照字节/sidecar 检查；旧 schema 不迁移；真实排他锁保留 SQLITE_BUSY。 |
+| F5 | 完成。store 在事务内抛 NoAcceptedScopeError，CLI 仅捕获该类型并输出 no-accepted-scope 和 ingest/follow 提示，退出 4。 | 空 scope 的离线 CLI JSON/退出码回归。 |
+| F6 | 完成。相同块高度不同 hash 的检查移至排序早退之前。 | 较早 logIndex 的分叉事件同样拒绝；正常倒序和 ancillary 行为保留。 |
+
+F3 对原任务书的语义修正：不能把所有 InvalidSwapDirectionError 都降级为正常事件；非零同号没有普通 Swap 的成交方向，仍保留质量错误。V3 的 nontrade fee 沿用调用方登记的 fee 契约，V4 fee 来自 Swap 本身。
+
+F4 对原测试要求的限定：SQLite 只读连接读取 WAL 库时仍可能创建/访问 -wal/-shm。因此“无 sidecar”仅在关闭写连接、稳定的 DELETE-journal 只读快照上验证；实时 WAL 库验证无业务写入和并发可读，不使用 immutable 绕过 recorder 的 WAL。离线验收采用 SQLite online backup，而不是仅复制主库文件。
+
+### 建议项与延后项
+
+| 项目 | 处理结果 |
+|---|---|
+| S1 | 完成：project 必须显式 --rebuild。 |
+| S2 | 完成本轮要求的代码注释：read 读取 cursor JSON，三张明细表目前只写。实际按池/分钟查询与消除重复 payload 留 P3。 |
+| S3 | 留 P3：稀疏观测及 registered-no-observation 输出要随查询接口一同调整，本批保持登记池查询合同。 |
+| S4 | 完成：inspect 分列 poolQualityErrors/scopeQualityErrors，任一非空仍返回 4。 |
+| S5 | 本批显式升至 p2-v2，并新增旧版本拒绝回归；自动版本门槛/源码哈希机制留 P3。 |
+| S6 | 完成：解码公开入口验证登记形态、chain/emitter/PoolId、币种地址、整数 fee，并规范化副本地址小写，不修改输入。 |
+| S7 | 部分完成：V4 实际 Swap fee 限定 0..1,000,000，先校验再判断 nontrade。V3 来源建模留 P3：现有 source 是字符串，不靠单一文案白名单推定可信度，保留登记 fee 合同。 |
+| S8 | 完成：pool=null 的 manager ancillary 和其他 ancillary 均不更改观测。 |
+| S9 | 完成：canonical ABI 按 topic selector 匹配，含同名重载回归。 |
+| S10 | 完成：CollectProtocol 归 other，LP Collect 保留 collect。 |
+| S11 | 完成：actor 注明 V3 owner / V4 sender，不能混算用户数。 |
+| S12 | 完成：共享 UniswapEventDecodeError 移至 event-log，旧 V4 路径 re-export 保持构造器身份。 |
+| S13 | 完成：V3 Mint/Burn、V4 ModifyLiquidity 要求 tickLower < tickUpper 且位于合法界限内。 |
+| S14 | 完成：说明规范金额是无符号大小，不能重编码回原 signed 类型。 |
+| S15 | 完成：--db 拒绝空白和目录；缺文件仍为配置错误。 |
+| S16 | 完成：四张投影表 INSERT 显式列名，新增 nullable 列回归。 |
+| S17 | 完成：真实 fixture 使用 V3 完整事件 selector 集分类；固定完整 kind 计数；1 条 V3 和 3 条 V4 用固定方向 oracle；异常测试保留深拷贝 raw 期望。 |
+| S18 | 完成：原验收补 ffc8b54 提交时点，implementation-status 追加本批结果并链接本文。 |
+
+### 测试期望变化与真实数据
+
+原有零侧 decode 期望由 invalid-direction 改为 swap-nontrade；非零同号、直接 normalizeCoreDeltas 的拒绝期望不变。P0 fixture 从 V4 530 条普通 Swap + 1 条被拒绝，改为 530 条普通 Swap + 1 条 nontrade。完整分布：V3 swap 1；V4 swap 530、swap-nontrade 1、liquidity 27、initialize 3、other 15；其余 kind 为 0。历史 artifacts/p2 的 344 测试/计数原样保留。
+
+真实零侧样本逐字段固定：amount0=-1、amount1=0、sqrtPriceX96=6723590767295199506134079760391、liquidity=242871927514263989673、tick=88825、fee=0。投影往返测试中的前一条成交、登记与分钟时间是明确标注的合成输入；该零侧 raw 日志本身未改，不声称补齐其历史登记或精确秒数。
+
+最终构建通过只读源连接 online backup 到唯一临时目录，先验证旧 p2-v1 inspect 返回 4，再执行：
+
+```text
+node dist/cli.js project --db <temporary-backup> --rebuild
+exit 0: status=projected, version=p2-v2, events=650, pools=1827, qualityErrors=[]
+node dist/cli.js inspect-pool --config config/robinhood.json --db <temporary-backup> --pool amc-usdg-v3
+exit 0: status=observed, timing=minute, poolQualityErrors=[], scopeQualityErrors=[]
+```
+
+650 事件分布仍为 V4 Swap 556、V3 Swap 47、V4 liquidity 37、V3 liquidity 5、V3 Collect 5；29 个池有观测。该 P0 零侧事件不在 P1 录制范围，所以本段数量不变。全部事件 minuteStartSec 已知、exactTimestampSec=null，finality 仍为 provisional。副本中 14 张 P1 表逐表内容哈希未变；源 data/p2-acceptance.sqlite 的逐表内容及主库/WAL 字节哈希前后相同。临时目录已清理，没有覆盖历史 artifacts 或采集新 RPC。
+
+### 最终验证与独立复核
+
+以下是最终运行的实际结果，全部退出 0：
+
+```text
+pnpm run typecheck
+$ tsc --noEmit && tsc -p tsconfig.scripts.json
+
+pnpm test
+Test Files  34 passed (34)
+     Tests  401 passed (401)
+  Start at  22:56:50
+  Duration  8.88s (tests 70%, import 19%, transform 10%)
+
+pnpm run build
+$ node scripts/clean-build.mjs && tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs
+
+pnpm run lint
+$ node scripts/check-scripts.mjs && prettier --check "src/**/*.ts" "tests/**/*.ts" "scripts/**/*.mjs"
+Checking formatting...
+All matched files use Prettier code style!
+
+git diff --check
+(no output)
+```
+
+没有删除/skip 既有测试；全量从 344 增至 401。现有 Uniswap SDK 缺失 source-map 源文件提示保留，未屏蔽。先运行新增用例复现缺陷，再实现并确认通过；其中独立复核补出的真实锁回归也先复现 ConfigError 误分类，再验证返回 SQLITE_BUSY。
+
+独立复核最终结论：F1–F6 与代码质量 PASS，无开放的本批正确性问题。初审 23 项专项通过；唯一发现是 readonly schema catch-all 误报锁错误，修复后独立重跑 readonly 6 项通过并关闭。完整日志、解码报告、独立复核和离线复验 JSON 存于本地 .superpowers/sdd/p2-fix-*，作为临时工作证据，不改写历史验收 artifacts。
+
+P3 仍未开始。上述明确延后的查询/稀疏观测/自动版本门槛/V3 费率来源事项，不属于本批已完成范围。

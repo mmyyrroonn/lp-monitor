@@ -72,3 +72,26 @@ test('cross-pool observations and same-position conflicting histories are reject
     }),
   ).toThrow(/rebuild/i);
 });
+
+test('same block fork with earlier logIndex is rejected before ordering early return', () => {
+  const original = { ...swap(2), ref: { ...ref(2), logIndex: 10 } };
+  const conflicting = {
+    ...swap(2),
+    ref: { ...ref(2), logIndex: 5, blockHash: toHex(999, { size: 32 }) },
+  };
+  expect(() => observePool(observePool(empty(), original), conflicting)).toThrow(
+    /Conflicting history/,
+  );
+});
+test('manager-wide ancillary event leaves pool observation unchanged', () => {
+  const previous = observePool(empty(), swap(2));
+  expect(
+    observePool(previous, {
+      kind: 'other',
+      pool: null,
+      ref: ref(3),
+      time,
+      decoded: { eventName: 'Transfer' },
+    }),
+  ).toBe(previous);
+});

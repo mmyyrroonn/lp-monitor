@@ -86,11 +86,12 @@ export type LiquidityChange = {
   tickLower: number;
   tickUpper: number;
   delta: bigint;
+  /** V3 position owner; V4 caller/sender, which may be a router. Never a cross-protocol user count. */
   actor: Address;
   salt: Hex | null;
 };
 export type AncillaryEvent = {
-  kind: 'initialize' | 'collect' | 'donate' | 'other';
+  kind: 'initialize' | 'collect' | 'donate' | 'other' | 'swap-nontrade';
   ref: LogRef;
   time: LogTime;
   pool: PoolRef | null;

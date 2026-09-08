@@ -224,6 +224,32 @@ test('offline CLI projects, inspects minute precision, rejects stale state and n
     expect(output.observation.lastSwap.time.exactTimestampSec).toBeNull();
     expect(output.timing).toBe('minute');
     expect(output.currentPoolStateKnown).toBe(false);
+
+    const withErrors = openDatabase(dbPath);
+    const unknown = { ...swap(106), address: toHex(777, { size: 20 }) };
+    const badPoolLog = { ...swap(107), data: '0x1234' as Hex };
+    const errorBatch = batch('cli-errors', [swap(105), unknown, badPoolLog], minute, scope);
+    errorBatch.manifest.shards[0]!.request.address = [address, unknown.address];
+    new SqliteRangeStore(withErrors).acceptRange(errorBatch);
+    withErrors.close();
+    expect(
+      await runCli(['project', '--db', dbPath, '--config', configPath, '--rebuild'], {
+        environment,
+      }),
+    ).toBe(4);
+    expect(
+      await runCli(
+        ['inspect-pool', '--db', dbPath, '--config', configPath, '--pool', 'amc-usdg-v3'],
+        { environment },
+      ),
+    ).toBe(4);
+    const separated = JSON.parse(log.mock.calls.at(-1)![0] as string);
+    expect(separated.poolQualityErrors.map((e: { code: string }) => e.code)).toEqual([
+      'invalid-data',
+    ]);
+    expect(separated.scopeQualityErrors.map((e: { code: string }) => e.code)).toEqual([
+      'unregistered-pool',
+    ]);
     const changed = openDatabase(dbPath);
     new SqliteRangeStore(changed).acceptRange(batch('cli2', [swap(110)], minute, scope));
     changed.close();
@@ -313,4 +339,126 @@ test('V4 same-block discovery and swap use registry scope, then registry rollbac
   const unregistered = projection.rebuild('operations', 'registry');
   expect(unregistered.events).toEqual([]);
   expect(unregistered.qualityErrors).toHaveLength(2);
+});
+
+test('internal decoder failures abort projection replacement and preserve all prior rows', async () => {
+  const helpers = await import('../../src/protocols/event-log.js');
+  const { vi } = await import('vitest');
+  const { raw, projection, db } = fixture();
+  raw.acceptRange(batch('first', [swap(105)]));
+  projection.rebuild('test');
+  const before = db.prepare('select * from projection_cursors').all();
+  raw.acceptRange(batch('second', [swap(110)]));
+  const sentinel = new TypeError('injected helper defect');
+  const mock = vi.spyOn(helpers, 'eventRef').mockImplementation(() => {
+    throw sentinel;
+  });
+  try {
+    expect(() => projection.rebuild('test')).toThrow(sentinel);
+    expect(db.prepare('select * from projection_cursors').all()).toEqual(before);
+    expect(db.prepare('select block_number from projected_events').all()).toEqual([
+      { block_number: 105 },
+    ]);
+  } finally {
+    mock.mockRestore();
+  }
+});
+test('projection insert tolerates unrelated nullable columns and rejects obsolete version', () => {
+  const { raw, projection, db } = fixture();
+  raw.acceptRange(batch('first', [swap(105)]));
+  for (const table of [
+    'projected_events',
+    'pool_observations',
+    'projection_quality_errors',
+    'projection_cursors',
+  ])
+    db.exec('alter table ' + table + ' add column future_annotation TEXT');
+  const result = projection.rebuild('test');
+  expect(result.events).toHaveLength(1);
+  const row = db.prepare('select payload_json from projection_cursors').get() as {
+    payload_json: string;
+  };
+  const old = JSON.parse(row.payload_json);
+  old.version = 'p2-v1';
+  db.prepare('update projection_cursors set projection_version=?,payload_json=?').run(
+    'p2-v1',
+    JSON.stringify(old),
+  );
+  expect(projection.read('test')).toBeNull();
+});
+
+test('archived zero-sided Swap preserves post-state through projection and SQLite without replacing lastSwap', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { Interface } = await import('ethers');
+  const { v4ManagerAbi } = await import('../../src/protocols/uniswap-v4/abi.js');
+  const values = JSON.parse(
+    readFileSync('artifacts/p0/raw/2026-09-08T06-10-51-129Z/logs.json', 'utf8'),
+  ) as (Omit<RawLog, 'blockNumber'> & { blockNumber: string })[];
+  const archived = values.find((l) => l.blockNumber === '57465603' && l.logIndex === 3)!;
+  const zero: RawLog = { ...archived, blockNumber: BigInt(archived.blockNumber) };
+  const abi = new Interface(v4ManagerAbi);
+  const encoded = abi.encodeEventLog(abi.getEvent('Swap')!, [
+    zero.topics[1],
+    address,
+    -100n,
+    90n,
+    2n ** 96n,
+    1000n,
+    0,
+    3000,
+  ]);
+  // Earlier trade, registration and time are synthetic test inputs; the zero-sided raw log is archived unchanged.
+  const earlier: RawLog = {
+    ...zero,
+    logIndex: 2,
+    topics: encoded.topics as Hex[],
+    data: encoded.data as Hex,
+  };
+  const reg: PersistedPoolRegistration = {
+    ...registration(earlier),
+    pool: { chainId: 4663, protocol: 'v4', manager: zero.address, poolId: zero.topics[1]! },
+    feePips: 0x800000,
+    source: 'synthetic-metadata',
+  };
+  const b = batch('real-zero', [earlier, zero], {
+    minuteStartSec: 120,
+    exactTimestampSec: null,
+    source: 'minute-boundary',
+  });
+  b.fromBlock = zero.blockNumber;
+  b.toBlock = zero.blockNumber;
+  b.end = { number: zero.blockNumber, hash: zero.blockHash, timestampSec: 180 };
+  b.previous = null;
+  b.poolRegistrations = [reg];
+  const shard = b.manifest.shards[0]!;
+  shard.filterId = 'operation-v4';
+  shard.request = {
+    fromBlock: zero.blockNumber,
+    toBlock: zero.blockNumber,
+    address: [zero.address],
+    topics: [],
+  };
+  const { raw, projection, db } = fixture();
+  raw.acceptRange(b);
+  const result = projection.rebuild('test');
+  expect(result.qualityErrors).toEqual([]);
+  expect(result.events.map((e) => e.kind)).toEqual(['swap', 'swap-nontrade']);
+  const retained = result.events[1]!;
+  if (retained.kind !== 'swap-nontrade') throw Error('expected nontrade');
+  expect(retained.ref).toMatchObject({ blockNumber: 57465603n, logIndex: 3 });
+  expect(retained.decoded).toEqual({
+    eventName: 'Swap',
+    amount0: '-1',
+    amount1: '0',
+    sqrtPriceX96: '6723590767295199506134079760391',
+    liquidity: '242871927514263989673',
+    tick: '88825',
+    fee: '0',
+  });
+  expect(result.observations[0]!.lastSwap).toEqual(result.events[0]);
+  expect(projection.read('test')).toEqual(result);
+  const persisted = db
+    .prepare("select payload_json from projected_events where kind='swap-nontrade'")
+    .get() as { payload_json: string };
+  expect(JSON.parse(persisted.payload_json).decoded).toEqual(retained.decoded);
 });

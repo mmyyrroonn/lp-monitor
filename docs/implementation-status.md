@@ -133,3 +133,13 @@ P1 未开始，仍从 Task 1.1 开始；未实现 store/follow/恢复，未执�
 能力边界：显式全 scope 离线重建，未挂入每个 recorder 批次；时间或有效集合变化后必须重建，过期 inspect 返回 4。没有当前完整 AMM 状态、分钟排名、告警或 LP 收益。本轮无依赖/ABI/配置版本变更，没有永久服务或交易。
 
 下一窗口：用户安排后读取 docs/superpowers/plans/2026-09-08-p3-metrics.md，从 **Task 3.1** 开始。P3–P6 保持 pending。
+
+## P2 复核修复 — 2026-09-08
+
+原 P2 验收中的“改动未提交”是当时时点，后已提交为 `ffc8b54`。本批基于 `484079c`，在 `fix/p2-review` 完成 F1–F6，并处理多数建议项，详见 [逐项修复与验证记录](reviews/2026-09-08-p2-review-fixes.md#修复记录)。
+
+投影版本升至 p2-v2，旧投影须显式 project --rebuild。零侧 Swap 保留为 swap-nontrade，原始后状态无损且不替换 lastSwap；非零同号仍为质量错误。inspect 使用真实只读连接，并分列池级与 scope 级错误；空 accepted scope 返回可操作的状态和退出码 4。
+
+最终 34 文件、401 测试通过，typecheck/build/lint/diff 检查通过，独立复核无开放问题。原 P2 验收库经只读 online backup 后在临时副本重放，仍为 650 事件、0 质量错误、29 个有观测池；分钟已知、精确秒数仍 null。源库与副本的 P1 表未改，历史 artifacts 未改，无新增 RPC。
+
+P3 查询改造、稀疏观测、自动版本门槛和 V3 fee 来源建模继续待办。P3 尚未开始；本批不推送远端。

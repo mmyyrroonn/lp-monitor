@@ -26,6 +26,8 @@ export class PoolEventDecodeError extends Error {
   }
 }
 
+/** Normalized amounts are unsigned bigint magnitudes; negating the signed minimum
+ * exceeds int256/int128 maximum. Do not encode them back into those signed types. */
 export function normalizeCoreDeltas(
   version: 'v3' | 'v4',
   a: bigint,

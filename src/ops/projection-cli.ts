@@ -1,5 +1,5 @@
 import { parseArgs } from 'node:util';
-import { existsSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { ConfigError } from '../config/env.js';
 import { loadChainConfig } from '../config/chain.js';
@@ -9,7 +9,7 @@ import { PoolRegistry, poolRegistrationId } from '../registry/pools.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
 import { encodeJson } from '../domain/json.js';
 import { openDatabase } from '../storage/database.js';
-import { SqliteProjectionStore } from '../storage/projection-store.js';
+import { NoAcceptedScopeError, SqliteProjectionStore } from '../storage/projection-store.js';
 import { observationFreshness } from '../state/observations.js';
 
 export function runProjectionCli(
@@ -47,16 +47,32 @@ export function runProjectionCli(
   const assets = loadAssetVersion(String(values.watchlist ?? 'config/watchlist.amc.json'));
   const scopeId = computeWatchScopeId(assets, 'operations', config);
   const registryScopeId = computeWatchScopeId(assets, 'discovery-only', config);
-  const dbPath = resolve(
-    String(values.db ?? (environment.LP_DATA_DIR ?? 'data') + '/recorder.sqlite'),
-  );
+  const dbValue = String(values.db ?? (environment.LP_DATA_DIR ?? 'data') + '/recorder.sqlite');
+  if (!dbValue.trim()) throw new ConfigError('Recorded database path must not be blank');
+  const dbPath = resolve(dbValue);
   if (!existsSync(dbPath)) throw new ConfigError('Recorded database does not exist');
-  const db = openDatabase(dbPath);
+  if (!statSync(dbPath).isFile()) throw new ConfigError('Recorded database path must be a file');
+  if (command === 'project' && values.rebuild !== true)
+    throw new ConfigError('project requires --rebuild');
+  const db = openDatabase(dbPath, { readonly: command === 'inspect-pool' });
   try {
     const store = new SqliteProjectionStore(db);
     if (command === 'project') {
       // P2 uses deterministic whole-scope replacement; --rebuild makes this explicit.
-      const result = store.rebuild(scopeId, registryScopeId, config.version);
+      let result;
+      try {
+        result = store.rebuild(scopeId, registryScopeId, config.version);
+      } catch (error) {
+        if (!(error instanceof NoAcceptedScopeError)) throw error;
+        console.log(
+          encodeJson({
+            status: 'no-accepted-scope',
+            scopeId: error.scopeId,
+            next: 'Run ingest/follow with the same config first',
+          }),
+        );
+        return 4;
+      }
       console.log(
         encodeJson({
           status: result.qualityErrors.length ? 'quality-errors' : 'projected',
@@ -112,11 +128,13 @@ export function runProjectionCli(
     );
     if (!observation) throw new ConfigError('Pool is not registered in this projection');
     const id = poolRegistrationId(observation);
-    const errors = result.qualityErrors.filter((e) => e.poolId === id || e.poolId === null);
+    const poolQualityErrors = result.qualityErrors.filter((e) => e.poolId === id);
+    const scopeQualityErrors = result.qualityErrors.filter((e) => e.poolId === null);
+    const hasErrors = poolQualityErrors.length + scopeQualityErrors.length > 0;
     const last = observation.lastSwap?.time;
     console.log(
       encodeJson({
-        status: errors.length ? 'quality-errors' : 'observed',
+        status: hasErrors ? 'quality-errors' : 'observed',
         version: result.version,
         scopeId,
         configVersion: config.version,
@@ -134,10 +152,11 @@ export function runProjectionCli(
         currentPoolStateKnown: false,
         finality: 'provisional',
         note: 'L, price and tick are values reported by the last Swap. Later liquidity actions do not infer current L. Actors are not user counts.',
-        qualityErrors: errors,
+        poolQualityErrors,
+        scopeQualityErrors,
       }),
     );
-    return errors.length ? 4 : 0;
+    return hasErrors ? 4 : 0;
   } finally {
     db.close();
   }

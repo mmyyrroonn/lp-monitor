@@ -1,4 +1,5 @@
 import {
+  BaseError,
   decodeEventLog,
   encodeAbiParameters,
   getAddress,
@@ -9,6 +10,7 @@ import {
 } from 'viem';
 import type { PoolKey } from '../../domain/types.js';
 import { v4ManagerAbi } from './abi.js';
+import { UniswapEventDecodeError, CanonicalEventError, assertLogEncoding } from '../event-log.js';
 
 const poolKeyParameters = [
   { type: 'address' },
@@ -29,12 +31,8 @@ export class UnknownUniswapEventTopicError extends Error {
   }
 }
 
-export class UniswapEventDecodeError extends Error {
-  constructor(protocol: 'v3' | 'v4', cause: unknown) {
-    super(`Could not strictly decode Uniswap ${protocol} event`, { cause });
-    this.name = 'UniswapEventDecodeError';
-  }
-}
+// Retain the P0/P1 public import path for the now shared error class.
+export { UniswapEventDecodeError } from '../event-log.js';
 
 export function computeV4PoolId(key: PoolKey): Hex {
   const currency0 = getAddress(key.currency0);
@@ -62,6 +60,7 @@ export function decodeV4ManagerEvent(log: { topics: readonly Hex[]; data: Hex })
     throw new UnknownUniswapEventTopicError('v4', topic);
   }
   try {
+    assertLogEncoding(log);
     return decodeEventLog({
       abi: v4ManagerAbi,
       data: log.data,
@@ -69,7 +68,9 @@ export function decodeV4ManagerEvent(log: { topics: readonly Hex[]; data: Hex })
       strict: true,
     });
   } catch (error) {
-    throw new UniswapEventDecodeError('v4', error);
+    if (error instanceof BaseError || error instanceof CanonicalEventError)
+      throw new UniswapEventDecodeError('v4', error);
+    throw error;
   }
 }
 

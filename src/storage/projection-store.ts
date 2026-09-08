@@ -7,13 +7,23 @@ import { projectRange, PROJECTION_VERSION, type ProjectionResult } from '../stat
 import { SqliteRangeStore } from './raw-store.js';
 import { rawLogKey } from './manifest.js';
 
+export class NoAcceptedScopeError extends Error {
+  constructor(readonly scopeId: string) {
+    super('No accepted scope to project');
+    this.name = 'NoAcceptedScopeError';
+  }
+}
+
 export interface StoredProjection extends ProjectionResult {
   sourceHash: string;
   configVersion: string;
   registryScopeId: string;
 }
 
-/** Snapshot reads/replacements: rescans can remove/retime logs without changing the chain tip. */
+/** Snapshot reads/replacements: rescans can remove/retime logs without changing the chain tip.
+ * P2 read() uses the cursor JSON snapshot; the three detail tables currently serve
+ * persisted projections only. P3 should add scoped pool/minute queries against
+ * those tables with the same freshness guard before removing duplicate payloads. */
 export class SqliteProjectionStore {
   private readonly raw: SqliteRangeStore;
   constructor(private readonly db: Database.Database) {
@@ -59,7 +69,7 @@ export class SqliteProjectionStore {
     return this.db
       .transaction(() => {
         const snapshot = this.snapshot(scopeId, registryScopeId, configVersion);
-        if (!snapshot) throw new Error('No accepted scope to project');
+        if (!snapshot) throw new NoAcceptedScopeError(scopeId);
         const result: StoredProjection = {
           ...projectRange(
             {
@@ -78,7 +88,9 @@ export class SqliteProjectionStore {
         };
         for (const table of ['projected_events', 'pool_observations', 'projection_quality_errors'])
           this.db.prepare('delete from ' + table + ' where scope_id=?').run(scopeId);
-        const eventInsert = this.db.prepare('insert into projected_events values (?,?,?,?,?,?,?)');
+        const eventInsert = this.db.prepare(
+          'insert into projected_events (scope_id,event_id,pool_id,kind,block_number,minute_start_sec,payload_json) values (?,?,?,?,?,?,?)',
+        );
         for (const e of result.events)
           eventInsert.run(
             scopeId,
@@ -89,17 +101,19 @@ export class SqliteProjectionStore {
             e.time.minuteStartSec,
             encodeJson(e),
           );
-        const obsInsert = this.db.prepare('insert into pool_observations values (?,?,?)');
+        const obsInsert = this.db.prepare(
+          'insert into pool_observations (scope_id,pool_id,payload_json) values (?,?,?)',
+        );
         for (const o of result.observations)
           obsInsert.run(scopeId, poolRegistrationId(o), encodeJson(o));
         const errorInsert = this.db.prepare(
-          'insert into projection_quality_errors values (?,?,?,?)',
+          'insert into projection_quality_errors (scope_id,event_id,code,payload_json) values (?,?,?,?)',
         );
         for (const e of result.qualityErrors)
           errorInsert.run(scopeId, rawLogKey(e.raw), e.code, encodeJson(e));
         this.db
           .prepare(
-            `insert into projection_cursors values (?,?,?,?,?,?,?,?,?)
+            `insert into projection_cursors (scope_id,registry_scope_id,projection_version,config_version,source_hash,batch_id,block_number,block_hash,payload_json) values (?,?,?,?,?,?,?,?,?)
         on conflict(scope_id) do update set registry_scope_id=excluded.registry_scope_id,
         projection_version=excluded.projection_version,config_version=excluded.config_version,
         source_hash=excluded.source_hash,batch_id=excluded.batch_id,block_number=excluded.block_number,
@@ -127,9 +141,12 @@ export class SqliteProjectionStore {
   ): StoredProjection | null {
     return this.db.transaction(() => {
       const row = this.db
-        .prepare('select source_hash, payload_json from projection_cursors where scope_id=?')
-        .get(scopeId) as { source_hash: string; payload_json: string } | undefined;
-      if (!row) return null;
+        .prepare(
+          'select source_hash, projection_version, payload_json from projection_cursors where scope_id=?',
+        )
+        .get(scopeId) as
+        { source_hash: string; projection_version: string; payload_json: string } | undefined;
+      if (!row || row.projection_version !== PROJECTION_VERSION) return null;
       const snapshot = this.snapshot(scopeId, registryScopeId, configVersion);
       if (!snapshot || snapshot.sourceHash !== row.source_hash) return null;
       return decodeProjection(row.payload_json);
