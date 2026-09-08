@@ -1,0 +1,228 @@
+{
+  "schemaVersion": "p0.1",
+  "sourceAlias": "robinhood-public",
+  "chainId": 4663,
+  "at": "2026-09-08T06:10:09.678Z",
+  "requiredPassed": true,
+  "capabilities": {
+    "chainId": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-08T06:10:04.953Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": 4663
+    },
+    "recentAnchor": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-08T06:10:05.220Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": {
+        "number": "57465368",
+        "hash": "0x2bf25e98906192fa5f90177b447894dbf9a95855007965e6377795d0560e0676",
+        "timestampSec": 1788847801
+      }
+    },
+    "rangeLogs10": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-08T06:10:05.514Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": {
+        "fromBlock": "57465359",
+        "toBlock": "57465368",
+        "count": 21,
+        "decodedResponseBytes": 21159,
+        "direct": {
+          "status": "supported"
+        },
+        "adaptive": {
+          "complete": true,
+          "ranges": 1
+        }
+      }
+    },
+    "rangeLogs20": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-08T06:10:05.824Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": {
+        "fromBlock": "57465349",
+        "toBlock": "57465368",
+        "count": 44,
+        "decodedResponseBytes": 43727,
+        "direct": {
+          "status": "supported"
+        },
+        "adaptive": {
+          "complete": true,
+          "ranges": 1
+        }
+      }
+    },
+    "rangeLogs100": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-08T06:10:06.118Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": {
+        "fromBlock": "57465269",
+        "toBlock": "57465368",
+        "count": 200,
+        "decodedResponseBytes": 197749,
+        "direct": {
+          "status": "supported"
+        },
+        "adaptive": {
+          "complete": true,
+          "ranges": 1
+        }
+      }
+    },
+    "rangeUnionConsistency": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-08T06:10:07.888Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": {
+        "equal": true,
+        "full": 44,
+        "union": 44,
+        "adaptive": true,
+        "coverage": "tested range only; provider upper limit unknown"
+      }
+    },
+    "currentCode": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-08T06:10:08.182Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": {
+        "bytes": 24009,
+        "codeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626"
+      }
+    },
+    "currentCall": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-08T06:10:08.448Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": {
+        "responseHash": "0xbb8a6a4669ba250d26cd7a459eca9d215f8307e33aebe50379bc5a3617ec3444",
+        "decimals": 18
+      }
+    },
+    "historicalAnchor": {
+      "status": "supported",
+      "required": false,
+      "at": "2026-09-08T06:10:08.734Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": {
+        "number": "56465368",
+        "hash": "0x8ec613684c99532907d931afd0939fb5943ffc65227a1bd457a09adf8f520c27",
+        "timestampSec": 1788746900
+      }
+    },
+    "historicalLogs": {
+      "status": "supported",
+      "required": false,
+      "at": "2026-09-08T06:10:09.040Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": {
+        "fromBlock": "56465368",
+        "toBlock": "56465387",
+        "count": 158,
+        "scope": "one sampled range; not full P5 coverage"
+      }
+    },
+    "timestampAnchor-57465349": {
+      "status": "supported",
+      "required": false,
+      "at": "2026-09-08T06:10:09.326Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": {
+        "blockNumber": "57465349",
+        "raw": "0x0",
+        "quality": "zero",
+        "anchor": {
+          "number": "57465349",
+          "hash": "0xa2f5975c442f6a51fb4c5d5793ddcb4b68b8797f8635f63d437d408ceda0dbaf",
+          "timestampSec": 1788847799
+        }
+      }
+    },
+    "timestampAnchor-57465367": {
+      "status": "supported",
+      "required": false,
+      "at": "2026-09-08T06:10:09.678Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": {
+        "blockNumber": "57465367",
+        "raw": "0x6a9fa6b9",
+        "quality": "valid",
+        "anchor": {
+          "number": "57465367",
+          "hash": "0x6ae35f09896f22e6f06d1d613646b4038d7d48bfcedf2b5f9fa20b5c1e728ce9",
+          "timestampSec": 1788847801
+        }
+      }
+    },
+    "historicalState": {
+      "status": "unknown",
+      "required": false,
+      "at": "2026-09-08T06:10:09.678Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": "not probed: optional for P0"
+    },
+    "websocket": {
+      "status": "unknown",
+      "required": false,
+      "at": "2026-09-08T06:10:09.678Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": "not probed: optional for P0"
+    },
+    "trace": {
+      "status": "unknown",
+      "required": false,
+      "at": "2026-09-08T06:10:09.678Z",
+      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "detail": "not probed: optional for P0"
+    }
+  },
+  "maxLogsPerResponse": null,
+  "logResponseGuard": 5000,
+  "logTimestamp": {
+    "sampled": 2,
+    "quality": {
+      "zero": 1,
+      "valid": 1
+    },
+    "sdkPreservesField": true,
+    "fallback": "P1 minute-boundary index; no per-block headers"
+  },
+  "meter": {
+    "calls": 34,
+    "retries": 0,
+    "responseBytes": 688992,
+    "methods": {
+      "eth_chainId": 2,
+      "eth_getBlockByNumber": 7,
+      "eth_getLogs": 7,
+      "eth_getCode": 9,
+      "eth_call": 9
+    },
+    "elapsedMs": 11377,
+    "maxCalls": 150,
+    "peakOneSecond": 4,
+    "averageRpcPerSecond": 2.9884855410037794,
+    "billingUnits": null
+  },
+  "configHash": "cb129b74bed0b3e0045ab08ca0100edc99329976f0a5a47c74cf68db28f56727",
+  "abiHashes": {
+    "v3Pool": "2a3f0cf642d330dd2f6f0161f8d6de5815cb629771d07eebb93d11c317f25178",
+    "v4Manager": "86d9ece37ee75f72eb211f37a1ae9b7d8af60e66971f22c4c9ce499302a715c2"
+  },
+  "identityPassed": true,
+  "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl"
+}

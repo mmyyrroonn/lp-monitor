@@ -1,0 +1,30 @@
+{
+  "version": "2026-09-08.p0",
+  "chainId": 4663,
+  "v3Factory": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+  "v4Manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+  "stateView": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
+  "tokens": {
+    "AMC": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+    "USDG": "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
+  },
+  "v3Pools": ["0xaa34fea710a1a737840329051d81d3b0b7c564d5"],
+  "v4PoolIds": [
+    "0x7499938c352d5b5b8f0c648722aca5ee964ef9b85c3a3041f1ec379726291d9d",
+    "0x27ccf0a6d1ee74840220715bcca7d3b01e0d33aa30d0259b47ae1585b3f4c071"
+  ],
+  "deploymentCandidateBlock": "9070",
+  "historyTimestampSec": 1788496435,
+  "v4PoolHistoryHints": [
+    { "poolId": "0x7499938c352d5b5b8f0c648722aca5ee964ef9b85c3a3041f1ec379726291d9d", "timestampSec": 1788496435 },
+    { "poolId": "0x27ccf0a6d1ee74840220715bcca7d3b01e0d33aa30d0259b47ae1585b3f4c071", "timestampSec": 1788467405 }
+  ],
+  "pollIntervalMs": 2000,
+  "maxRangeBlocks": 1000,
+  "overlapBlocks": 20,
+  "logResponseGuard": 5000,
+  "maxRpcCalls": 150,
+  "rpcPerSecond": 5,
+  "timeoutMs": 10000,
+  "maxRetries": 2
+}

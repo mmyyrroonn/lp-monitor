@@ -1,0 +1,91 @@
+{
+  "sourceAlias": "robinhood-public",
+  "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+  "report": {
+    "status": "unverified",
+    "requiredPassed": true,
+    "currentIdentityStatus": "verified",
+    "anchor": {
+      "number": "57465417",
+      "hash": "0xb5da78426a0c188e7eec4710d275a21a5b487aee2275b010a99afe5be430052a",
+      "timestampSec": 1788847806
+    },
+    "chainId": {
+      "expected": 4663,
+      "observed": 4663,
+      "status": "verified"
+    },
+    "contracts": {
+      "v3Factory": {
+        "address": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0xec72b1abd1f2faee020cfea9c646bd8994f9fb389054f6e574f103a895091739"
+      },
+      "v4Manager": {
+        "address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626"
+      },
+      "stateView": {
+        "address": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
+        "required": false,
+        "status": "verified",
+        "codeHash": "0x7d9c591e0956fd89d98feb4ffcfe8bf1f7a62bd485edd979fa21d104b49878a6"
+      }
+    },
+    "tokens": {
+      "AMC": {
+        "address": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0x6c1fdd40002dcb440c7fff6a84171404d279ccb057803b65826f7546acd65630",
+        "decimals": 18
+      },
+      "USDG": {
+        "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0x864cc9ad53b338b82da1f7cab85ab0b3d5c8861acb422b6fec63cf36234f36a6",
+        "decimals": 6
+      }
+    },
+    "v3Pools": [
+      {
+        "address": "0xaa34fea710a1a737840329051d81d3b0b7c564d5",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0x7285522ff427b6fc303fbae5a66111cf1d30e003c568dd13f5c6522e4b5ce04c",
+        "factory": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+        "token0": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "token1": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "fee": 3000
+      }
+    ],
+    "stateViewPoolManager": {
+      "required": false,
+      "status": "verified",
+      "observed": "0x8366a39cc670b4001a1121b8f6a443a643e40951"
+    },
+    "deployments": {
+      "v3Factory": {
+        "address": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+        "status": "unverified",
+        "firstCodeBlock": null,
+        "candidateBlock": "9070",
+        "candidateChecked": true,
+        "reason": "RPC request-failed"
+      },
+      "v4Manager": {
+        "address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "status": "unverified",
+        "firstCodeBlock": null,
+        "candidateBlock": "9070",
+        "candidateChecked": true,
+        "reason": "RPC request-failed"
+      }
+    },
+    "rpcCallsUsed": 34
+  }
+}

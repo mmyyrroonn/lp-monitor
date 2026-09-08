@@ -1,0 +1,51 @@
+{
+  "at": "2026-09-08T06:01:00.880Z",
+  "commit": null,
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/Uniswap/contracts/main/deployments/4663.md",
+      "at": "2026-09-08T06:01:00.880Z",
+      "path": "artifacts/p0/upstream/deployments-4663.md",
+      "sha256": "4e34c82c607536a3df8e28243e90a13507e7894a86147a0865229a915b193aec"
+    },
+    {
+      "url": "https://api.robinhood.com/rhj/assets",
+      "at": "2026-09-08T06:01:00.880Z",
+      "path": "artifacts/p0/upstream/stock-assets.json",
+      "sha256": "f0ac52a33bd5c49a928b506455e843e103f61671a69e52a4adfcc81f17b4f0b7"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/labrinyang/lp-terminal/c127e70a2a21ca40f5668d155587e36e80049277/LICENSE",
+      "at": "2026-09-08T06:01:00.880Z",
+      "path": "artifacts/p0/upstream/lp-terminal-LICENSE",
+      "sha256": "8d55658261cf4e0e28cc953307d18d8814d076840969137cca4ad956467d692f"
+    }
+  ],
+  "contracts": {
+    "v3Factory": {
+      "address": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+      "matchesOfficialDeployment": true
+    },
+    "v4Manager": {
+      "address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+      "matchesOfficialDeployment": true
+    },
+    "stateView": {
+      "address": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
+      "matchesOfficialDeployment": true
+    }
+  },
+  "AMC": {
+    "address": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+    "matchesOfficialRegistry": true,
+    "decimals": 18,
+    "status": "ASSET_STATUS_ACTIVE"
+  },
+  "runtime": {
+    "node": "v24.19.0",
+    "platform": "win32",
+    "arch": "x64"
+  },
+  "packageJsonSha256": "a01fd46161b249ba1d537f2ab85f770d22c4979b1f0753e6339b7d4c339b7b98",
+  "lockfileSha256": "4e7d8ea2d97688d6552c73d56dbc9bc089613d1a0df2569902fe6d5dcb4a215e"
+}

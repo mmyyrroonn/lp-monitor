@@ -1,0 +1,110 @@
+{
+  "generatedAt": "2026-09-08T05:49:17.510Z",
+  "entries": [
+    {
+      "id": "uniswap-v3-factory",
+      "package": "@uniswap/v3-core",
+      "version": "1.0.1",
+      "packageLicense": "BUSL-1.1",
+      "sourceUrl": "https://unpkg.com/@uniswap/v3-core@1.0.1/contracts/interfaces/IUniswapV3Factory.sol",
+      "sourceSpdx": "GPL-2.0-or-later",
+      "abi": {
+        "path": "artifacts/p0/upstream/uniswap-v3-factory/artifact.json",
+        "sha256": "daf147e8a0023b9c4ab002689b15460fdcd024b1d18d0e92376726c6131f0853"
+      },
+      "source": {
+        "path": "artifacts/p0/upstream/uniswap-v3-factory/source.sol",
+        "sha256": "17c72e89a7d0eecca7929ca08d97f46e80930ef7024e4ccbc7b294c588477107"
+      },
+      "notice": {
+        "path": "artifacts/p0/upstream/uniswap-v3-factory/NOTICE_OR_LICENSE",
+        "sha256": "85c5cbc5be388d8bb38d8618de93c96e247ae5af20eb79dbafc1fb5b13b57b54"
+      },
+      "importTest": {
+        "command": "node node_modules/vitest/vitest.mjs run tests/unit/abi.test.ts",
+        "result": "passed"
+      }
+    },
+    {
+      "id": "uniswap-v3-pool",
+      "package": "@uniswap/v3-core",
+      "version": "1.0.1",
+      "packageLicense": "BUSL-1.1",
+      "sourceUrl": "https://unpkg.com/@uniswap/v3-core@1.0.1/contracts/interfaces/IUniswapV3Pool.sol",
+      "sourceSpdx": "GPL-2.0-or-later",
+      "abi": {
+        "path": "artifacts/p0/upstream/uniswap-v3-pool/artifact.json",
+        "sha256": "1cb22d8cc5f70b1cef8a4f59bdd49541f01279bfba116878244ed913fe4cba33"
+      },
+      "source": {
+        "path": "artifacts/p0/upstream/uniswap-v3-pool/source.sol",
+        "sha256": "b0f97121de74f3c916503f6ec37fa1ba196affd1cc02157e47ab00125dde91fe"
+      },
+      "notice": {
+        "path": "artifacts/p0/upstream/uniswap-v3-pool/NOTICE_OR_LICENSE",
+        "sha256": "85c5cbc5be388d8bb38d8618de93c96e247ae5af20eb79dbafc1fb5b13b57b54"
+      },
+      "importTest": {
+        "command": "node node_modules/vitest/vitest.mjs run tests/unit/abi.test.ts",
+        "result": "passed"
+      }
+    },
+    {
+      "id": "uniswap-v4-manager",
+      "package": "@uniswap/v4-core",
+      "version": "1.0.2",
+      "packageLicense": "BUSL-1.1",
+      "sourceUrl": "https://unpkg.com/@uniswap/v4-core@1.0.2/src/interfaces/IPoolManager.sol",
+      "sourceSpdx": "MIT",
+      "abi": {
+        "path": "artifacts/p0/upstream/uniswap-v4-manager/artifact.json",
+        "sha256": "24eeeb948a32fa7e0679586013ad74d78468a050ba700a2a75c3ce55dc8352c9"
+      },
+      "source": {
+        "path": "artifacts/p0/upstream/uniswap-v4-manager/source.sol",
+        "sha256": "a98405333567e4ab344489728014795721cf0071c151536377d2fcc986e0600c"
+      },
+      "notice": {
+        "path": "artifacts/p0/upstream/uniswap-v4-manager/NOTICE_OR_LICENSE",
+        "sha256": "b7b0c4379346af0701f5e4df9c861295d4a3af91dc3b15eb4356ebc571303df9"
+      },
+      "importTest": {
+        "command": "node node_modules/vitest/vitest.mjs run tests/unit/abi.test.ts",
+        "result": "passed"
+      }
+    },
+    {
+      "id": "uniswap-v4-sdk-pool-id-cross-check",
+      "package": "@uniswap/v4-sdk",
+      "version": "2.3.3",
+      "packageLicense": "MIT",
+      "sourceUrl": "https://unpkg.com/@uniswap/v4-sdk@2.3.3/dist/esm/src/entities/pool.js",
+      "sourceSpdx": null,
+      "abi": null,
+      "source": {
+        "path": "artifacts/p0/upstream/uniswap-v4-sdk-pool-id-cross-check/source.js",
+        "sha256": "de83292d86af85a5796fad850a0d9e89255f0a4c94f2822a9e69ff7cc4e37057"
+      },
+      "notice": {
+        "path": "artifacts/p0/upstream/uniswap-v4-sdk-pool-id-cross-check/NOTICE_OR_LICENSE",
+        "sha256": "5f4bbff13715ab5b4241a201638864888317d27c975f0b1c9805e11d7a646b0c"
+      },
+      "importTest": {
+        "command": "node node_modules/vitest/vitest.mjs run tests/unit/abi.test.ts",
+        "result": "passed"
+      }
+    },
+    {
+      "id": "lp-terminal-reference",
+      "package": "labrinyang/lp-terminal",
+      "version": "c127e70a2a21ca40f5668d155587e36e80049277",
+      "packageLicense": "MIT",
+      "sourceUrl": "https://github.com/labrinyang/lp-terminal/tree/c127e70a2a21ca40f5668d155587e36e80049277",
+      "sourceSpdx": null,
+      "abi": null,
+      "source": null,
+      "notice": null,
+      "importTest": "reference only; no application code copied. Robinhood StateView candidate: 0xF3334192D15450CdD385c8B70e03f9A6bD9E673b (unverified)."
+    }
+  ]
+}

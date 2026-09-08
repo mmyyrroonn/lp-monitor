@@ -1,0 +1,8 @@
+{
+  "version": "2026-09-08.p0-seeds",
+  "chainId": 4663,
+  "rwa": [{ "symbol": "AMC", "address": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b", "identityStatus": "seed-requires-evidence" }],
+  "quote": { "symbol": "USDG", "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168" },
+  "source": "https://api.robinhood.com/rhj/assets",
+  "note": "Configuration is not identity verification; use artifacts/p0/identity-evidence.json."
+}

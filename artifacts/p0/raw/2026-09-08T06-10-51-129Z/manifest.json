@@ -1,0 +1,305 @@
+{
+  "schemaVersion": "p0.1",
+  "chainId": 4663,
+  "configVersion": "2026-09-08.p0",
+  "sourceAlias": "robinhood-public",
+  "capturedAt": "2026-09-08T06:12:14.818Z",
+  "captureMode": "live",
+  "supplementalCaptureMode": "backfill",
+  "synthetic": false,
+  "requestedRange": {
+    "fromBlock": "57465528",
+    "toBlock": "57465827"
+  },
+  "filters": {
+    "fromBlock": "57465528",
+    "toBlock": "57465827",
+    "address": [
+      "0xaa34fea710a1a737840329051d81d3b0b7c564d5",
+      "0x8366a39cc670b4001a1121b8f6a443a643e40951"
+    ],
+    "topics": [
+      [
+        "0x0c396cd989a39f4459b5fa1aed6a9a8dcdbc45908acfd67e028cd568da98982c",
+        "0x70935338e69775456a85ddef226c395fb668b63fa0115f5f20610b388e6ca9c0",
+        "0x596b573906218d3411850b26a6b437d6c4522fdb43d2d2386263f86d50b8b151",
+        "0xbdbdb71d7860376ba52b25a5028beea23581364a40522f6bcfb86bb1f2dca633",
+        "0xac49e518f90a358f652e4400164f05a5d8f7e35e7747279bc3a93dbf584e125a",
+        "0x98636036cb66a9c19a37435efc1e90142190214e8abeb821bdba3f2990dd4c95",
+        "0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde",
+        "0x973d8d92bb299f4af6ce49b52a8adb85ae46b9f214c4c4fc06ac77401237b133",
+        "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67",
+        "0xb3fd5071835887567a0671151121894ddccc2842f1d10bedad13e0d17cace9a7",
+        "0x29ef05caaff9404b7cb6d1c0e9bbae9eaa7ab2541feba1a9c4248594c08156cb",
+        "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438",
+        "0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec",
+        "0xceb576d9f15e4e200fdb5096d64d5dfd667e16def20c1eefd14256d8e3faa267",
+        "0xb4bd8ef53df690b9943d3318996006dbb82a25f54719d8c8035b516a2a5b8acc",
+        "0xe9c42593e71f84403b84352cd168d693e2c9fcd1fdbcc3feb21d92b43e6696f9",
+        "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f",
+        "0x1b3d7edb2e9c0b0e7c525b20aaaef0f5940d2ed71663c7d39266ecafac728859"
+      ]
+    ]
+  },
+  "filterPlanHash": "b4b2420f03e471072ec73d083fc3f608d41493865482e3aa7b4495b301f3e82e",
+  "configHash": "cb129b74bed0b3e0045ab08ca0100edc99329976f0a5a47c74cf68db28f56727",
+  "abiHashes": {
+    "v3Pool": "2a3f0cf642d330dd2f6f0161f8d6de5815cb629771d07eebb93d11c317f25178",
+    "v4Manager": "86d9ece37ee75f72eb211f37a1ae9b7d8af60e66971f22c4c9ce499302a715c2"
+  },
+  "rangeEvidence": [
+    {
+      "label": "primary",
+      "filter": {
+        "fromBlock": "57465528",
+        "toBlock": "57465827",
+        "address": [
+          "0xaa34fea710a1a737840329051d81d3b0b7c564d5",
+          "0x8366a39cc670b4001a1121b8f6a443a643e40951"
+        ],
+        "topics": [
+          [
+            "0x0c396cd989a39f4459b5fa1aed6a9a8dcdbc45908acfd67e028cd568da98982c",
+            "0x70935338e69775456a85ddef226c395fb668b63fa0115f5f20610b388e6ca9c0",
+            "0x596b573906218d3411850b26a6b437d6c4522fdb43d2d2386263f86d50b8b151",
+            "0xbdbdb71d7860376ba52b25a5028beea23581364a40522f6bcfb86bb1f2dca633",
+            "0xac49e518f90a358f652e4400164f05a5d8f7e35e7747279bc3a93dbf584e125a",
+            "0x98636036cb66a9c19a37435efc1e90142190214e8abeb821bdba3f2990dd4c95",
+            "0x7a53080ba414158be7ec69b987b5fb7d07dee101fe85488f0853ae16239d0bde",
+            "0x973d8d92bb299f4af6ce49b52a8adb85ae46b9f214c4c4fc06ac77401237b133",
+            "0xc42079f94a6350d7e6235f29174924f928cc2ac818eb64fed8004e115fbcca67",
+            "0xb3fd5071835887567a0671151121894ddccc2842f1d10bedad13e0d17cace9a7",
+            "0x29ef05caaff9404b7cb6d1c0e9bbae9eaa7ab2541feba1a9c4248594c08156cb",
+            "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438",
+            "0xf208f4912782fd25c7f114ca3723a2d5dd6f3bcc3ac8db5af63baa85f711d5ec",
+            "0xceb576d9f15e4e200fdb5096d64d5dfd667e16def20c1eefd14256d8e3faa267",
+            "0xb4bd8ef53df690b9943d3318996006dbb82a25f54719d8c8035b516a2a5b8acc",
+            "0xe9c42593e71f84403b84352cd168d693e2c9fcd1fdbcc3feb21d92b43e6696f9",
+            "0x40e9cecb9f5f1f1c5b9c97dec2917b7ee92e57ba5563708daca94dd84ad7112f",
+            "0x1b3d7edb2e9c0b0e7c525b20aaaef0f5940d2ed71663c7d39266ecafac728859"
+          ]
+        ]
+      },
+      "start": {
+        "number": "57465528",
+        "hash": "0x426e53b3f54557e10415ac132f1a1fcc3502c5a155319034744a35e65461df27",
+        "timestampSec": 1788847817
+      },
+      "end": {
+        "number": "57465827",
+        "hash": "0x5bca1a3e5244c62aa74fcf182ac5db8f43216c49c31e1e7cd0124e0b8999aae2",
+        "timestampSec": 1788847848
+      },
+      "complete": true,
+      "stable": true,
+      "successfulRanges": [
+        {
+          "fromBlock": "57465528",
+          "toBlock": "57465827",
+          "count": 575
+        }
+      ],
+      "failures": [],
+      "file": {
+        "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\primary.logs.json",
+        "sha256": "f6de2198d92f0d1a034b2c9673e9d11711884d8a558214d98b54bbfad5d30a30",
+        "bytes": 574962
+      }
+    },
+    {
+      "label": "seed-1-supplement",
+      "filter": {
+        "fromBlock": "53983865",
+        "toBlock": "53984185",
+        "address": [
+          "0x8366a39cc670b4001a1121b8f6a443a643e40951"
+        ],
+        "topics": [
+          "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438",
+          "0x7499938c352d5b5b8f0c648722aca5ee964ef9b85c3a3041f1ec379726291d9d"
+        ]
+      },
+      "start": {
+        "number": "53983865",
+        "hash": "0x178ed93e9cb57e84183cadf03b073616e658a999c558ddb40af0874076d00bf0",
+        "timestampSec": 1788496432
+      },
+      "end": {
+        "number": "53984185",
+        "hash": "0x5b9accb55ac1ac51218f70b4602305191c0aa222b9ba5e6f44c2ab610c8c4dcc",
+        "timestampSec": 1788496465
+      },
+      "complete": true,
+      "stable": true,
+      "successfulRanges": [
+        {
+          "fromBlock": "53983865",
+          "toBlock": "53984185",
+          "count": 1
+        }
+      ],
+      "failures": [],
+      "file": {
+        "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\seed-1-supplement.logs.json",
+        "sha256": "3256a2d158205a06fd51f4c5f8df5c76134804e6b5b477f39cecf443e5d3bffe",
+        "bytes": 1026
+      }
+    },
+    {
+      "label": "seed-2-supplement",
+      "filter": {
+        "fromBlock": "53697143",
+        "toBlock": "53697463",
+        "address": [
+          "0x8366a39cc670b4001a1121b8f6a443a643e40951"
+        ],
+        "topics": [
+          "0xdd466e674ea557f56295e2d0218a125ea4b4f0f6f3307b95f85e6110838d6438",
+          "0x27ccf0a6d1ee74840220715bcca7d3b01e0d33aa30d0259b47ae1585b3f4c071"
+        ]
+      },
+      "start": {
+        "number": "53697143",
+        "hash": "0xab57e576e5f154e88b07c1b094e0df0593391ec0a6582ca171930de11248ae0d",
+        "timestampSec": 1788467403
+      },
+      "end": {
+        "number": "53697463",
+        "hash": "0xcb2d370b4b4491320458c485e3ec7feb2454a18f137d2fc01af40d9a40cb2b9a",
+        "timestampSec": 1788467435
+      },
+      "complete": true,
+      "stable": true,
+      "successfulRanges": [
+        {
+          "fromBlock": "53697143",
+          "toBlock": "53697463",
+          "count": 1
+        }
+      ],
+      "failures": [],
+      "file": {
+        "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\seed-2-supplement.logs.json",
+        "sha256": "e28c4e82b357a6c53084145c39238bb48c002b75212d7ed20ba7579d82bac923",
+        "bytes": 1026
+      }
+    }
+  ],
+  "files": [
+    {
+      "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\primary.logs.json",
+      "sha256": "f6de2198d92f0d1a034b2c9673e9d11711884d8a558214d98b54bbfad5d30a30",
+      "bytes": 574962
+    },
+    {
+      "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\seed-1-supplement.logs.json",
+      "sha256": "3256a2d158205a06fd51f4c5f8df5c76134804e6b5b477f39cecf443e5d3bffe",
+      "bytes": 1026
+    },
+    {
+      "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\seed-2-supplement.logs.json",
+      "sha256": "e28c4e82b357a6c53084145c39238bb48c002b75212d7ed20ba7579d82bac923",
+      "bytes": 1026
+    },
+    {
+      "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\logs.json",
+      "sha256": "13d388eaf6702cf28025e064f0f3fdab2c93ecd50cc5069e36e7a45489223126",
+      "bytes": 577008
+    },
+    {
+      "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\anchors.json",
+      "sha256": "85bb0d1a0e2db981a7b78ca87681bfbb376188b0e193ad5f2055b344147756ea",
+      "bytes": 11515
+    },
+    {
+      "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\time-boundaries.json",
+      "sha256": "17e6a540693b345ca73c67d576bc3a8b67979ecf034d7b8eadf328600874d099",
+      "bytes": 240
+    }
+  ],
+  "categories": {
+    "v4.Initialize": 3,
+    "v4.Swap": 531,
+    "v4.Transfer": 15,
+    "v4.ModifyLiquidity": 27,
+    "v3.Swap": 1
+  },
+  "initializations": [
+    {
+      "poolId": "0x27ccf0a6d1ee74840220715bcca7d3b01e0d33aa30d0259b47ae1585b3f4c071",
+      "keyVerified": true,
+      "configuredSeed": true,
+      "blockNumber": "53697172",
+      "blockHash": "0xdd027ec1ad6fbead8bf697bd8293473a8d0b14b4b1ac4dd79703423557182c9a",
+      "transactionHash": "0x75c36932619070f16f65bd7d252f689a4e6cf7d170a99ee72774d56f4315e41e",
+      "key": {
+        "currency0": "0x05a3d1Cd21d0C88145E82600E62e7E496e0F222B",
+        "currency1": "0x385F4f8ae47651ce5F58F5265395a669f8281e18",
+        "fee": 8388608,
+        "tickSpacing": 8,
+        "hooks": "0x4e3468951D49f2EEa976eD0D6e75fFCb44a9a544"
+      }
+    },
+    {
+      "poolId": "0x7499938c352d5b5b8f0c648722aca5ee964ef9b85c3a3041f1ec379726291d9d",
+      "keyVerified": true,
+      "configuredSeed": true,
+      "blockNumber": "53983886",
+      "blockHash": "0x514028cb51a5080a811426471637a5d534ca824096166f5ea91800e3ea70b52b",
+      "transactionHash": "0x37f93b7b204cb6d88e903d066a36ce2705252ec4c782402c7a3f5739ad870a3b",
+      "key": {
+        "currency0": "0x05a3d1Cd21d0C88145E82600E62e7E496e0F222B",
+        "currency1": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "fee": 1000,
+        "tickSpacing": 10,
+        "hooks": "0x0000000000000000000000000000000000000000"
+      }
+    },
+    {
+      "poolId": "0x6a11ff0a97e4715edb89f74fd94f19fb0f40834e786b437eed33028ee421971a",
+      "keyVerified": true,
+      "configuredSeed": false,
+      "blockNumber": "57465542",
+      "blockHash": "0x3f449a3f6ec83e795ce89d1993cc0b93f20f6791ab3ae96fac7a087809f0f6ab",
+      "transactionHash": "0xbbd088e2c8ea09b44e564eb2e30faa1b6c43f8becbaba226b35c1ab323ed20b3",
+      "key": {
+        "currency0": "0x47f49FcF10AC026f9D4752Baa8E187feAcC964F8",
+        "currency1": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168",
+        "fee": 900000,
+        "tickSpacing": 18000,
+        "hooks": "0x0000000000000000000000000000000000000000"
+      }
+    }
+  ],
+  "seedVerifications": [
+    {
+      "poolId": "0x7499938c352d5b5b8f0c648722aca5ee964ef9b85c3a3041f1ec379726291d9d",
+      "status": "verified"
+    },
+    {
+      "poolId": "0x27ccf0a6d1ee74840220715bcca7d3b01e0d33aa30d0259b47ae1585b3f4c071",
+      "status": "verified"
+    }
+  ],
+  "errors": [],
+  "missing": [],
+  "completeness": "complete",
+  "failures": [],
+  "acceptancePassed": true,
+  "note": "V4 Manager-wide protocol fixtures include pools outside AMC watchlist. No heat/volume metrics or trades. Complete means RPC coverage for declared ranges only.",
+  "meter": {
+    "calls": 86,
+    "retries": 3,
+    "responseBytes": 744674,
+    "methods": {
+      "eth_getBlockByNumber": 82,
+      "eth_chainId": 1,
+      "eth_getLogs": 3
+    },
+    "elapsedMs": 83690,
+    "maxCalls": 150,
+    "peakOneSecond": 4,
+    "averageRpcPerSecond": 1.027601864021986,
+    "billingUnits": null
+  }
+}
