@@ -294,3 +294,10 @@ test('actual HTTP 429 penalizes client requests and sustained success restores b
     vi.useRealTimers();
   }
 });
+
+test.each([
+  [{ code: -32602, message: 'invalid argument 0: exceed max topics' }, 'filter-limit'],
+  [{ code: -32602, message: 'invalid argument 0' }, 'request-failed'],
+])('classifies only explicit provider filter overflow %j as %s', (error, kind) => {
+  expect(classifyRpcError(error).kind).toBe(kind);
+});

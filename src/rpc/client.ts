@@ -16,6 +16,7 @@ const methods = [
 ] as const;
 export interface ReaderOptions extends EvidenceOptions {
   maxCalls?: number | null;
+  deadlineMs?: number;
   maxConcurrentRpc?: number;
   perSecond?: number;
   timeoutMs?: number;
@@ -47,6 +48,13 @@ export function createChainReader(
   const limiter = new RateLimiter(options.perSecond ?? 5, options.maxConcurrentRpc ?? 2);
   const writer = new EvidenceWriter(options);
   let closed = false;
+  if (options.deadlineMs !== undefined && !Number.isFinite(options.deadlineMs))
+    throw new RangeError('Invalid RPC deadline');
+  const assertRequestAllowed = () => {
+    meter.assertAvailable();
+    if (options.deadlineMs !== undefined && Date.now() >= options.deadlineMs)
+      throw new RpcFailure('deadline');
+  };
   const client = createPublicClient({
     transport: http(env.httpRpcUrl, {
       retryCount: 0,
@@ -75,13 +83,16 @@ export function createChainReader(
     if (!(methods as readonly string[]).includes(method))
       throw new RpcFailure('read-only-method-denied');
     for (let attempt = 0; ; attempt++) {
-      meter.assertAvailable();
+      assertRequestAllowed();
       const release = await limiter.enter();
       try {
-        meter.assertAvailable();
+        assertRequestAllowed();
         await limiter.acquire(
-          () => meter.assertAvailable(),
-          () => meter.begin(method, attempt > 0),
+          () => assertRequestAllowed(),
+          () => {
+            assertRequestAllowed();
+            meter.begin(method, attempt > 0);
+          },
         );
         const at = new Date().toISOString();
         const started = Date.now();

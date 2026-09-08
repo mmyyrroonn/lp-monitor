@@ -23,3 +23,11 @@ skills-lock.json
 
 # Rotated transient request evidence follows the same policy as the active file.
 artifacts/**/requests.jsonl.*
+
+# P1 per-batch runtime payloads stay local; retain small run summaries.
+/artifacts/p1/live/runs/*/*
+!/artifacts/p1/live/runs/*/manifest.json
+
+# Console streams are transient; retain manifests and test summaries instead.
+/artifacts/p1/live/*.stdout.txt
+/artifacts/p1/live/*.stderr.txt

@@ -11,7 +11,11 @@ import { saveJson, repositoryRelativePath } from './ops/files.js';
 import { CHAIN_ID } from './domain/chain.js';
 import { encodeJson } from './domain/json.js';
 
-const help = `Robinhood read-only P0 CLI
+const help = `Robinhood read-only P0/P1 CLI
+  pnpm lp ingest --config config/robinhood.json --from-block N --to-block N
+  pnpm lp follow --config config/robinhood.json --duration 10m
+  P1: --db PATH --watchlist PATH --max-rpc-calls N (default 10000)
+  P1: --evidence full|sampled|off (default sampled); bounded run only.
   pnpm lp probe --config config/robinhood.json --out artifacts/p0/capabilities.json
   pnpm lp capture --config config/robinhood.json --last-blocks 300 --out artifacts/p0/raw
   pnpm lp capture --from-block N --to-block N --out artifacts/p0/raw
@@ -25,6 +29,14 @@ export async function runCli(
   args = process.argv.slice(2),
   options: { environment?: NodeJS.ProcessEnv; readerFactory?: typeof createChainReader } = {},
 ): Promise<number> {
+  if (
+    ['ingest', 'follow'].includes(args[0] ?? '') &&
+    !args.includes('--help') &&
+    !args.includes('-h')
+  ) {
+    const { runRecorderCli } = await import('./ops/recorder-cli.js');
+    return runRecorderCli(args, options);
+  }
   let parsed: ReturnType<typeof parseArgs>;
   try {
     parsed = parseArgs({

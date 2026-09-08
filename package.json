@@ -11,7 +11,7 @@
     "lp": "tsx src/cli.ts",
     "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
     "test": "vitest run",
-    "build": "node scripts/clean-build.mjs && tsc -p tsconfig.build.json",
+    "build": "node scripts/clean-build.mjs && tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs",
     "lint": "node scripts/check-scripts.mjs && prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\"",
     "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\""

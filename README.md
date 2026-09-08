@@ -1,6 +1,6 @@
-# Robinhood RWA monitor — P0
+# Robinhood RWA monitor — P0/P1
 
-只读、单次执行的工程与数据验收工具。阶段入口为 [START_HERE.md](START_HERE.md)，验收状态见 [实施状态](docs/implementation-status.md)。P1 记录器、分钟热度与提醒尚未实现。
+只读数据采集与有界运行工具。阶段入口为 [START_HERE.md](START_HERE.md)，验收状态见 [实施状态](docs/implementation-status.md)。P1 记录器的实现与验收进度见阶段状态；分钟热度和提醒属于后续阶段。
 
 ## 环境与命令
 
@@ -34,9 +34,9 @@ pnpm lp capture --config config/robinhood.json --last-blocks 300 --out artifacts
 
 ## 数据与预算
 
-- 单次运行最多 150 次方法调用；每次请求 10 秒超时、最多两次退避重试。重试计入预算。初始软上限 5 RPC/s；遇到 429 后降速。请求字节统计是读取到的解压响应体字节，排除 HTTP headers；不等同供应商 CU 或费用。
+- P0 单次运行最多 150 次方法调用；每次请求 10 秒超时、最多两次退避重试。重试计入预算。初始软上限 5 RPC/s；遇到 429 后降速。请求字节统计是读取到的解压响应体字节，排除 HTTP headers；不等同供应商 CU 或费用。
 - `maxLogsPerResponse: null` 表示供应商最大返回条数未知。5000 是本地响应防护值，不是已测供应商上限。范围与子范围对照只验证已测区间。
-- 日志 `blockTimestamp=0` 不用作成交时间；跨分钟使用稀疏二分边界，允许多个块同秒，创世块时间 0 单独处理。P0 保存时间证据，持久化分钟索引由 P1 实现。
+- 日志 `blockTimestamp=0` 不用作成交时间；跨分钟使用稀疏二分边界，允许多个块同秒，创世块时间 0 单独处理。P0 保存时间证据；P1 持久化分钟索引见下文。
 - 可选历史 state、StateView、WS、trace 失败单独报告；当前身份不因缺失部署历史而被冒充已验证部署。历史样本只证明已取到的区间，不能代表 P5 历史覆盖完成。
 - 错误只保存分类，供应商 URL、headers 和原始错误正文不进入证据。成功 RPC 返回的链上公开数据保留原文。
 
@@ -62,7 +62,7 @@ P0 `probe`/`capture` 仍为单次运行，最多 150 次 RPC、5 RPS、10 秒超
 
 `--evidence full|sampled|off` 默认 full。full 保留每条响应，默认每片 16 MiB、最多 8 片，满后明确失败而不覆盖旧证据；sampled 每 100 条保留一个完整响应，其余记录哈希，并滚动保留最近分片；off 不写请求证据。CLI 退出会等待异步落盘。sampled/off 不应被当作全量请求归档。
 
-`pollIntervalMs`、`overlapBlocks` 为 P1 预留；`historyTimestampSec` 为后续历史范围入口预留；P0 使用逐池 `v4PoolHistoryHints`。`RH_RPC_WS` 尚不发起 WS 请求，`config/watchlist.amc.json` 留待 P1 动态池发现使用。底层 ReaderOptions 可配置并发和证据容量，P1 长跑策略尚未实现。
+P1 使用 `pollIntervalMs`、`overlapBlocks` 和 `config/watchlist.amc.json`。`historyTimestampSec` 为后续历史范围入口预留，P0 使用逐池 `v4PoolHistoryHints`。`RH_RPC_WS` 尚不发起 WS 请求。
 
 本轮 review 的全部编号、处理依据及验证边界见 [处理记录](docs/reviews/2026-09-08-p0-review-resolution.md)。
 
@@ -71,3 +71,25 @@ P0 `probe`/`capture` 仍为单次运行，最多 150 次 RPC、5 RPS、10 秒超
 `node scripts/audit-p0-archive.mjs artifacts/p0/raw/2026-09-08T06-10-51-129Z/manifest.json` 只审计历史证据哈希，另写 `archive-audit.json`，不验证当前源码或当前链状态。旧 `p0-acceptance.mjs` 仅为兼容入口，不再覆盖历史 `acceptance.json`。当前源码用 `pnpm lint`、`pnpm typecheck`、`pnpm test`、`pnpm build` 独立验证；本轮结果与源码哈希见 `artifacts/p0/acceptance-followup-validation.json`。
 
 新证据的路径基准统一为 `repository` 或 `artifact-directory`；读取保留旧别名兼容。`v4PoolHistoryHints` 可给出成对十进制 `fromBlock` / `toBlock` 提示，采集时会重新读取两端并验证第一个匹配块；无效提示输出 incomplete。当前配置中的两组紧界限来自已有真实归档，不把部署候选块当可靠下界。
+
+## P1 范围记录与恢复
+
+`ingest` 和 `follow` 使用 SQLite WAL 保存原始批次、分片、有效日志、独立 scope 游标、池登记、分钟证据与检查点。P1 提供记录与修订集合，后续 P2–P4 再接协议业务解码、热度和提醒。
+
+```powershell
+pnpm lp ingest --config config/robinhood.json --from-block 100 --to-block 200
+pnpm lp follow --config config/robinhood.json --duration 10m
+pnpm lp follow --config config/robinhood.json --duration 5m --db data/recorder.sqlite --max-rpc-calls 5000
+```
+
+上面的高度仅说明参数格式。默认数据库为 `LP_DATA_DIR/recorder.sqlite`（未设置环境变量时为 `data/recorder.sqlite`），运行证据写入 `artifacts/p1/<runId>`。重启时复用同一数据库，先检查原游标 hash；观察名单改动产生独立 scope，先完成发现历史，再启用操作日志采集。可用 `--watchlist config/watchlist.amc.json` 指定观察名单。
+
+历史池发现有独立覆盖游标，默认每段最多 1,000,000 块、超量自动拆分；操作范围默认最多 1000 块。地址及各 OR topic 维度默认按 `maxFilterValues=1000` 分片；供应商返回明确过滤项超限时继续拆分，保持原范围及完整分片覆盖。每个操作范围先发现两侧 RWA 新池，再抓扩大后的整段池操作，同块创建和首笔操作都在范围内。旧池保留，不因暂时冷却删除。
+
+正常跟随的轮间等待默认为 2 秒（实际周期还包含 RPC 与入库耗时），有积压时连续分段追赶，近期重扫 20 块。通过完整范围对账返回 `added / removed / retimed`，有效日志消失会退出集合，原始旧分支证据保留。重组沿稀疏检查点恢复，查找最多 32 次；缺少匹配点时按链时间回溯 60 分钟 warmup，原覆盖标记为待重核。保留检查点窗口默认 180 分钟。
+
+运行有明确时限或方法预算：`follow --duration` 接受正整数 `s/m/h`，最多 24h，包含启动验证和发现；`ingest` 有固定目标和一小时外层期限。P1 默认总预算 10,000 次、并发 2，初始速率沿用配置 5 RPC/s。截止后不再发出新请求；已发出请求与限流等待按既有超时收尾。不会启动后台永久服务。P0 的 150 次探测预算仍独立保留。
+
+`--evidence` 在 P1 默认 `sampled`；SQLite 和逐批 JSON 仍保存相关原始日志及完整分片 manifest，sampled 仅限定请求响应证据流。逐批记录明确区分“抓取完成”和“事务已提交”；运行 manifest 包含 scope、配置 hash、调用/字节/重试计数、端点与时间定位计数，以及时间失败窗口。未知供应商日志上限仍为 `null`，不把 HTTP 200 当成独立完整性证明。
+
+分钟归桶采用实际稀疏端点与 lower_bound 边界证据。日志时间为零时保留原文，未知秒数保持 `exactTimestampSec=null`；时间证据不足标 `unresolved`，原始日志照常记录。后续证据补齐会产生 `retimed`。所有结果仍是基于 RPC 一致性假设的 `provisional` 观察。

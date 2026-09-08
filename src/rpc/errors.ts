@@ -38,6 +38,11 @@ export function classifyRpcError(error: unknown): RpcFailure {
   if (codes.includes(-32029)) return new RpcFailure('rate-limit', 'unknown', true);
   const message = messages.join(' ');
   if (
+    codes.includes(-32602) &&
+    /(?:exceed|max(?:imum)?|too many).*(?:topics?|addresses?|filter values?)/i.test(message)
+  )
+    return new RpcFailure('filter-limit');
+  if (
     /rate[ -]?limit|too many requests|requests per second|(?:CU|compute units?)\s*(?:per second|\/sec)/i.test(
       message,
     )

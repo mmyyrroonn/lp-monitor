@@ -1,6 +1,6 @@
 # Robinhood RWA 短时 LP 机会监控：实施入口
 
-更新：2026-09-08。**P0 已通过官方公共 RPC 验收，下一窗口只实现 P1。** P0 review 及复验遗留已修正，188 个测试通过；[复验处理](docs/reviews/2026-09-08-p0-review-acceptance-resolution.md)。已有可运行只读 CLI、官方 ABI、能力/身份报告及真实样本；细节与限制见 [实施状态](docs/implementation-status.md)和 [运行说明](README.md)。
+更新：2026-09-08。**P0、P1 已通过验收；下一窗口由用户安排 P2。** P0 review 及复验遗留已修正，188 个测试通过；[复验处理](docs/reviews/2026-09-08-p0-review-acceptance-resolution.md)。P1 新增 SQLite 记录/发现/分钟索引/恢复，273 测试通过，真实录制与重启证据见 [P1 验收](docs/reviews/2026-09-08-p1-acceptance.md)。已有可运行只读 CLI、官方 ABI、能力/身份报告及真实样本；细节与限制见 [实施状态](docs/implementation-status.md)和 [运行说明](README.md)。
 
 目标：直接解析 Robinhood Chain 的 Uniswap V3/V4 链上事件，持续观察有限的 RWA 集合，发现关联新 Meme、老 Meme 再次放量，以及具体 RWA/USDG 池的短时成交热度。首版以热度排名与提醒为核心，不做精确 LP 模拟。通知要及时，机会可以只持续几个小时。
 
@@ -35,14 +35,14 @@
 ~~~text
 请在 E:/lp-monitor 继续 Robinhood RWA 短时 LP 机会监控项目。
 先读 START_HERE.md、docs/implementation-status.md、架构文档与 GitHub 复用调查。
-本窗口只实现 P1，按 docs/superpowers/plans/2026-09-08-p1-recorder.md 从 Task 1.1 执行。
+本窗口只实现 P2，按 docs/superpowers/plans/2026-09-08-p2-protocol-state.md 从 Task 2.1 执行。
 不要重做已经完成的市场调研；用现成 Uniswap ABI、viem 和官方 SDK，避免手写通用协议解析。
 沿用 TypeScript + Node.js 24 + SQLite。凭据仅从本机环境读取，不打印 RPC URL 中的密钥。
 参考 docs/research/2026-09-08-lp-terminal-review.md 中固定commit的只读模块，不照搬其跳块刷新或第三方成交统计。
-使用只读 RPC；沿用已通过的 P0 工程、官方 ABI、能力报告与真实样本，实现 P1 范围记录/发现/恢复并完成必要测试，更新实施状态与交接记录。
+使用只读 RPC；沿用已通过的 P0/P1 工程、官方 ABI、持久化范围记录和真实样本，实现 P2 协议解码与观测并完成必要测试，更新实施状态与交接记录。
 按 docs/research/2026-09-08-batched-rpc.md 验证连续范围 getLogs；默认每2秒追新增logs，时间为0时定位分钟边界，禁止逐块补Header；先读docs/research/2026-09-08-logs-first-heat.md。
 遇到 RPC 不支持某项能力，要保留证据、继续不依赖它的工作，不能假造历史数据或填零。
-不执行交易、不接钱包、不启动永久服务。完成 P1 后停止，说明下一窗口入口。
+不执行交易、不接钱包、不启动永久服务。完成 P2 后停止，说明下一窗口入口。
 需要独立子任务时可按需使用 Sol/Terra，不要所有子任务都用 Astra。
 ~~~
 
@@ -50,8 +50,8 @@
 
 ## 本次已完成与已有资料
 
-- 已完成：设计、复用调查、分阶段计划，以及 P0 工程、60 个测试、只读 CLI、官方 ABI/SDK 对照、公共 RPC 能力与当前身份验证、真实 V3/V4 样本；[验收汇总](artifacts/p0/acceptance.json)。
-- 尚未完成：P1 范围记录器与恢复、后续协议业务层、分钟热度/告警和完整历史回填。历史部署起点仍未验证，日志时间混有零值，公共端点会限流；这些限制已写入交接。
+- 已完成：设计、复用调查、P0 工程与真实样本；P1 范围记录、动态池发现、分钟证据、恢复和 CLI。当前全库 273 测试通过；[P1 验收汇总](artifacts/p1/acceptance.json)。
+- 尚未完成：P2 协议业务层、分钟热度/告警和完整历史回填。历史部署起点仍未验证，日志时间混有零值，公共端点会限流；这些限制已写入交接。
 - 已建立本地 Git，P0 工程、设计文档与最终验收样本纳入版本控制。原 research、GMGN tooling、.agents、.pnpm-store 保留；没有启动永久服务。
 - [AMC/MEME 案例研究](research/amc-meme/AMC与MEME案例研究.md)解释了为何必须监控重新放量，不能首次降温后永久删币。
 - [历史验证](research/short-window-study/2026-09-07-短时机会监控-历史验证.md)包含初始阈值实验与失败样本。

@@ -188,6 +188,7 @@ export async function captureFixture(
         logs: [],
         complete: false,
         ranges: [],
+        fragments: [],
         failures: [{ fromBlock: filter.fromBlock, toBlock: filter.toBlock, reason }],
       };
     }

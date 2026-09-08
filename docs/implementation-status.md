@@ -1,6 +1,6 @@
 # 实施状态与窗口交接
 
-更新：2026-09-08。当前状态：**P0 passed（官方公共 RPC 端点）**，P1–P6 未开始。下一窗口执行 P1。下方旧记录保留为设计阶段历史证据；本轮完整验收与限制见文末。
+更新：2026-09-08。当前状态：**P0 passed；P1 passed**，P2–P6 未开始。下方旧记录保留为设计阶段历史证据；本轮完整验收与限制见文末。
 
 此前13份Markdown的本地链接、代码围栏、计划头部顺序、占位符与行尾空白检查通过；并已按架构逐项核对P0–P6覆盖。批量查询补充后的文档检查另记于下方。文档验收不代表应用测试通过。
 
@@ -18,8 +18,8 @@
 
 | 阶段 | 状态 | 已验证证据 | 下一步 |
 |---|---|---|---|
-| P0 工程与能力 | passed | 60 测试通过；typecheck/build/probe/capture 退出 0；真实 V3/V4 与两枚 V4 种子验证；[汇总](../artifacts/p0/acceptance.json) | 下一窗口执行 P1 Task 1.1 |
-| P1 记录与恢复 | pending | 尚无生产记录器 | P0 验收后开始 |
+| P0 工程与能力 | passed | P0 最终修正后 188 测试通过；历史 RPC 证据保留 | 沿用既有合同 |
+| P1 记录与恢复 | passed | 273 测试；5 个实时分钟边界；重启/旧段重扫退出 0；[验收](../artifacts/p1/acceptance.json) | 用户安排后进入 P2 Task 2.1 |
 | P2 协议与观测 | pending | 官方源码已调查；尚无实现测试 | P1 验收后开始 |
 | P3 分钟热度 | pending | 已有研究定义；尚无分钟热度输出 | P2 验收后开始 |
 | P4 告警 | pending | 尚无运行中通知 | P3 验收后开始 |
@@ -109,3 +109,11 @@ P1 尚未开始：下一步按 docs/superpowers/plans/2026-09-08-p1-recorder.md 
 本轮 18 文件、188 测试通过，lint/typecheck/build/历史审计/diff 检查均退出 0；当前结果绑定源码 SHA256 快照，见 [验证记录](../artifacts/p0/acceptance-followup-validation.json)。历史归档审计另立入口并明确不验证当前源码，不覆盖原验收。配置版本升为 2026-09-08.p0-review2，为两枚 seed 加入归档真实相邻块提示；每次运行仍强制 RPC 验证这些界限。无新依赖，无本轮公共 RPC 采集。
 
 P1 未开始，仍从 Task 1.1 开始；未实现 store/follow/恢复，未执行远端 CI。
+
+## P1 验收记录 — 2026-09-08
+
+最终范围：SQLite 范围/有效集合、同块动态发现、分钟边界、重扫恢复、ingest/follow CLI 与预算/证据。273 个测试通过，typecheck/test/build/lint 退出 0；源码与构建 hash 绑定见 [验收汇总](../artifacts/p1/acceptance.json)。详细命令、失败历史、用量与限制见 [P1 报告](reviews/2026-09-08-p1-acceptance.md)。
+
+真实录制与重启：五分钟运行跨 5 个当时分钟边界；最终累计 650 条操作日志、30 个边界，全部操作日志的原始时间为 0x0，分钟已归桶、精确秒数保持 null。最终构建同 DB 重启退出 0，旧 100 块显式重扫退出 0且 added/removed/retimed 均为 0。首轮 max topics 失败和第二轮期限末段 incomplete 均保留；未误推进失败范围。P0 原证据未改。
+
+无新依赖，增加默认 maxFilterValues=1000 及 P1 专用预算/恢复配置；生产部署起点仍未验证，日志上限仍为 null，结果依赖 RPC 一致性且为 provisional。P2–P6 未开始；未启动永久服务、连接钱包或交易。当前改动在 feat/p1-recorder，尚未提交或推送。下一窗口经用户安排后读 P2 计划，从 Task 2.1 开始。

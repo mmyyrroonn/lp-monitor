@@ -58,6 +58,13 @@ const schema = z
     rpcPerSecond: z.number().positive().finite(),
     timeoutMs: z.number().int().positive().max(2147483647),
     maxRetries: z.number().int().min(0).max(2),
+    recorderMaxRpcCalls: z.number().int().positive().safe().default(10000),
+    maxConcurrentRpc: z.number().int().positive().max(16).default(2),
+    warmupMinutes: z.number().int().positive().safe().default(60),
+    checkpointRetentionMinutes: z.number().int().positive().safe().default(180),
+    discoveryMaxRangeBlocks: z.number().int().positive().safe().default(1000000),
+    maxFilterValues: z.number().int().positive().safe().default(1000),
+    maxLogsPerResponse: z.number().int().positive().safe().nullable().default(null),
   })
   .superRefine((value, context) => {
     const configured = new Set(value.v4PoolIds.map((id) => id.toLowerCase()));
