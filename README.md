@@ -1,4 +1,4 @@
-# Robinhood RWA monitor — P0/P1
+# Robinhood RWA monitor — P0/P1/P2
 
 只读数据采集与有界运行工具。阶段入口为 [START_HERE.md](START_HERE.md)，验收状态见 [实施状态](docs/implementation-status.md)。P1 记录器的实现与验收进度见阶段状态；分钟热度和提醒属于后续阶段。
 
@@ -74,7 +74,7 @@ P1 使用 `pollIntervalMs`、`overlapBlocks` 和 `config/watchlist.amc.json`。`
 
 ## P1 范围记录与恢复
 
-`ingest` 和 `follow` 使用 SQLite WAL 保存原始批次、分片、有效日志、独立 scope 游标、池登记、分钟证据与检查点。P1 提供记录与修订集合，后续 P2–P4 再接协议业务解码、热度和提醒。
+`ingest` 和 `follow` 使用 SQLite WAL 保存原始批次、分片、有效日志、独立 scope 游标、池登记、分钟证据与检查点。P1 提供记录与修订集合；P2 已提供离线协议解码与观测，P3–P4 再接热度和提醒。
 
 ```powershell
 pnpm lp ingest --config config/robinhood.json --from-block 100 --to-block 200
@@ -93,3 +93,22 @@ pnpm lp follow --config config/robinhood.json --duration 5m --db data/recorder.s
 `--evidence` 在 P1 默认 `sampled`；SQLite 和逐批 JSON 仍保存相关原始日志及完整分片 manifest，sampled 仅限定请求响应证据流。逐批记录明确区分“抓取完成”和“事务已提交”；运行 manifest 包含 scope、配置 hash、调用/字节/重试计数、端点与时间定位计数，以及时间失败窗口。未知供应商日志上限仍为 `null`，不把 HTTP 200 当成独立完整性证明。
 
 分钟归桶采用实际稀疏端点与 lower_bound 边界证据。日志时间为零时保留原文，未知秒数保持 `exactTimestampSec=null`；时间证据不足标 `unresolved`，原始日志照常记录。后续证据补齐会产生 `retimed`。所有结果仍是基于 RPC 一致性假设的 `provisional` 观察。
+
+## P2 离线协议投影与最近观测
+
+先有 P1 的真实录制数据库，再使用同一配置、watchlist 与数据库路径：
+
+```powershell
+pnpm lp project --db data/recorder.sqlite --rebuild
+pnpm lp inspect-pool --config config/robinhood.json --db data/recorder.sqlite --pool amc-usdg-v3
+```
+
+本机验收副本可直接使用 `--db data/p2-acceptance.sqlite`；`--db data/monitor.sqlite` 同样支持，但须先由 P1 录制或从已有库备份获得该文件。P2 不自动创建空录制库，不需要 RH_RPC_HTTP。
+
+`--pool` 支持 V3 地址、V4 PoolId 或完整 `4663:v4:<manager>:<poolId>` / `4663:v3:<address>`。AMC/USDG 别名只接受唯一的已登记、已配置 V3 交易对；存在多个匹配时请指定地址。`--watchlist` 默认 `config/watchlist.amc.json`。
+
+`project` 从 active_logs 全量重建该 scope 的事件与观测，并在同一事务保存处理游标。未知 topic、非法 data、零侧或同号 Swap 保存错误原文，存在质量错误返回 4。原始旧日志保留。重新录制或 retime 后，旧投影会被识别为过期；重新 project 后再 inspect。
+
+输出 price/tick/L 仅代表最后 Swap 事件的观测。之后发生 Burn 不推算当前 L；`currentPoolStateKnown=false`。分钟时间继续保留精确秒数 null，actor 不作为真实用户数。本阶段没有自动接入每个录制批次；全量重建和过期检查成本随保留历史增长。
+
+[P2 验收](docs/reviews/2026-09-08-p2-acceptance.md)记录 344 个测试、650 条真实历史事件的 ethers 对照、源库保护与限制。下一阶段 P3 由用户安排。

@@ -1,0 +1,13 @@
+{
+  "source": "data/p1-acceptance.sqlite",
+  "target": "data/p2-acceptance.sqlite",
+  "method": "SQLite online backup from read-only connection",
+  "at": "2026-09-08T13:11:09.225Z",
+  "counts": {
+    "raw_logs": 2477,
+    "active_logs": 2477,
+    "pools": 3654,
+    "scope_cursors": 2,
+    "log_times": 650
+  }
+}

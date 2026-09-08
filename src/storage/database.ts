@@ -2,19 +2,19 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 
-function loadMigration(): string {
+function loadMigration(name: string): string {
   try {
-    return readFileSync(new URL('./migrations/001-raw.sql', import.meta.url), 'utf8');
+    return readFileSync(new URL('./migrations/' + name, import.meta.url), 'utf8');
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
     return readFileSync(
-      new URL('../../../src/storage/migrations/001-raw.sql', import.meta.url),
+      new URL('../../../src/storage/migrations/' + name, import.meta.url),
       'utf8',
     );
   }
 }
 
-const migration = loadMigration();
+const migration = ['001-raw.sql', '002-projections.sql'].map(loadMigration).join('\n');
 
 export function openDatabase(path: string): Database.Database {
   if (path !== ':memory:') mkdirSync(dirname(resolve(path)), { recursive: true });

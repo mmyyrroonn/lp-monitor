@@ -1,0 +1,18 @@
+{
+  "status": "projected",
+  "version": "p2-v1",
+  "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+  "registryScopeId": "scope-v1-31c2bb795d5b913ca6ebf4ec7cef72201fbe2115f4c00a93abcdc0b62eea3794",
+  "configVersion": "2026-09-08.p0-review2",
+  "assetVersion": "2026-09-08.p0-seeds",
+  "sourceHash": "020acdd838f35648fbb5ff67aea138a098430610b6b37a991ec7fc4e1d23f435",
+  "at": {
+    "number": "57625255",
+    "hash": "0xc03ff86009711d4f95cd2dd255ef54e79dae617873a745221d1e7a70e390dfba",
+    "timestampSec": 1788863932
+  },
+  "events": 650,
+  "pools": 1827,
+  "qualityErrors": [],
+  "finality": "provisional"
+}

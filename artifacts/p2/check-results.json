@@ -1,0 +1,34 @@
+[
+  {
+    "command": "pnpm run typecheck",
+    "exitCode": 0,
+    "evidence": "artifacts/p2/checks/typecheck.log"
+  },
+  {
+    "command": "pnpm test --reporter=json --outputFile=artifacts/p2/tests.json",
+    "exitCode": 0,
+    "evidence": "artifacts/p2/checks/tests.log"
+  },
+  {
+    "command": "pnpm run build",
+    "exitCode": 0,
+    "evidence": "artifacts/p2/checks/build.log"
+  },
+  {
+    "command": "pnpm run lint",
+    "exitCode": 0,
+    "evidence": "artifacts/p2/checks/lint.log"
+  },
+  {
+    "command": "node dist/cli.js project --db data/p2-acceptance.sqlite --rebuild",
+    "exitCode": 0
+  },
+  {
+    "command": "node dist/cli.js inspect-pool --db data/p2-acceptance.sqlite --config config/robinhood.json --pool amc-usdg-v3",
+    "exitCode": 0
+  },
+  {
+    "command": "git diff --check",
+    "exitCode": 0
+  }
+]

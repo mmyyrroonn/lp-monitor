@@ -1,0 +1,30 @@
+{
+  "database": "data/p2-acceptance.sqlite",
+  "scope": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+  "registryScope": "scope-v1-31c2bb795d5b913ca6ebf4ec7cef72201fbe2115f4c00a93abcdc0b62eea3794",
+  "sourceHash": "020acdd838f35648fbb5ff67aea138a098430610b6b37a991ec7fc4e1d23f435",
+  "counts": {
+    "v4:Swap": 556,
+    "v3:Swap": 47,
+    "v4:ModifyLiquidity": 37,
+    "v3:Burn": 5,
+    "v3:Collect": 5
+  },
+  "activeLogs": 650,
+  "events": 650,
+  "registeredPools": 1827,
+  "observedPools": 29,
+  "qualityErrors": 0,
+  "exactSeconds": null,
+  "timing": "minute",
+  "sourceTables": {
+    "raw_logs": "b0a6bd2a58fc1ccb02e3490c6477179536bee153409b613919a4154e9c887544",
+    "active_logs": "979d89bcf46329b2dd02a2e79405a99726c19140ea1a2e2a3d2bdc3333b51c5c",
+    "log_times": "8e6bc08b08e934bb35aaf2f4cbc31d2786c3859e38b285b90119021c34966a21",
+    "pools": "80d1cc7316c6bf29cf63ec0c0b5a225b3b93b9186840b084b0a99905c29fd77e",
+    "scope_cursors": "ab52b7f6bcd63937306bb5767851abf8ad90159fde5222e3cafe72bd72072465",
+    "accepted_ranges": "a7d9f43184599e82a6cf47df418d7c9df1d71e50ef0b932520d05c4494b7de8d",
+    "minute_boundaries": "aeb722bdcf2b0e7c7891977b0a690b9718429637600a9ee685497093bd21fb92"
+  },
+  "independentDecoder": "ethers.Interface against fixed official ABI"
+}

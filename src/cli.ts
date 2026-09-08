@@ -11,7 +11,10 @@ import { saveJson, repositoryRelativePath } from './ops/files.js';
 import { CHAIN_ID } from './domain/chain.js';
 import { encodeJson } from './domain/json.js';
 
-const help = `Robinhood read-only P0/P1 CLI
+const help = `Robinhood read-only P0/P1/P2 CLI
+  pnpm lp project --db data/recorder.sqlite --rebuild
+  pnpm lp inspect-pool --db data/recorder.sqlite --pool amc-usdg-v3
+  P2 commands are offline; no RPC environment required.
   pnpm lp ingest --config config/robinhood.json --from-block N --to-block N
   pnpm lp follow --config config/robinhood.json --duration 10m
   P1: --db PATH --watchlist PATH --max-rpc-calls N (default 10000)
@@ -36,6 +39,14 @@ export async function runCli(
   ) {
     const { runRecorderCli } = await import('./ops/recorder-cli.js');
     return runRecorderCli(args, options);
+  }
+  if (
+    ['project', 'inspect-pool'].includes(args[0] ?? '') &&
+    !args.includes('--help') &&
+    !args.includes('-h')
+  ) {
+    const { runProjectionCli } = await import('./ops/projection-cli.js');
+    return runProjectionCli(args, options.environment ?? process.env);
   }
   let parsed: ReturnType<typeof parseArgs>;
   try {

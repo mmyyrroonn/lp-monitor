@@ -31,3 +31,6 @@ artifacts/**/requests.jsonl.*
 # Console streams are transient; retain manifests and test summaries instead.
 /artifacts/p1/live/*.stdout.txt
 /artifacts/p1/live/*.stderr.txt
+
+# Local agent task briefs and review scratch.
+.superpowers/

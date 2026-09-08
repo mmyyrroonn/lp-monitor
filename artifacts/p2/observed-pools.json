@@ -1,0 +1,1385 @@
+{
+  "sourceHash": "020acdd838f35648fbb5ff67aea138a098430610b6b37a991ec7fc4e1d23f435",
+  "at": {
+    "number": "57625255",
+    "hash": "0xc03ff86009711d4f95cd2dd255ef54e79dae617873a745221d1e7a70e390dfba",
+    "timestampSec": 1788863932
+  },
+  "observations": [
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v3",
+        "address": "0xaa34fea710a1a737840329051d81d3b0b7c564d5"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x4606746cd19fa8756e2bc200527ef59410abfafac886f3d7ba2dcdf48fec86a8",
+          "blockNumber": "57622196",
+          "transactionHash": "0x4cd8b56144fc050b4799ed9d10166b08d376a335327ad57e3fdeffd69d74bdcc",
+          "transactionIndex": 2,
+          "logIndex": 33
+        },
+        "time": {
+          "minuteStartSec": 1788863580,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v3",
+          "address": "0xaa34fea710a1a737840329051d81d3b0b7c564d5"
+        },
+        "kind": "swap",
+        "rawAmount0": "26983147391951457392",
+        "rawAmount1": "-70339739",
+        "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountIn": "26983147391951457392",
+        "tokenOut": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "amountOut": "70339739",
+        "sqrtPriceX96After": "128110782392564615880793",
+        "liquidityAfter": "23857459188709623349",
+        "tickAfter": -266713,
+        "effectiveSwapFeePips": 3000
+      },
+      "lastLiquidityAction": {
+        "ref": {
+          "blockHash": "0x0aded8bac62537ed8d22e583d744b85423ce7535e328462b6b3afb04ce0a5940",
+          "blockNumber": "57623196",
+          "transactionHash": "0xb6157e2af18fb3f5ed3e9c5978b6cb7d282288573d9f1e11e041926c0c923f50",
+          "transactionIndex": 2,
+          "logIndex": 18
+        },
+        "time": {
+          "minuteStartSec": 1788863700,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v3",
+          "address": "0xaa34fea710a1a737840329051d81d3b0b7c564d5"
+        },
+        "kind": "liquidity",
+        "tickLower": -267780,
+        "tickUpper": -265320,
+        "delta": "0",
+        "actor": "0x73991a25c818bf1f1128deaab1492d45638de0d3",
+        "salt": null
+      }
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v3",
+        "address": "0xcf38764ae8c92222af4358a701871a6235cfc7b7"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0xe4e9a5546fcdc5d949e2b31b15f46b2c250b13fd6955e05391b648496b7a76ad",
+          "blockNumber": "57622530",
+          "transactionHash": "0x9a2b406d3f383b34d5f35210ebb0a496c0bb48a5a94f416188bfb34983b33c05",
+          "transactionIndex": 7,
+          "logIndex": 22
+        },
+        "time": {
+          "minuteStartSec": 1788863640,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v3",
+          "address": "0xcf38764ae8c92222af4358a701871a6235cfc7b7"
+        },
+        "kind": "swap",
+        "rawAmount0": "-1175879652129271142",
+        "rawAmount1": "1252650325101963",
+        "tokenIn": "0x0bd7d308f8e1639fab988df18a8011f41eacad73",
+        "amountIn": "1252650325101963",
+        "tokenOut": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountOut": "1175879652129271142",
+        "sqrtPriceX96After": "2572948465061819916320116834",
+        "liquidityAfter": "19912310738958746160749",
+        "tickAfter": -68550,
+        "effectiveSwapFeePips": 10000
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x06b9732431bd134599dd112a93c708fe80cadd2fb7dc750fe632e1cbf49fd8c0"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x4983cde5587d0bc0ca134148f04793027175e8d9766212e604be3f592020597a",
+          "blockNumber": "57624533",
+          "transactionHash": "0xbee4a771c1d4513c23753976787e3e2a6d8e194b6eb6389e685558456b1becac",
+          "transactionIndex": 2,
+          "logIndex": 19
+        },
+        "time": {
+          "minuteStartSec": 1788863820,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x06b9732431bd134599dd112a93c708fe80cadd2fb7dc750fe632e1cbf49fd8c0"
+        },
+        "kind": "swap",
+        "rawAmount0": "7379780416433229256",
+        "rawAmount1": "-19315395",
+        "tokenIn": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "amountIn": "19315395",
+        "tokenOut": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountOut": "7379780416433229256",
+        "sqrtPriceX96After": "128136983477326749850976",
+        "liquidityAfter": "4288361025322448838",
+        "tickAfter": -266709,
+        "effectiveSwapFeePips": 625
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x0fbd4be474e818682b8586522600b6113204a75dedd60d89376e0fb7bcaa5adf"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0xaeb901888dbd71edc1895c6368a09033581d860b292351bb709520fc1c0bdb2f",
+          "blockNumber": "57622854",
+          "transactionHash": "0xfda19d65e568455af524e5c1a0a902383955c0697d363a150c18dadf7a571a7d",
+          "transactionIndex": 1,
+          "logIndex": 22
+        },
+        "time": {
+          "minuteStartSec": 1788863640,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x0fbd4be474e818682b8586522600b6113204a75dedd60d89376e0fb7bcaa5adf"
+        },
+        "kind": "swap",
+        "rawAmount0": "116307976534627371",
+        "rawAmount1": "-4621866564677884550319",
+        "tokenIn": "0xe0514a254b465c8c804f77230fb1059f84b21e18",
+        "amountIn": "4621866564677884550319",
+        "tokenOut": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountOut": "116307976534627371",
+        "sqrtPriceX96After": "15738420627767643757749547706391",
+        "liquidityAfter": "1678635283933862727045022",
+        "tickAfter": 105835,
+        "effectiveSwapFeePips": 7000
+      },
+      "lastLiquidityAction": {
+        "ref": {
+          "blockHash": "0xaeb901888dbd71edc1895c6368a09033581d860b292351bb709520fc1c0bdb2f",
+          "blockNumber": "57622854",
+          "transactionHash": "0xfda19d65e568455af524e5c1a0a902383955c0697d363a150c18dadf7a571a7d",
+          "transactionIndex": 1,
+          "logIndex": 27
+        },
+        "time": {
+          "minuteStartSec": 1788863640,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x0fbd4be474e818682b8586522600b6113204a75dedd60d89376e0fb7bcaa5adf"
+        },
+        "kind": "liquidity",
+        "tickLower": -887272,
+        "tickUpper": 887272,
+        "delta": "23102606817417307879",
+        "actor": "0x6f02324d20cc679d0e585290caa6b16bacbc0f77",
+        "salt": "0x5984961d9d5c754f2cdf032d6ce3c8498fdbed8cb848a2300565a4ed0129f3b5"
+      }
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x0fd15ad10bf82a676c187e9ef09c1a814df213a1e6ea42e9a59d03f6f7b91736"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x1199181f8e02ab7f23a1d1edb251c4d7ebcc5a3a3dde8c3b20e2b7657d7a8504",
+          "blockNumber": "57612724",
+          "transactionHash": "0x03fc78001f045fdadc7870f531ed63168339965e00bc3f2eba4989d2943ef0d0",
+          "transactionIndex": 7,
+          "logIndex": 75
+        },
+        "time": {
+          "minuteStartSec": 1788862620,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x0fd15ad10bf82a676c187e9ef09c1a814df213a1e6ea42e9a59d03f6f7b91736"
+        },
+        "kind": "swap",
+        "rawAmount0": "15027071195202886822",
+        "rawAmount1": "-2201326798624026781675819",
+        "tokenIn": "0x64ee81557b0a4fd8ac2ef80b1030c0e5f43f1501",
+        "amountIn": "2201326798624026781675819",
+        "tokenOut": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountOut": "15027071195202886822",
+        "sqrtPriceX96After": "30394776843213570777454016991918",
+        "liquidityAfter": "1231324299740620319980988",
+        "tickAfter": 118999,
+        "effectiveSwapFeePips": 0
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x226082f4e1edbae611425c9474301500f29e7b7c65d6cfc618ae0bc8ab258774"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x0a7e56ca9bf82734da4ee53c0ed8b42dbec4a911c185a56f878c3922c51b12b9",
+          "blockNumber": "57624566",
+          "transactionHash": "0x2e8a9bea4266821ae4dae703cbf1d742d41bb95ab2f31d14e04195bfa7fe8711",
+          "transactionIndex": 1,
+          "logIndex": 10
+        },
+        "time": {
+          "minuteStartSec": 1788863820,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x226082f4e1edbae611425c9474301500f29e7b7c65d6cfc618ae0bc8ab258774"
+        },
+        "kind": "swap",
+        "rawAmount0": "-2327890798157746976",
+        "rawAmount1": "6093630",
+        "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountIn": "2327890798157746976",
+        "tokenOut": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "amountOut": "6093630",
+        "sqrtPriceX96After": "128246492946532164913329",
+        "liquidityAfter": "45726807521936650",
+        "tickAfter": -266692,
+        "effectiveSwapFeePips": 1045
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x27ccf0a6d1ee74840220715bcca7d3b01e0d33aa30d0259b47ae1585b3f4c071"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x0bac2b63019eb1e13bc8f8549acc109bebeb9e1ef2922c7b41faf8570e5f891f",
+          "blockNumber": "57623532",
+          "transactionHash": "0xe1607e1151affb01f9a1cfca912d3f903999cb5837c8cbcc4a6e9090f80f74aa",
+          "transactionIndex": 3,
+          "logIndex": 20
+        },
+        "time": {
+          "minuteStartSec": 1788863700,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x27ccf0a6d1ee74840220715bcca7d3b01e0d33aa30d0259b47ae1585b3f4c071"
+        },
+        "kind": "swap",
+        "rawAmount0": "-6529570342044902",
+        "rawAmount1": "181301853708189222",
+        "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountIn": "6529570342044902",
+        "tokenOut": "0x385f4f8ae47651ce5f58f5265395a669f8281e18",
+        "amountOut": "181301853708189222",
+        "sqrtPriceX96After": "417691519024502236922919958244",
+        "liquidityAfter": "3368868322176983180846639",
+        "tickAfter": 33249,
+        "effectiveSwapFeePips": 1000
+      },
+      "lastLiquidityAction": {
+        "ref": {
+          "blockHash": "0x0bac2b63019eb1e13bc8f8549acc109bebeb9e1ef2922c7b41faf8570e5f891f",
+          "blockNumber": "57623532",
+          "transactionHash": "0xe1607e1151affb01f9a1cfca912d3f903999cb5837c8cbcc4a6e9090f80f74aa",
+          "transactionIndex": 3,
+          "logIndex": 25
+        },
+        "time": {
+          "minuteStartSec": 1788863700,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x27ccf0a6d1ee74840220715bcca7d3b01e0d33aa30d0259b47ae1585b3f4c071"
+        },
+        "kind": "liquidity",
+        "tickLower": -887272,
+        "tickUpper": 887272,
+        "delta": "34389524506690244",
+        "actor": "0x6f02324d20cc679d0e585290caa6b16bacbc0f77",
+        "salt": "0x54cb2b3e911d42618e9afd245690ab56cbf918787784346726608f4e3d7f753b"
+      }
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x42f09da197350b85680414ccf459b4fe970f59f39e5489c5d2934258db337197"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x2e76b42bc40aa0affdf77240f86d7f750657712296c79644e9f5cd54c1f10506",
+          "blockNumber": "57618523",
+          "transactionHash": "0xb3886b0982b60e4e50a7000bc3a9bcf1de6d398d13c0d2919052f9fb7d1d2062",
+          "transactionIndex": 12,
+          "logIndex": 55
+        },
+        "time": {
+          "minuteStartSec": 1788863220,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x42f09da197350b85680414ccf459b4fe970f59f39e5489c5d2934258db337197"
+        },
+        "kind": "swap",
+        "rawAmount0": "-10245539530153473",
+        "rawAmount1": "1030932235515205995559",
+        "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountIn": "10245539530153473",
+        "tokenOut": "0x609bc137331708e088aca9d2278796de024b1e18",
+        "amountOut": "1030932235515205995559",
+        "sqrtPriceX96After": "25144565174290444664081578559735",
+        "liquidityAfter": "1998355332073110452115186",
+        "tickAfter": 115207,
+        "effectiveSwapFeePips": 1000
+      },
+      "lastLiquidityAction": {
+        "ref": {
+          "blockHash": "0x2e76b42bc40aa0affdf77240f86d7f750657712296c79644e9f5cd54c1f10506",
+          "blockNumber": "57618523",
+          "transactionHash": "0xb3886b0982b60e4e50a7000bc3a9bcf1de6d398d13c0d2919052f9fb7d1d2062",
+          "transactionIndex": 12,
+          "logIndex": 60
+        },
+        "time": {
+          "minuteStartSec": 1788863220,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x42f09da197350b85680414ccf459b4fe970f59f39e5489c5d2934258db337197"
+        },
+        "kind": "liquidity",
+        "tickLower": -887272,
+        "tickUpper": 887272,
+        "delta": "3248370617285787921",
+        "actor": "0x6f02324d20cc679d0e585290caa6b16bacbc0f77",
+        "salt": "0xcc217e6a86dd58763fff97535e613386ab6883909688b8faa6f3604e444190a6"
+      }
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x44affed87ca544bd394fb11441242ff41cf3c475cb5f8dd4126f44662cb49e7e"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x6927b0d2c09a64914ea9b6b031e10b9d3215b7efc9f31e7faeac0be2f30a241b",
+          "blockNumber": "57621021",
+          "transactionHash": "0x10f3cc1477504181af70e3b6f0cf4b3fd42e416caa15c2a2b97b9955184f0e19",
+          "transactionIndex": 4,
+          "logIndex": 84
+        },
+        "time": {
+          "minuteStartSec": 1788863460,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x44affed87ca544bd394fb11441242ff41cf3c475cb5f8dd4126f44662cb49e7e"
+        },
+        "kind": "swap",
+        "rawAmount0": "-46851523977935405",
+        "rawAmount1": "5719389487969635172461",
+        "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountIn": "46851523977935405",
+        "tokenOut": "0xe99e17844bfc7cfbd6e55ac05224fac59ae41e18",
+        "amountOut": "5719389487969635172461",
+        "sqrtPriceX96After": "27695456184080386769635334024488",
+        "liquidityAfter": "2749887182567906560714137",
+        "tickAfter": 117139,
+        "effectiveSwapFeePips": 1000
+      },
+      "lastLiquidityAction": {
+        "ref": {
+          "blockHash": "0x6927b0d2c09a64914ea9b6b031e10b9d3215b7efc9f31e7faeac0be2f30a241b",
+          "blockNumber": "57621021",
+          "transactionHash": "0x10f3cc1477504181af70e3b6f0cf4b3fd42e416caa15c2a2b97b9955184f0e19",
+          "transactionIndex": 4,
+          "logIndex": 89
+        },
+        "time": {
+          "minuteStartSec": 1788863460,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x44affed87ca544bd394fb11441242ff41cf3c475cb5f8dd4126f44662cb49e7e"
+        },
+        "kind": "liquidity",
+        "tickLower": -887272,
+        "tickUpper": 887272,
+        "delta": "16361410219186087123",
+        "actor": "0x6f02324d20cc679d0e585290caa6b16bacbc0f77",
+        "salt": "0x8149acab46686a03664a1890aa9a161c6357016d6bfdfe304885a764b9463ee6"
+      }
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x5822b4625224ee4e8daedfd977476e55f0f5ca023502c25dec69c058f639762f"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0xc0dd45dddbb0087c4ed14fe2fcef4b36781a6f5def4c4373d64f5d12c27ac1e0",
+          "blockNumber": "57616383",
+          "transactionHash": "0x03b1f0298e035522a58746ead0b67859100d515014b608c40c8ebcb6c642f350",
+          "transactionIndex": 6,
+          "logIndex": 39
+        },
+        "time": {
+          "minuteStartSec": 1788862980,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x5822b4625224ee4e8daedfd977476e55f0f5ca023502c25dec69c058f639762f"
+        },
+        "kind": "swap",
+        "rawAmount0": "13112656775167209418",
+        "rawAmount1": "-34352681",
+        "tokenIn": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "amountIn": "34352681",
+        "tokenOut": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountOut": "13112656775167209418",
+        "sqrtPriceX96After": "128113003336325675660807",
+        "liquidityAfter": "37665221718904854",
+        "tickAfter": -266712,
+        "effectiveSwapFeePips": 2500
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x592b43d2cca216f6b95b917a2a097464498c34816def99f3ccf2be7f88f45ef5"
+      },
+      "lastSwap": null,
+      "lastLiquidityAction": {
+        "ref": {
+          "blockHash": "0xf0acbc5bdadcdc1e98c1b2374885301ac051ac7cddeef7007e465789be96553d",
+          "blockNumber": "57619173",
+          "transactionHash": "0xc3dc978b7a1918f8ddbd9836c16b5da387374f54ac9f86c06ef7191639348d24",
+          "transactionIndex": 1,
+          "logIndex": 0
+        },
+        "time": {
+          "minuteStartSec": 1788863280,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x592b43d2cca216f6b95b917a2a097464498c34816def99f3ccf2be7f88f45ef5"
+        },
+        "kind": "liquidity",
+        "tickLower": -267600,
+        "tickUpper": -239400,
+        "delta": "-12118934896188039",
+        "actor": "0x58daec3116aae6d93017baaea7749052e8a04fa7",
+        "salt": "0x00000000000000000000000000000000000000000000000000000000001b883b"
+      }
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x639247ff9c6284c1bef67a76884bac0938ad2d2bb1062bc15503344cb2cead95"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0xe4e24ae75b981aabcf8a524eb402a4e03b3c699fcd4fbb3fdda3b8c1a0401ba1",
+          "blockNumber": "57622536",
+          "transactionHash": "0x474435978cf8742bc5c6da03e197034abb2bbd97abc0182b06ee20f72ae55702",
+          "transactionIndex": 7,
+          "logIndex": 34
+        },
+        "time": {
+          "minuteStartSec": 1788863640,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x639247ff9c6284c1bef67a76884bac0938ad2d2bb1062bc15503344cb2cead95"
+        },
+        "kind": "swap",
+        "rawAmount0": "-474321264655753932",
+        "rawAmount1": "1241108",
+        "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountIn": "474321264655753932",
+        "tokenOut": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "amountOut": "1241108",
+        "sqrtPriceX96After": "128156208400112966644027",
+        "liquidityAfter": "19732715872583255",
+        "tickAfter": -266706,
+        "effectiveSwapFeePips": 0
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x709bbc02697360d9eaaa98ba047478baee1e567f92b6ce40fa674e3a389cfc7c"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x4983cde5587d0bc0ca134148f04793027175e8d9766212e604be3f592020597a",
+          "blockNumber": "57624533",
+          "transactionHash": "0xbee4a771c1d4513c23753976787e3e2a6d8e194b6eb6389e685558456b1becac",
+          "transactionIndex": 2,
+          "logIndex": 23
+        },
+        "time": {
+          "minuteStartSec": 1788863820,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x709bbc02697360d9eaaa98ba047478baee1e567f92b6ce40fa674e3a389cfc7c"
+        },
+        "kind": "swap",
+        "rawAmount0": "-7379780416433229256",
+        "rawAmount1": "90194198704851096095895",
+        "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountIn": "7379780416433229256",
+        "tokenOut": "0xd7fe759504e6009d85a91e18b5b0d7ff64279266",
+        "amountOut": "90194198704851096095895",
+        "sqrtPriceX96After": "8754816435272882533546131803988",
+        "liquidityAfter": "885260792200307818399060",
+        "tickAfter": 94105,
+        "effectiveSwapFeePips": 0
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x7499938c352d5b5b8f0c648722aca5ee964ef9b85c3a3041f1ec379726291d9d"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x145ba7f506e4ae88261fdc38405dfe4e621c7f379092f3c43420729abb696d4e",
+          "blockNumber": "57624937",
+          "transactionHash": "0x60be5ddd927e6debda876c1029163e5b06add5d978021efa109b754c2956d3c7",
+          "transactionIndex": 4,
+          "logIndex": 21
+        },
+        "time": {
+          "minuteStartSec": 1788863880,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x7499938c352d5b5b8f0c648722aca5ee964ef9b85c3a3041f1ec379726291d9d"
+        },
+        "kind": "swap",
+        "rawAmount0": "-12782150069542311211",
+        "rawAmount1": "33411578",
+        "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountIn": "12782150069542311211",
+        "tokenOut": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "amountOut": "33411578",
+        "sqrtPriceX96After": "128169602847895902943074",
+        "liquidityAfter": "15131123559042628722",
+        "tickAfter": -266704,
+        "effectiveSwapFeePips": 1193
+      },
+      "lastLiquidityAction": {
+        "ref": {
+          "blockHash": "0x19ba3b6410e0a04e6c2a881decb03a599e4abad90585f45f4884abc2b3a17aea",
+          "blockNumber": "57615305",
+          "transactionHash": "0x2e1506af8ac951f272e448078bf3e91fc0dbc9c2a309d4fa049988d622c841a1",
+          "transactionIndex": 9,
+          "logIndex": 9
+        },
+        "time": {
+          "minuteStartSec": 1788862920,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x7499938c352d5b5b8f0c648722aca5ee964ef9b85c3a3041f1ec379726291d9d"
+        },
+        "kind": "liquidity",
+        "tickLower": -266790,
+        "tickUpper": -266430,
+        "delta": "502055453058407",
+        "actor": "0x58daec3116aae6d93017baaea7749052e8a04fa7",
+        "salt": "0x000000000000000000000000000000000000000000000000000000000021084f"
+      }
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x862e2036b0bef113cb46bddc6902d1347e88ffa7c873c3df8498c244dbfaf384"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0xadb8a1568b652ddf6166b1e79a1bb65add9e588bce7ae421b7da7f10345a2fe9",
+          "blockNumber": "57618160",
+          "transactionHash": "0x1989ba3ede8582b49747995c5c0c438b622aa33c06ba3eaf774c87af44c496c1",
+          "transactionIndex": 9,
+          "logIndex": 80
+        },
+        "time": {
+          "minuteStartSec": 1788863160,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x862e2036b0bef113cb46bddc6902d1347e88ffa7c873c3df8498c244dbfaf384"
+        },
+        "kind": "swap",
+        "rawAmount0": "176304411141067581",
+        "rawAmount1": "-13507432403749318328175",
+        "tokenIn": "0x5e857cb15616b907db0999940ef76a2ce6061e18",
+        "amountIn": "13507432403749318328175",
+        "tokenOut": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountOut": "176304411141067581",
+        "sqrtPriceX96After": "21853088168361913355525701664106",
+        "liquidityAfter": "2780457548747086530158655",
+        "tickAfter": 112400,
+        "effectiveSwapFeePips": 7000
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x95e973ce6d44f80f7584639f6b301f5fe88d89fc78f69fcdc17d7727f195aa91"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x9c8681ed329957f22010aea496e882d0620122a599f7537e58966d9cce5d8496",
+          "blockNumber": "57619421",
+          "transactionHash": "0x491b89dd436e3c1ee5f0660d14087b1920d3b99f1bbe8b204a87116b39b01c1f",
+          "transactionIndex": 5,
+          "logIndex": 21
+        },
+        "time": {
+          "minuteStartSec": 1788863340,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x95e973ce6d44f80f7584639f6b301f5fe88d89fc78f69fcdc17d7727f195aa91"
+        },
+        "kind": "swap",
+        "rawAmount0": "908344998547166476",
+        "rawAmount1": "-2380927",
+        "tokenIn": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "amountIn": "2380927",
+        "tokenOut": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountOut": "908344998547166476",
+        "sqrtPriceX96After": "128284388949828661248608",
+        "liquidityAfter": "4432067283728042",
+        "tickAfter": -266686,
+        "effectiveSwapFeePips": 117
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x98a9c9bbbcc96f0c23e9d156f5dec39230bbfaccea244610bc6c6749d0755929"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x145ba7f506e4ae88261fdc38405dfe4e621c7f379092f3c43420729abb696d4e",
+          "blockNumber": "57624937",
+          "transactionHash": "0x60be5ddd927e6debda876c1029163e5b06add5d978021efa109b754c2956d3c7",
+          "transactionIndex": 4,
+          "logIndex": 20
+        },
+        "time": {
+          "minuteStartSec": 1788863880,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x98a9c9bbbcc96f0c23e9d156f5dec39230bbfaccea244610bc6c6749d0755929"
+        },
+        "kind": "swap",
+        "rawAmount0": "12782150069542311211",
+        "rawAmount1": "-466038667782956002777001",
+        "tokenIn": "0xe4902ea6a8a05f09f14032f837b50fa374dc3261",
+        "amountIn": "466038667782956002777001",
+        "tokenOut": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountOut": "12782150069542311211",
+        "sqrtPriceX96After": "15084609227732344261942299438900",
+        "liquidityAfter": "568330067561003002795455",
+        "tickAfter": 104987,
+        "effectiveSwapFeePips": 10000
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x9bfe900c6d40151fe3ad56538869e8aa8b517ace96ab274554b878352a6894a0"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0xe85a24c3d58d803e268af36fd583c5a407420f58f6b6dca53675913d54125489",
+          "blockNumber": "57614823",
+          "transactionHash": "0x9dfe51d583ea7e8b9304b33afe1e3a341c10f5ea1c1152bb424e28c5e65b131e",
+          "transactionIndex": 6,
+          "logIndex": 44
+        },
+        "time": {
+          "minuteStartSec": 1788862860,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x9bfe900c6d40151fe3ad56538869e8aa8b517ace96ab274554b878352a6894a0"
+        },
+        "kind": "swap",
+        "rawAmount0": "-15535568986023962",
+        "rawAmount1": "569545771638002883364",
+        "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountIn": "15535568986023962",
+        "tokenOut": "0xcb6f4711e9af0e22cf0be5a15b9333f8c03d1e18",
+        "amountOut": "569545771638002883364",
+        "sqrtPriceX96After": "15177399020422950423246095801156",
+        "liquidityAfter": "2912818964747025510209654",
+        "tickAfter": 105109,
+        "effectiveSwapFeePips": 1000
+      },
+      "lastLiquidityAction": {
+        "ref": {
+          "blockHash": "0xe85a24c3d58d803e268af36fd583c5a407420f58f6b6dca53675913d54125489",
+          "blockNumber": "57614823",
+          "transactionHash": "0x9dfe51d583ea7e8b9304b33afe1e3a341c10f5ea1c1152bb424e28c5e65b131e",
+          "transactionIndex": 6,
+          "logIndex": 49
+        },
+        "time": {
+          "minuteStartSec": 1788862860,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x9bfe900c6d40151fe3ad56538869e8aa8b517ace96ab274554b878352a6894a0"
+        },
+        "kind": "liquidity",
+        "tickLower": -887272,
+        "tickUpper": 887272,
+        "delta": "2973109219433983028",
+        "actor": "0x6f02324d20cc679d0e585290caa6b16bacbc0f77",
+        "salt": "0xf8e49999ed17552533b6debc8f3f43d992f3fd2f0cc1d2491621def5bb98fb14"
+      }
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x9c771f6020f77382b726f0b770a87d43c1de6f0b2229c741065577e5488363f8"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x6927b0d2c09a64914ea9b6b031e10b9d3215b7efc9f31e7faeac0be2f30a241b",
+          "blockNumber": "57621021",
+          "transactionHash": "0xc59d73c2426c1594ac958e9c83a1151d09f5087acf56a73f6b9eb41263e36c78",
+          "transactionIndex": 1,
+          "logIndex": 11
+        },
+        "time": {
+          "minuteStartSec": 1788863460,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0x9c771f6020f77382b726f0b770a87d43c1de6f0b2229c741065577e5488363f8"
+        },
+        "kind": "swap",
+        "rawAmount0": "-28193172350103833724",
+        "rawAmount1": "6768858306296230471634224",
+        "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountIn": "28193172350103833724",
+        "tokenOut": "0xe51aa1200d170b42a67fb425e982741726412604",
+        "amountOut": "6768858306296230471634224",
+        "sqrtPriceX96After": "38778900911878608686569022643448",
+        "liquidityAfter": "1125350740444569635487847",
+        "tickAfter": 123872,
+        "effectiveSwapFeePips": 10000
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0xa4eb752439830dfea091b1a99a0734fbe083d6ccacf5d6234cba5d4932fbc57c"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x0a7e56ca9bf82734da4ee53c0ed8b42dbec4a911c185a56f878c3922c51b12b9",
+          "blockNumber": "57624566",
+          "transactionHash": "0x2e8a9bea4266821ae4dae703cbf1d742d41bb95ab2f31d14e04195bfa7fe8711",
+          "transactionIndex": 1,
+          "logIndex": 6
+        },
+        "time": {
+          "minuteStartSec": 1788863820,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0xa4eb752439830dfea091b1a99a0734fbe083d6ccacf5d6234cba5d4932fbc57c"
+        },
+        "kind": "swap",
+        "rawAmount0": "2327890798157746976",
+        "rawAmount1": "-20852171193460315426055",
+        "tokenIn": "0xfeaf46c2661002dd1402221b08468b276a8e0863",
+        "amountIn": "20852171193460315426055",
+        "tokenOut": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountOut": "2327890798157746976",
+        "sqrtPriceX96After": "7483800809199567457911716502948",
+        "liquidityAfter": "35825716020515613089303",
+        "tickAfter": 90967,
+        "effectiveSwapFeePips": 9991
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0xcb1fe4ae3b4ffe335e58693935def25f178067ac7d4dba86fa0d574eca77a992"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0xd652d73b435dd3090513bfc526fbdef884c64cdb60228876a7fc5a088c2db38d",
+          "blockNumber": "57621768",
+          "transactionHash": "0x042eb50bb6c0583c1c0a66e48b155f23688ddf44e3616ecc3b9318d8ee246d21",
+          "transactionIndex": 2,
+          "logIndex": 8
+        },
+        "time": {
+          "minuteStartSec": 1788863580,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0xcb1fe4ae3b4ffe335e58693935def25f178067ac7d4dba86fa0d574eca77a992"
+        },
+        "kind": "swap",
+        "rawAmount0": "-1459526114364900211",
+        "rawAmount1": "6189806332410223823783",
+        "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountIn": "1459526114364900211",
+        "tokenOut": "0x9936403a9cc72cf306063e3496ea387428a3aecd",
+        "amountOut": "6189806332410223823783",
+        "sqrtPriceX96After": "5182398517183066092989245857644",
+        "liquidityAfter": "78441557926527017925086",
+        "tickAfter": 83618,
+        "effectiveSwapFeePips": 9991
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0xcba7969262c588b79c292ebeddc3222584d3047deafcb86476653ca690a8b751"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x6f35fb23cbf4eb1707fa82bb016af83b6d2f93169ee999e11544e5f6952f890e",
+          "blockNumber": "57611091",
+          "transactionHash": "0x47f5d0df0e7e7a3213f7a65feb3639b679bd3428a8b85907546f891e374266ff",
+          "transactionIndex": 6,
+          "logIndex": 42
+        },
+        "time": {
+          "minuteStartSec": 1788862500,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0xcba7969262c588b79c292ebeddc3222584d3047deafcb86476653ca690a8b751"
+        },
+        "kind": "swap",
+        "rawAmount0": "1757423220635233609",
+        "rawAmount1": "-1108819361216474848392210",
+        "tokenIn": "0x4053929aeef75621d67749711b9867286e9ebc01",
+        "amountIn": "1108819361216474848392210",
+        "tokenOut": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountOut": "1757423220635233609",
+        "sqrtPriceX96After": "62967722075217673432317816523267",
+        "liquidityAfter": "1231324299740620319980988",
+        "tickAfter": 133567,
+        "effectiveSwapFeePips": 0
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0xcd0cee5a7e3772abfca4ba66feb86462a4a65fe4829e98a8d40efe7c48da87fa"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0xe97d040525f012f8a27cb689d918cbc12422d8378309cf44672d914a7167b4c7",
+          "blockNumber": "57619679",
+          "transactionHash": "0xba727974579aeca3c4b0acb998cd0f09c51187146cefd072e4a2527f8a8046b0",
+          "transactionIndex": 2,
+          "logIndex": 13
+        },
+        "time": {
+          "minuteStartSec": 1788863340,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0xcd0cee5a7e3772abfca4ba66feb86462a4a65fe4829e98a8d40efe7c48da87fa"
+        },
+        "kind": "swap",
+        "rawAmount0": "-110189813371954919",
+        "rawAmount1": "6802680854331972885467",
+        "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountIn": "110189813371954919",
+        "tokenOut": "0xf690dbb1228c9b65aaf8c31e379b00d3401a1e18",
+        "amountOut": "6802680854331972885467",
+        "sqrtPriceX96After": "19695366884646319737597497700624",
+        "liquidityAfter": "2844580357862599784853968",
+        "tickAfter": 110321,
+        "effectiveSwapFeePips": 1000
+      },
+      "lastLiquidityAction": {
+        "ref": {
+          "blockHash": "0xe97d040525f012f8a27cb689d918cbc12422d8378309cf44672d914a7167b4c7",
+          "blockNumber": "57619679",
+          "transactionHash": "0xba727974579aeca3c4b0acb998cd0f09c51187146cefd072e4a2527f8a8046b0",
+          "transactionIndex": 2,
+          "logIndex": 18
+        },
+        "time": {
+          "minuteStartSec": 1788863340,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0xcd0cee5a7e3772abfca4ba66feb86462a4a65fe4829e98a8d40efe7c48da87fa"
+        },
+        "kind": "liquidity",
+        "tickLower": -887272,
+        "tickUpper": 887272,
+        "delta": "27365009619589352308",
+        "actor": "0x6f02324d20cc679d0e585290caa6b16bacbc0f77",
+        "salt": "0x57fcc33544d58569fae81aae82804503725e6e5973a7ba9d11a8816f7ffa037c"
+      }
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0xe027213cccdf39ae2dddd0674df4597ca2c5cc7655b8e1467b7c033277273fd3"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0xe2092315d0053d06944df608ff45fb75a11f45a59e93c21152d3919dad801cdf",
+          "blockNumber": "57610656",
+          "transactionHash": "0x1e626b13cc5f2bc512b675270fd6c28ce4e35357b574f15ee1ceb77864ffec47",
+          "transactionIndex": 2,
+          "logIndex": 21
+        },
+        "time": {
+          "minuteStartSec": 1788862440,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0xe027213cccdf39ae2dddd0674df4597ca2c5cc7655b8e1467b7c033277273fd3"
+        },
+        "kind": "swap",
+        "rawAmount0": "-1605903266276952",
+        "rawAmount1": "134142294168506200450",
+        "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountIn": "1605903266276952",
+        "tokenOut": "0x804b4c5d23a6b144f5f1afe696c414fea1081e18",
+        "amountOut": "134142294168506200450",
+        "sqrtPriceX96After": "22909730378204036516431857316929",
+        "liquidityAfter": "2825599339881148172444594",
+        "tickAfter": 113345,
+        "effectiveSwapFeePips": 1000
+      },
+      "lastLiquidityAction": {
+        "ref": {
+          "blockHash": "0xe2092315d0053d06944df608ff45fb75a11f45a59e93c21152d3919dad801cdf",
+          "blockNumber": "57610656",
+          "transactionHash": "0x1e626b13cc5f2bc512b675270fd6c28ce4e35357b574f15ee1ceb77864ffec47",
+          "transactionIndex": 2,
+          "logIndex": 26
+        },
+        "time": {
+          "minuteStartSec": 1788862440,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0xe027213cccdf39ae2dddd0674df4597ca2c5cc7655b8e1467b7c033277273fd3"
+        },
+        "kind": "liquidity",
+        "tickLower": -887272,
+        "tickUpper": 887272,
+        "delta": "463901028382675008",
+        "actor": "0x6f02324d20cc679d0e585290caa6b16bacbc0f77",
+        "salt": "0x810979118d08c3c80c97ae1d46c32da0b271bd99a8be13f6484db037420e6426"
+      }
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0xe1e66a941071a44635384922e2e1d282158b35afdf4b292fc200e95ab228b6e5"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x78746a8bfc56c6e98633d4d8e1715b91bdef8969ed88fd6ee558737a8509b1e7",
+          "blockNumber": "57624222",
+          "transactionHash": "0xc7d095bf86eecf33c982a1db7890fca820b5069559c970e82fe431eaf21708da",
+          "transactionIndex": 3,
+          "logIndex": 20
+        },
+        "time": {
+          "minuteStartSec": 1788863820,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0xe1e66a941071a44635384922e2e1d282158b35afdf4b292fc200e95ab228b6e5"
+        },
+        "kind": "swap",
+        "rawAmount0": "86741288851425843428",
+        "rawAmount1": "-10091779308530712525743",
+        "tokenIn": "0xab093def657f15df31b33922a95e047add645b29",
+        "amountIn": "10091779308530712525743",
+        "tokenOut": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountOut": "86741288851425843428",
+        "sqrtPriceX96After": "851819739669528520356645576032",
+        "liquidityAfter": "259961918538511155622669",
+        "tickAfter": 47503,
+        "effectiveSwapFeePips": 9991
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0xe362a76f2687e5e1b5933e79192a0fe5232df09c44c3554f769a75d363b417b6"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x8d161857c3a5bbf57a86b86464e6d39fe2316c6bd06c63ee59214548adc18d5d",
+          "blockNumber": "57616308",
+          "transactionHash": "0xee3572a94c2e90a8b3a5da3564373bf6f354e5eb632078b181d4a5cff169323e",
+          "transactionIndex": 2,
+          "logIndex": 8
+        },
+        "time": {
+          "minuteStartSec": 1788862980,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0xe362a76f2687e5e1b5933e79192a0fe5232df09c44c3554f769a75d363b417b6"
+        },
+        "kind": "swap",
+        "rawAmount0": "2807193284925542835",
+        "rawAmount1": "-390017358107329169457152",
+        "tokenIn": "0xeb11080bda0b0ec4799c0bc0c5bacfda19f71b01",
+        "amountIn": "390017358107329169457152",
+        "tokenOut": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountOut": "2807193284925542835",
+        "sqrtPriceX96After": "29544042587799581721714122137708",
+        "liquidityAfter": "1231324299740620319980988",
+        "tickAfter": 118432,
+        "effectiveSwapFeePips": 0
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0xeb5051aaed55c0ac4181a366ccf34c4f1951a8dac7090c4419f4c97e1f284173"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0xaabaf08740dfa39b91268a09f5bc0d9eec26bccde8da0e976b17e2e993e76a8c",
+          "blockNumber": "57620520",
+          "transactionHash": "0x367ad77b2bcb3a68094df162e760956a804d08e22429ebce4bd4a295b4f62210",
+          "transactionIndex": 1,
+          "logIndex": 10
+        },
+        "time": {
+          "minuteStartSec": 1788863400,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0xeb5051aaed55c0ac4181a366ccf34c4f1951a8dac7090c4419f4c97e1f284173"
+        },
+        "kind": "swap",
+        "rawAmount0": "-28875126583441245528",
+        "rawAmount1": "4397782297655045971076322",
+        "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountIn": "28875126583441245528",
+        "tokenOut": "0x136dea0e15971e38e1d98ad8f642dd1d14e05f01",
+        "amountOut": "4397782297655045971076322",
+        "sqrtPriceX96After": "30778483541021109772488766964220",
+        "liquidityAfter": "1231324299740620319980988",
+        "tickAfter": 119250,
+        "effectiveSwapFeePips": 0
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0xf452715675de947f6b7cfba359f9e1d9f8eb42cba54a5e7275a12bf31487bf53"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0x0267029ce4dbdf2a060b820134497376d30e24c1fa014cf3a23b0e2d42981a30",
+          "blockNumber": "57624560",
+          "transactionHash": "0xd2a55627711670fa1790acf6fff14184bb8117c2eb39b1b0731e1d327f7cc8f8",
+          "transactionIndex": 3,
+          "logIndex": 2
+        },
+        "time": {
+          "minuteStartSec": 1788863820,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0xf452715675de947f6b7cfba359f9e1d9f8eb42cba54a5e7275a12bf31487bf53"
+        },
+        "kind": "swap",
+        "rawAmount0": "571433141033156710",
+        "rawAmount1": "-2462019041181508704825",
+        "tokenIn": "0x9936403a9cc72cf306063e3496ea387428a3aecd",
+        "amountIn": "2462019041181508704825",
+        "tokenOut": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountOut": "571433141033156710",
+        "sqrtPriceX96After": "5174487025032609911245596478387",
+        "liquidityAfter": "1136660135122006005590910",
+        "tickAfter": 83587,
+        "effectiveSwapFeePips": 10000
+      },
+      "lastLiquidityAction": null
+    },
+    {
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0xfe49c19c7f717b9f9a7d07afa801261cfd32b6fd3b140a0cba33f0c25a9f8e5d"
+      },
+      "lastSwap": {
+        "ref": {
+          "blockHash": "0xbc0a60cc6849c77bc937a0fb1b69fc629ff616f4fe19c5f013dbc4518f0b4667",
+          "blockNumber": "57617217",
+          "transactionHash": "0x356aacfdfea94870117eedd42d3d223a6769406fb97c6d7dc68c37bd4aeea852",
+          "transactionIndex": 3,
+          "logIndex": 23
+        },
+        "time": {
+          "minuteStartSec": 1788863100,
+          "exactTimestampSec": null,
+          "source": "minute-boundary"
+        },
+        "pool": {
+          "chainId": 4663,
+          "protocol": "v4",
+          "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+          "poolId": "0xfe49c19c7f717b9f9a7d07afa801261cfd32b6fd3b140a0cba33f0c25a9f8e5d"
+        },
+        "kind": "swap",
+        "rawAmount0": "28063289702376730351",
+        "rawAmount1": "-2241220010174706391669896",
+        "tokenIn": "0xe10c857687d5cf347a1c133e6a2df73b2ba7f21e",
+        "amountIn": "2241220010174706391669896",
+        "tokenOut": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "amountOut": "28063289702376730351",
+        "sqrtPriceX96After": "22490435706092377946067903290687",
+        "liquidityAfter": "885260792200307818363196",
+        "tickAfter": 112975,
+        "effectiveSwapFeePips": 0
+      },
+      "lastLiquidityAction": null
+    }
+  ]
+}

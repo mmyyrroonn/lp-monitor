@@ -1,6 +1,6 @@
 # P2 协议解码与最近观测 Implementation Plan
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** 将V3/V4 logs转为可统计事件，保存最近Swap观测。
 
@@ -28,7 +28,7 @@
 
 **Interfaces:** decodeV3(log: RawLog,time: LogTime,registration: PoolRegistration): PoolEvent；decodeV4同签名；normalizeCoreDeltas(version,a,b)返回inputIndex/amountIn/outputIndex/amountOut。
 
-- [ ] 使用P0固定ABI，以下测试必须保留原始符号并正确归一化。
+- [x] 使用P0固定ABI，以下测试必须保留原始符号并正确归一化。
 
 ~~~ts
 import { expect, test } from 'vitest';
@@ -45,10 +45,10 @@ test.each([
 });
 ~~~
 
-- [ ] v3以raw正值侧为输入，v4先反号再统一。零/两侧同号不强造普通成交；超大int、未知topic、非法data保留错误和原文。
-- [ ] V3 Mint正delta、Burn负delta；V4 ModifyLiquidity用事件有符号L变化；delta0不计新增/撤出；Collect/Donate单列。amount本金与L不混同。
-- [ ] V3记录登记fee，V4记录Swap实际fee；Initialize动态flag不作费率。sender/actor不当用户人数。
-- [ ] ethers作为dev-only独立fixture解码对照。运行 pnpm exec vitest run tests/unit/swap-direction.test.ts tests/integration/decode-real.test.ts。
+- [x] v3以raw正值侧为输入，v4先反号再统一。零/两侧同号不强造普通成交；超大int、未知topic、非法data保留错误和原文。
+- [x] V3 Mint正delta、Burn负delta；V4 ModifyLiquidity用事件有符号L变化；delta0不计新增/撤出；Collect/Donate单列。amount本金与L不混同。
+- [x] V3记录登记fee，V4记录Swap实际fee；Initialize动态flag不作费率。sender/actor不当用户人数。
+- [x] ethers作为dev-only独立fixture解码对照。运行 pnpm exec vitest run tests/unit/swap-direction.test.ts tests/integration/decode-real.test.ts。
 
 ## Task 2.2：最近Swap观测
 
@@ -56,10 +56,10 @@ test.each([
 
 **Interfaces:** observePool(previous: PoolObservation,event: PoolEvent): PoolObservation。
 
-- [ ] Swap替换lastSwap，流动性事件只替换lastLiquidityAction。保留price/tick/L及事件位置，不运行tick bitmap或修改位置本金。
-- [ ] fixture：Swap报告L1000，之后Burn delta100，结果lastSwap.L仍1000但标为Burn之前观测；下次Swap报告L700后才更新为700。不能把未知当前L补成900。
-- [ ] 老池没有历史state，首次Swap即可记录；只收到Burn则lastSwap=null。观测L比较仅同池，下降可能是tick跨越。
-- [ ] 运行 pnpm exec vitest run tests/unit/pool-observations.test.ts。
+- [x] Swap替换lastSwap，流动性事件只替换lastLiquidityAction。保留price/tick/L及事件位置，不运行tick bitmap或修改位置本金。
+- [x] fixture：Swap报告L1000，之后Burn delta100，结果lastSwap.L仍1000但标为Burn之前观测；下次Swap报告L700后才更新为700。不能把未知当前L补成900。
+- [x] 老池没有历史state，首次Swap即可记录；只收到Burn则lastSwap=null。观测L比较仅同池，下降可能是tick跨越。
+- [x] 运行 pnpm exec vitest run tests/unit/pool-observations.test.ts。
 
 ## Task 2.3：范围投影与重建
 
@@ -67,10 +67,12 @@ test.each([
 
 **Interfaces:** projectRange(batch,activeLogs,logTimes,registry): ProjectionResult；结果含events、observations、qualityErrors，与范围处理cursor同事务提交。
 
-- [ ] 仅active_logs进入统计。重扫移除旧Swap后，lastSwap和事件投影重新从有效日志得到；时间修正使旧桶失效。
-- [ ] 实现 pnpm lp project --db data/monitor.sqlite --rebuild 与 pnpm lp inspect-pool --config config/robinhood.json --pool amc-usdg-v3，显示最后观测时间及分钟精度。
-- [ ] P2测试、typecheck/build通过后保存解码对照与样本输出，更新状态，停止。
+- [x] 仅active_logs进入统计。重扫移除旧Swap后，lastSwap和事件投影重新从有效日志得到；时间修正使旧桶失效。
+- [x] 实现 pnpm lp project --db data/monitor.sqlite --rebuild 与 pnpm lp inspect-pool --config config/robinhood.json --pool amc-usdg-v3，显示最后观测时间及分钟精度。
+- [x] P2测试、typecheck/build通过后保存解码对照与样本输出，更新状态，停止。
 
 ## 验收
 
 协议方向/类型正确，真实fixture可独立解码；近期观测不会冒充完整当前池状态；重扫修正可重建。archive state、仓位feeGrowth、模拟器不作为门槛。下窗口P3。
+
+验收补记（2026-09-08）：344 测试通过，650 条 P1 真实历史事件完成独立解码对照。当前采用显式全 scope 重建；验收与限制见 [P2 报告](../../reviews/2026-09-08-p2-acceptance.md)。

@@ -1,6 +1,6 @@
 # 实施状态与窗口交接
 
-更新：2026-09-08。当前状态：**P0 passed；P1 passed**，P2–P6 未开始。下方旧记录保留为设计阶段历史证据；本轮完整验收与限制见文末。
+更新：2026-09-08。当前状态：**P0 passed；P1 passed；P2 passed**，P3–P6 未开始。下方旧记录保留为设计阶段历史证据；本轮完整验收与限制见文末。
 
 此前13份Markdown的本地链接、代码围栏、计划头部顺序、占位符与行尾空白检查通过；并已按架构逐项核对P0–P6覆盖。批量查询补充后的文档检查另记于下方。文档验收不代表应用测试通过。
 
@@ -19,8 +19,8 @@
 | 阶段 | 状态 | 已验证证据 | 下一步 |
 |---|---|---|---|
 | P0 工程与能力 | passed | P0 最终修正后 188 测试通过；历史 RPC 证据保留 | 沿用既有合同 |
-| P1 记录与恢复 | passed | 273 测试；5 个实时分钟边界；重启/旧段重扫退出 0；[验收](../artifacts/p1/acceptance.json) | 用户安排后进入 P2 Task 2.1 |
-| P2 协议与观测 | pending | 官方源码已调查；尚无实现测试 | P1 验收后开始 |
+| P1 记录与恢复 | passed | 273 测试；5 个实时分钟边界；重启/旧段重扫退出 0；[验收](../artifacts/p1/acceptance.json) | 已完成；沿用 P1 合同 |
+| P2 协议与观测 | passed | 344 测试；650 条真实历史事件 ethers 对照；[验收](../artifacts/p2/acceptance.json) | 用户安排后进入 P3 Task 3.1 |
 | P3 分钟热度 | pending | 已有研究定义；尚无分钟热度输出 | P2 验收后开始 |
 | P4 告警 | pending | 尚无运行中通知 | P3 验收后开始 |
 | P5 历史验证 | pending | GMGN/公共 API 案例仅供参照 | P4 验收后开始 |
@@ -121,3 +121,15 @@ P1 未开始，仍从 Task 1.1 开始；未实现 store/follow/恢复，未执�
 ## P1 第二轮 recorder 审查修正 — 2026-09-08
 
 修复 manifest 最终落盘失败分类、bootstrap hash 大小写比较、getLogs 接收对象及 rawLogKey 复用。新增 8 个回归用例，当前全库 281 测试通过；typecheck/build/lint 均通过。详见 [处理与验证记录](reviews/2026-09-08-p1-recorder-review-resolution.md)。原实链验收保留，本轮没有新 RPC 采集；临时运行输出不纳入 Git。
+
+## P2 验收记录 — 2026-09-08
+
+最终范围：V3/V4 官方 ABI 业务解码、最近 Swap/流动性动作观测、SQLite 投影与原子游标、离线 project/inspect-pool。基线 e8e3b9f，当前 feat/p2-protocol-state；改动未提交、未推送。
+
+验证命令与结果：typecheck/test/build/lint 全部退出 0，32 文件、344 测试通过、0 失败/跳过；git diff --check 退出 0。具体命令、源码及构建哈希见 [验收汇总](../artifacts/p2/acceptance.json)；范围、数据与限制见 [P2 报告](reviews/2026-09-08-p2-acceptance.md)。[独立审查](reviews/2026-09-08-p2-review.md)通过，AMC 别名与 V4 跨 scope 回归已关闭。
+
+真实证据：只读备份 P1 录制库到 data/p2-acceptance.sqlite 后投影，650 条有效日志生成 650 事件（V4 Swap 556、V3 Swap 47、V4 L 动作 37、V3 Burn 5、Collect 5），ethers 对照一致、质量错误 0。29 个池有实际观测；1827 是登记数。全部沿用分钟归桶，精确秒数仍 null；没有新增 RPC 调用，源 P1 表及 P0 固定归档未变。P0 广域归档中的一条零侧 V4 Swap 保留为 invalid-direction，其余缺失历史登记用合成 metadata 的测试有明确标注。
+
+能力边界：显式全 scope 离线重建，未挂入每个 recorder 批次；时间或有效集合变化后必须重建，过期 inspect 返回 4。没有当前完整 AMM 状态、分钟排名、告警或 LP 收益。本轮无依赖/ABI/配置版本变更，没有永久服务或交易。
+
+下一窗口：用户安排后读取 docs/superpowers/plans/2026-09-08-p3-metrics.md，从 **Task 3.1** 开始。P3–P6 保持 pending。

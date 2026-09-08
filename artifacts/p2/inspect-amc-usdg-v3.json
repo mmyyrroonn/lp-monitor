@@ -1,0 +1,81 @@
+{
+  "status": "observed",
+  "version": "p2-v1",
+  "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+  "configVersion": "2026-09-08.p0-review2",
+  "assetVersion": "2026-09-08.p0-seeds",
+  "sourceHash": "020acdd838f35648fbb5ff67aea138a098430610b6b37a991ec7fc4e1d23f435",
+  "at": {
+    "number": "57625255",
+    "hash": "0xc03ff86009711d4f95cd2dd255ef54e79dae617873a745221d1e7a70e390dfba",
+    "timestampSec": 1788863932
+  },
+  "observation": {
+    "pool": {
+      "chainId": 4663,
+      "protocol": "v3",
+      "address": "0xaa34fea710a1a737840329051d81d3b0b7c564d5"
+    },
+    "lastSwap": {
+      "ref": {
+        "blockHash": "0x4606746cd19fa8756e2bc200527ef59410abfafac886f3d7ba2dcdf48fec86a8",
+        "blockNumber": "57622196",
+        "transactionHash": "0x4cd8b56144fc050b4799ed9d10166b08d376a335327ad57e3fdeffd69d74bdcc",
+        "transactionIndex": 2,
+        "logIndex": 33
+      },
+      "time": {
+        "minuteStartSec": 1788863580,
+        "exactTimestampSec": null,
+        "source": "minute-boundary"
+      },
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v3",
+        "address": "0xaa34fea710a1a737840329051d81d3b0b7c564d5"
+      },
+      "kind": "swap",
+      "rawAmount0": "26983147391951457392",
+      "rawAmount1": "-70339739",
+      "tokenIn": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+      "amountIn": "26983147391951457392",
+      "tokenOut": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+      "amountOut": "70339739",
+      "sqrtPriceX96After": "128110782392564615880793",
+      "liquidityAfter": "23857459188709623349",
+      "tickAfter": -266713,
+      "effectiveSwapFeePips": 3000
+    },
+    "lastLiquidityAction": {
+      "ref": {
+        "blockHash": "0x0aded8bac62537ed8d22e583d744b85423ce7535e328462b6b3afb04ce0a5940",
+        "blockNumber": "57623196",
+        "transactionHash": "0xb6157e2af18fb3f5ed3e9c5978b6cb7d282288573d9f1e11e041926c0c923f50",
+        "transactionIndex": 2,
+        "logIndex": 18
+      },
+      "time": {
+        "minuteStartSec": 1788863700,
+        "exactTimestampSec": null,
+        "source": "minute-boundary"
+      },
+      "pool": {
+        "chainId": 4663,
+        "protocol": "v3",
+        "address": "0xaa34fea710a1a737840329051d81d3b0b7c564d5"
+      },
+      "kind": "liquidity",
+      "tickLower": -267780,
+      "tickUpper": -265320,
+      "delta": "0",
+      "actor": "0x73991a25c818bf1f1128deaab1492d45638de0d3",
+      "salt": null
+    }
+  },
+  "timing": "minute",
+  "swapObservation": "before-last-liquidity-action",
+  "currentPoolStateKnown": false,
+  "finality": "provisional",
+  "note": "L, price and tick are values reported by the last Swap. Later liquidity actions do not infer current L. Actors are not user counts.",
+  "qualityErrors": []
+}
