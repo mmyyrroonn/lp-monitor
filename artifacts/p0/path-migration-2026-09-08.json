@@ -1,0 +1,80 @@
+{
+  "at": "2026-09-08T08:06:15.907Z",
+  "reason": "Portable POSIX repository-relative metadata; historical verification declarations clarified. Raw logs and RPC requests unchanged. Source snapshot hashes retain their historical meaning; this is not a new live capture or verification.",
+  "changes": [
+    {
+      "path": "artifacts/p0/capabilities.json",
+      "beforeSha256": "c4dfe4f5b03dd16d13eb598fa76bdf687fe37a7044ef7248dc54c8cb49216169",
+      "afterSha256": "bb82e177484897c53f2876553389a30f3663d65dcdce22ef66faa03726821def"
+    },
+    {
+      "path": "artifacts/p0/dependency-evidence.json",
+      "beforeSha256": "100404454bea01cfe175ad0a0fb275a199dbb5e4269bd6179fd98f820fd18d5f",
+      "afterSha256": "76b99c3edea6b93cced1eb694ffff356ef5722484f8ffc5b26103cc365e13d2c",
+      "migrationSha256": "f3a166db2a6ed6a5928a5d3ac1faf90156d68c93104421bb23a0b5b1b817afbc",
+      "subsequentVerification": "vendor-abis.mjs --verified executed successfully: 11 ABI tests passed; report regenerated."
+    },
+    {
+      "path": "artifacts/p0/identity-evidence.json",
+      "beforeSha256": "e51d61ed6ef239fad7881ae016a1f5eb47176622df0c4ec59f99e4694eb2329d",
+      "afterSha256": "26a5945235bdfa0d6b747c8a9f47f4955fbe95b46c320505ffbac56336fda4c3"
+    },
+    {
+      "path": "artifacts/p0/probe-2026-09-08T05-58-02-385Z/capabilities.json",
+      "beforeSha256": "4c9a6ff60cf3a0b47e734432ae98d671387c40894ad7d3d42cae37694f52dfb6",
+      "afterSha256": "31d978fa78c2905a189c0cae744642377cbd905787d6bd078aaf01235c35d3ed"
+    },
+    {
+      "path": "artifacts/p0/probe-2026-09-08T05-58-02-385Z/identity-evidence.json",
+      "beforeSha256": "41df29bd365a0a061bb3e6450f99ac63ec55dc915a88707cfce9e369c07da400",
+      "afterSha256": "3e05c2c0ed56766052b8cfe115188a5828a5d156392648595cd7ff6639b11f8b"
+    },
+    {
+      "path": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/capabilities.json",
+      "beforeSha256": "c4dfe4f5b03dd16d13eb598fa76bdf687fe37a7044ef7248dc54c8cb49216169",
+      "afterSha256": "bb82e177484897c53f2876553389a30f3663d65dcdce22ef66faa03726821def"
+    },
+    {
+      "path": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/identity-evidence.json",
+      "beforeSha256": "e51d61ed6ef239fad7881ae016a1f5eb47176622df0c4ec59f99e4694eb2329d",
+      "afterSha256": "26a5945235bdfa0d6b747c8a9f47f4955fbe95b46c320505ffbac56336fda4c3"
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/manifest.json",
+      "beforeSha256": "22aa12bf6d1605fa82ce8210ee73e8082f8e9ccb9db6d17ffc8480974d0ba3ec",
+      "afterSha256": "e826525b76b48ca3d79ea37ed3d044f225b52d009a36b47fb1029aa88b218678"
+    },
+    {
+      "path": "artifacts/p0/source-snapshot.json",
+      "beforeSha256": "cecf6b9999c3efdfdaf2da7cf77e44fc7ca9d1a533acc8daa530bd64375163b1",
+      "afterSha256": "2fe63d0523180cff52135b4792bed0716cd70b3f42d12ce819f65b5458566785"
+    },
+    {
+      "path": "artifacts/p0/acceptance.json",
+      "beforeSha256": "85c993064e85d702dbcb6644f643bb59beb90dcae1e392110695db55c7de39b6",
+      "afterSha256": "2e0fc94ec6583e7cfae79b9699eec3d643b31e3ba5e6ff431d27ba9156846426"
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T05-53-40-355Z/manifest.json",
+      "beforeSha256": "193b29677d1692a75203ec29f56d4d48389d2df398c4c4d4659bd63a04769091",
+      "afterSha256": "46cb969e8995d80c765841ae866a031392ef632d5257113398c20f7aa3d0c147",
+      "localOnly": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T05-56-48-022Z/manifest.json",
+      "beforeSha256": "e1c913f0f8e34fc8ddf70c214504b26142934e3d753abd8a38b9cbf3eaa4660b",
+      "afterSha256": "f389db47fa162b7094f11e35c96daa02caf469a3fe8e25e9cd8ce057ad4224ce",
+      "localOnly": true
+    },
+    {
+      "path": "artifacts/p0/tests.json",
+      "beforeSha256": "94f26de292cece12232febbfc0f6478a081b4f8b0b98980978bc5dfbb18e8aea",
+      "afterSha256": "8061bab13f1b13dbb9b24909210dcb31241f5d720442e5c4571da59d52a5a777"
+    },
+    {
+      "path": "artifacts/p0/fixture-tests.json",
+      "beforeSha256": "72a125f83419e29f1d948588edc3939c5c2b82a024cc3e3dde4dd9381a206f6b",
+      "afterSha256": "47677f0ede7698f197081b0aa96cce643ca413f2d32267e525b37cfa8cce013d"
+    }
+  ]
+}

@@ -1,23 +1,55 @@
 export type Support = 'supported' | 'unsupported' | 'unknown';
 export class RpcFailure extends Error {
-  constructor(public readonly kind: string, public readonly status: Support = 'unknown', public readonly retryable = false) { super(`RPC ${kind}`); }
+  constructor(
+    public readonly kind: string,
+    public readonly status: Support = 'unknown',
+    public readonly retryable = false,
+  ) {
+    super(`RPC ${kind}`);
+  }
 }
 export function classifyRpcError(error: unknown): RpcFailure {
   if (error instanceof RpcFailure) return error;
   const seen = new Set<unknown>();
   let cursor: unknown = error;
-  let code: unknown; let status: unknown; let message = '';
+  const codes: number[] = [],
+    statuses: number[] = [],
+    messages: string[] = [];
   while (cursor && typeof cursor === 'object' && !seen.has(cursor)) {
     seen.add(cursor);
     const item = cursor as Record<string, unknown>;
-    code ??= item.code; status ??= item.status;
-    message += ` ${item.name ?? ''} ${item.message ?? ''}`;
+    if (typeof item.code === 'number') codes.push(item.code);
+    if (typeof item.status === 'number') statuses.push(item.status);
+    // viem's composed message embeds URLs and request bodies. Prefer provider details;
+    // strip URLs even in fallback strings so credentials cannot influence classification.
+    const detail = typeof item.details === 'string' ? item.details : item.message;
+    if (typeof detail === 'string')
+      messages.push(
+        detail.replace(/https?:\/\/\S+/gi, '').replace(/(?:URL|Request body):[^\n]*/gi, ''),
+      );
+    if (typeof item.name === 'string') messages.push(item.name);
     cursor = item.cause;
   }
-  if (code === -32601 || /method (not found|does not exist|.*not available)/i.test(message)) return new RpcFailure('method-not-found', 'unsupported');
-  if (status === 429 || /429|rate limit|too many requests/i.test(message)) return new RpcFailure('rate-limit', 'unknown', true);
-  if (/timeout|timed out|aborterror|econnreset|fetch failed/i.test(message)) return new RpcFailure('timeout-or-network', 'unknown', true);
-  if (/missing trie|historical state|state.*not available|pruned/i.test(message)) return new RpcFailure('historical-state-missing', 'unsupported');
-  if (/too many (results|logs)|block range|response.*(large|limit)|query.*limit|limit exceeded/i.test(message)) return new RpcFailure('range-limit');
+  if (statuses.includes(429)) return new RpcFailure('rate-limit', 'unknown', true);
+  if (statuses.some((s) => s === 408 || (s >= 500 && s <= 599 && s !== 501)))
+    return new RpcFailure('http-transient', 'unknown', true);
+  if (codes.includes(-32601)) return new RpcFailure('method-not-found', 'unsupported');
+  if (codes.includes(-32029)) return new RpcFailure('rate-limit', 'unknown', true);
+  const message = messages.join(' ');
+  if (
+    /rate[ -]?limit|too many requests|requests per second|(?:CU|compute units?)\s*(?:per second|\/sec)/i.test(
+      message,
+    )
+  )
+    return new RpcFailure('rate-limit', 'unknown', true);
+  if (/too many (results|logs)|block range|response.*(large|limit)|query.*limit/i.test(message))
+    return new RpcFailure('range-limit');
+  if (codes.includes(-32005)) return new RpcFailure('unknown-limit');
+  if (/method (not found|does not exist|.*not available)/i.test(message))
+    return new RpcFailure('method-not-found', 'unsupported');
+  if (/timeout|timed out|aborterror|econnreset|fetch failed/i.test(message))
+    return new RpcFailure('timeout-or-network', 'unknown', true);
+  if (/missing trie|historical state|state.*not available|pruned/i.test(message))
+    return new RpcFailure('historical-state-missing', 'unsupported');
   return new RpcFailure('request-failed');
 }

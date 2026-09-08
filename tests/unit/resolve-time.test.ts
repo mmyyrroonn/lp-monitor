@@ -32,15 +32,18 @@ test('returns the first block at a duplicated timestamp and verifies its predece
   const { reader, calls } = readerFrom(anchors);
   const resolver = createTimeResolver(reader);
 
-  await expect(resolver.resolveBlockAtOrAfter(1_103, { fromBlock: 100n, toBlock: 107n }))
-    .resolves.toEqual(anchors[3]);
+  await expect(
+    resolver.resolveBlockAtOrAfter(1_103, { fromBlock: 100n, toBlock: 107n }),
+  ).resolves.toEqual(anchors[3]);
 
   expect(calls).toContain(102n);
   expect(calls.length).toBeLessThan(anchors.length);
 });
 
 test('uses sparse cached anchors across repeated resolutions', async () => {
-  const anchors = Array.from({ length: 1_025 }, (_, number) => anchor(BigInt(number), 10_000 + number));
+  const anchors = Array.from({ length: 1_025 }, (_, number) =>
+    anchor(BigInt(number), 10_000 + number),
+  );
   const { reader, calls } = readerFrom(anchors);
   const resolver = createTimeResolver(reader);
 
@@ -51,7 +54,9 @@ test('uses sparse cached anchors across repeated resolutions', async () => {
   expect(calls.length).toBe(firstCallCount);
   expect(firstCallCount).toBeLessThanOrEqual(15);
   expect(resolver.queriedAnchors.map(({ number }) => number)).toEqual(
-    [...resolver.queriedAnchors.map(({ number }) => number)].sort((left, right) => left < right ? -1 : 1),
+    [...resolver.queriedAnchors.map(({ number }) => number)].sort((left, right) =>
+      left < right ? -1 : 1,
+    ),
   );
 });
 
@@ -59,7 +64,9 @@ test.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, Number.MAX_SAFE_INT
   'rejects invalid timestamp %s',
   async (timestampSec) => {
     const { reader } = readerFrom([anchor(0n, 1), anchor(1n, 2)]);
-    await expect(createTimeResolver(reader).resolveBlockAtOrAfter(timestampSec)).rejects.toThrow(/positive safe integer/i);
+    await expect(createTimeResolver(reader).resolveBlockAtOrAfter(timestampSec)).rejects.toThrow(
+      /positive safe integer/i,
+    );
   },
 );
 
@@ -67,16 +74,24 @@ test('rejects invalid block bounds', async () => {
   const { reader } = readerFrom([anchor(0n, 1), anchor(1n, 2)]);
   const resolver = createTimeResolver(reader);
 
-  await expect(resolver.resolveBlockAtOrAfter(1, { fromBlock: -1n, toBlock: 1n })).rejects.toThrow(/bounds/i);
-  await expect(resolver.resolveBlockAtOrAfter(1, { fromBlock: 1n, toBlock: 0n })).rejects.toThrow(/bounds/i);
+  await expect(resolver.resolveBlockAtOrAfter(1, { fromBlock: -1n, toBlock: 1n })).rejects.toThrow(
+    /bounds/i,
+  );
+  await expect(resolver.resolveBlockAtOrAfter(1, { fromBlock: 1n, toBlock: 0n })).rejects.toThrow(
+    /bounds/i,
+  );
 });
 
 test('rejects targets outside the bounded chain range', async () => {
   const { reader } = readerFrom([anchor(10n, 100), anchor(11n, 110), anchor(12n, 120)]);
   const resolver = createTimeResolver(reader);
 
-  await expect(resolver.resolveBlockAtOrAfter(99, { fromBlock: 10n, toBlock: 12n })).rejects.toThrow(/outside.*range/i);
-  await expect(resolver.resolveBlockAtOrAfter(121, { fromBlock: 10n, toBlock: 12n })).rejects.toThrow(/outside.*range/i);
+  await expect(
+    resolver.resolveBlockAtOrAfter(99, { fromBlock: 10n, toBlock: 12n }),
+  ).rejects.toThrow(/outside.*range/i);
+  await expect(
+    resolver.resolveBlockAtOrAfter(121, { fromBlock: 10n, toBlock: 12n }),
+  ).rejects.toThrow(/outside.*range/i);
 });
 
 test('rejects nonmonotonic sampled anchors', async () => {
@@ -112,5 +127,42 @@ test('accepts timestamp zero only for genesis and searches later positive timest
 test('rejects timestamp zero on a non-genesis anchor', async () => {
   const { reader } = readerFrom([anchor(0n, 0), anchor(1n, 0), anchor(2n, 20)]);
 
-  await expect(createTimeResolver(reader).resolveBlockAtOrAfter(15)).rejects.toThrow(/invalid block anchor/i);
+  await expect(createTimeResolver(reader).resolveBlockAtOrAfter(15)).rejects.toThrow(
+    /invalid block anchor/i,
+  );
+});
+
+test('injects shared anchors and retains the minute predecessor', async () => {
+  const anchors = [anchor(0n, 0), anchor(1n, 50), anchor(2n, 60), anchor(3n, 70)];
+  const { reader, calls } = readerFrom(anchors);
+  const store = new Map(anchors.map((a) => [a.number, a]));
+  const boundary = await createTimeResolver(reader, store).resolveMinuteBoundary(60, {
+    fromBlock: 0n,
+    toBlock: 3n,
+  });
+  expect(boundary).toEqual({
+    timestampSec: 60,
+    firstBlock: 2n,
+    before: anchors[1],
+    at: anchors[2],
+  });
+  expect(calls).toHaveLength(0);
+});
+
+test('rejects invalid injected anchors instead of trusting cached endpoints', async () => {
+  const { reader } = readerFrom([]);
+  const store = new Map([[1n, anchor(1n, 0)]]);
+  await expect(
+    createTimeResolver(reader, store).resolveBlockAtOrAfter(60, { fromBlock: 1n, toBlock: 1n }),
+  ).rejects.toThrow(/invalid block anchor/i);
+});
+test('rejects nonmonotonic injected anchors', async () => {
+  const { reader } = readerFrom([]);
+  const store = new Map([
+    [1n, anchor(1n, 120)],
+    [2n, anchor(2n, 60)],
+  ]);
+  await expect(
+    createTimeResolver(reader, store).resolveBlockAtOrAfter(60, { fromBlock: 1n, toBlock: 2n }),
+  ).rejects.toThrow(/nonmonotonic/i);
 });

@@ -17,16 +17,16 @@
   },
   "evidence": [
     {
-      "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\manifest.json",
-      "sha256": "22aa12bf6d1605fa82ce8210ee73e8082f8e9ccb9db6d17ffc8480974d0ba3ec"
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/manifest.json",
+      "sha256": "e826525b76b48ca3d79ea37ed3d044f225b52d009a36b47fb1029aa88b218678"
     },
     {
       "path": "artifacts/p0/capabilities.json",
-      "sha256": "c4dfe4f5b03dd16d13eb598fa76bdf687fe37a7044ef7248dc54c8cb49216169"
+      "sha256": "bb82e177484897c53f2876553389a30f3663d65dcdce22ef66faa03726821def"
     },
     {
       "path": "artifacts/p0/identity-evidence.json",
-      "sha256": "e51d61ed6ef239fad7881ae016a1f5eb47176622df0c4ec59f99e4694eb2329d"
+      "sha256": "26a5945235bdfa0d6b747c8a9f47f4955fbe95b46c320505ffbac56336fda4c3"
     },
     {
       "path": "artifacts/p0/official-source-evidence.json",
@@ -34,11 +34,11 @@
     },
     {
       "path": "artifacts/p0/tests.json",
-      "sha256": "94f26de292cece12232febbfc0f6478a081b4f8b0b98980978bc5dfbb18e8aea"
+      "sha256": "8061bab13f1b13dbb9b24909210dcb31241f5d720442e5c4571da59d52a5a777"
     },
     {
       "path": "artifacts/p0/fixture-tests.json",
-      "sha256": "72a125f83419e29f1d948588edc3939c5c2b82a024cc3e3dde4dd9381a206f6b"
+      "sha256": "47677f0ede7698f197081b0aa96cce643ca413f2d32267e525b37cfa8cce013d"
     },
     {
       "path": "artifacts/p0/verification.json",
@@ -52,5 +52,7 @@
     "Historical samples are not full P5 coverage",
     "WS and trace not probed",
     "No transactions, wallet connection or permanent service"
-  ]
+  ],
+  "pathBase": "repository",
+  "metadataMigration": "artifacts/p0/path-migration-2026-09-08.json"
 }

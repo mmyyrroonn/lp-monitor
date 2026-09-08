@@ -1,10 +1,9 @@
+import { UniswapEventDecodeError } from '../uniswap-v4/pool-key.js';
 import { decodeEventLog, toEventSelector, type Hex } from 'viem';
 import { v3PoolAbi } from './abi.js';
 
 const v3PoolEventTopics = new Set(
-  v3PoolAbi
-    .filter((entry) => entry.type === 'event')
-    .map((entry) => toEventSelector(entry)),
+  v3PoolAbi.filter((entry) => entry.type === 'event').map((entry) => toEventSelector(entry)),
 );
 
 export class UnknownUniswapV3EventTopicError extends Error {
@@ -19,10 +18,14 @@ export function decodeV3PoolEvent(log: { topics: readonly Hex[]; data: Hex }) {
   if (topic === undefined || !v3PoolEventTopics.has(topic)) {
     throw new UnknownUniswapV3EventTopicError(topic);
   }
-  return decodeEventLog({
-    abi: v3PoolAbi,
-    data: log.data,
-    topics: log.topics as [Hex, ...Hex[]],
-    strict: true,
-  });
+  try {
+    return decodeEventLog({
+      abi: v3PoolAbi,
+      data: log.data,
+      topics: log.topics as [Hex, ...Hex[]],
+      strict: true,
+    });
+  } catch (error) {
+    throw new UniswapEventDecodeError('v3', error);
+  }
 }

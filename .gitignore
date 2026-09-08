@@ -8,3 +8,18 @@ data/
 artifacts/**/requests.jsonl
 artifacts/**/raw/
 coverage/
+
+# Only the audited P0 acceptance capture is committed; new runs remain local.
+!artifacts/p0/raw/
+artifacts/p0/raw/*
+!artifacts/p0/raw/2026-09-08T06-10-51-129Z/
+!artifacts/p0/raw/2026-09-08T06-10-51-129Z/**
+!artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl
+# Local research/tooling retained outside application source control.
+research/
+tooling/
+.agents/
+skills-lock.json
+
+# Rotated transient request evidence follows the same policy as the active file.
+artifacts/**/requests.jsonl.*

@@ -19,9 +19,7 @@ const poolKeyParameters = [
 ] as const;
 
 const v4EventTopics = new Set(
-  v4ManagerAbi
-    .filter((entry) => entry.type === 'event')
-    .map((entry) => toEventSelector(entry)),
+  v4ManagerAbi.filter((entry) => entry.type === 'event').map((entry) => toEventSelector(entry)),
 );
 
 export class UnknownUniswapEventTopicError extends Error {
@@ -32,7 +30,7 @@ export class UnknownUniswapEventTopicError extends Error {
 }
 
 export class UniswapEventDecodeError extends Error {
-  constructor(protocol: 'v4', cause: unknown) {
+  constructor(protocol: 'v3' | 'v4', cause: unknown) {
     super(`Could not strictly decode Uniswap ${protocol} event`, { cause });
     this.name = 'UniswapEventDecodeError';
   }
@@ -49,11 +47,13 @@ export function computeV4PoolId(key: PoolKey): Hex {
   if (!Number.isInteger(key.fee) || key.fee < 0 || key.fee > 0xffffff) {
     throw new RangeError('V4 PoolKey fee must fit uint24');
   }
-  if (!Number.isInteger(key.tickSpacing) || key.tickSpacing < -8_388_608 || key.tickSpacing > 8_388_607) {
-    throw new RangeError('V4 PoolKey tickSpacing must fit int24');
+  if (!Number.isInteger(key.tickSpacing) || key.tickSpacing < 1 || key.tickSpacing > 32_767) {
+    throw new RangeError('V4 PoolKey tickSpacing must be between 1 and 32767');
   }
 
-  return keccak256(encodeAbiParameters(poolKeyParameters, [currency0, currency1, key.fee, key.tickSpacing, hooks]));
+  return keccak256(
+    encodeAbiParameters(poolKeyParameters, [currency0, currency1, key.fee, key.tickSpacing, hooks]),
+  );
 }
 
 export function decodeV4ManagerEvent(log: { topics: readonly Hex[]; data: Hex }) {

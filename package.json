@@ -9,9 +9,12 @@
   "packageManager": "pnpm@11.19.0",
   "scripts": {
     "lp": "tsx src/cli.ts",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc -p tsconfig.scripts.json",
     "test": "vitest run",
-    "build": "tsc"
+    "build": "node scripts/clean-build.mjs && tsc -p tsconfig.build.json",
+    "lint": "node scripts/check-scripts.mjs && pnpm format:check",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\""
   },
   "dependencies": {
     "better-sqlite3": "13.0.3",
@@ -26,6 +29,7 @@
     "@uniswap/v4-core": "1.0.2",
     "@uniswap/v4-sdk": "2.3.3",
     "ethers": "6.17.0",
+    "prettier": "3.9.6",
     "tsx": "4.23.13",
     "typescript": "7.0.2",
     "vitest": "5.0.0"

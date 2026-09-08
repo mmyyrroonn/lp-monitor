@@ -1,0 +1,80 @@
+{
+  "at": "2026-09-08T08:17:49.332Z",
+  "scope": "P0 review fixes; local mocks and archived real fixtures; no new public RPC capture",
+  "passed": true,
+  "tests": {
+    "passed": 149,
+    "failed": 0,
+    "suites": 18
+  },
+  "checks": [
+    {
+      "name": "lint",
+      "command": "pnpm lint",
+      "exitCode": 0,
+      "log": "artifacts/p0/review-checks/lint.txt"
+    },
+    {
+      "name": "typecheck",
+      "command": "pnpm typecheck",
+      "exitCode": 0,
+      "log": "artifacts/p0/review-checks/typecheck.txt"
+    },
+    {
+      "name": "test",
+      "command": "node node_modules/vitest/vitest.mjs run --reporter=json --outputFile=artifacts/p0/review-tests.json",
+      "exitCode": 0,
+      "log": "artifacts/p0/review-checks/test.txt"
+    },
+    {
+      "name": "build",
+      "command": "pnpm build",
+      "exitCode": 0,
+      "log": "artifacts/p0/review-checks/build.txt"
+    },
+    {
+      "name": "diff",
+      "command": "git diff --check",
+      "exitCode": 0,
+      "log": "artifacts/p0/review-checks/diff.txt"
+    }
+  ],
+  "ci": "configured, not run remotely",
+  "nextStage": "P1 Task 1.1",
+  "rawEvidence": [
+    {
+      "path": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/anchors.json",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/logs.json",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/primary.logs.json",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/requests.jsonl",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/seed-1-supplement.logs.json",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/seed-2-supplement.logs.json",
+      "unchanged": true
+    },
+    {
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/time-boundaries.json",
+      "unchanged": true
+    }
+  ],
+  "metadataHashMismatches": 0,
+  "acceptanceHashMismatches": 0
+}

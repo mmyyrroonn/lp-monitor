@@ -2,12 +2,78 @@ import { expect, test } from 'vitest';
 import { loadEnv } from '../../src/config/env.js';
 test('missing RPC has no default network', () => expect(() => loadEnv({})).toThrow(/RH_RPC_HTTP/));
 test('invalid config never echoes secrets', () => {
-  for (const env of [{ RH_RPC_HTTP: 'secret-token' }, { RH_RPC_HTTP: 'https://user:secret@host/', RH_PROVIDER_ALIAS: 'https://secret' }]) {
-    try { loadEnv(env); throw new Error('accepted'); } catch (e) { expect(String(e)).not.toContain('secret'); }
+  for (const env of [
+    { RH_RPC_HTTP: 'secret-token' },
+    { RH_RPC_HTTP: 'https://user:secret@host/', RH_PROVIDER_ALIAS: 'https://secret' },
+  ]) {
+    try {
+      loadEnv(env);
+      throw new Error('accepted');
+    } catch (e) {
+      expect(String(e)).not.toContain('secret');
+    }
   }
 });
 test('explicit endpoint and safe alias', () => {
-  const result = loadEnv({ RH_RPC_HTTP: 'https://example.org/key', RH_PROVIDER_ALIAS: 'local-provider' });
+  const result = loadEnv({
+    RH_RPC_HTTP: 'https://example.org/key',
+    RH_PROVIDER_ALIAS: 'local-provider',
+  });
   expect(result.providerAlias).toBe('local-provider');
   expect(result.dataDir).toBe('data');
+});
+
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { loadChainConfig } from '../../src/config/chain.js';
+function withConfig(change: (c: any) => void, check: (path: string) => void) {
+  const dir = mkdtempSync(join(tmpdir(), 'lp-config-'));
+  try {
+    const c = JSON.parse(readFileSync('config/robinhood.json', 'utf8'));
+    change(c);
+    const path = join(dir, 'config.json');
+    writeFileSync(path, JSON.stringify(c));
+    check(path);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+test('rejects unknown config fields and identifies safe field paths', () => {
+  withConfig(
+    (c) => {
+      c.pollIntervallMs = 123;
+    },
+    (path) => expect(() => loadChainConfig(path)).toThrow(/unknown field/),
+  );
+  withConfig(
+    (c) => {
+      c.rpcPerSecond = -1;
+    },
+    (path) => expect(() => loadChainConfig(path)).toThrow(/rpcPerSecond/),
+  );
+});
+test('normalizes all configured addresses and pool hashes', () => {
+  withConfig(
+    (c) => {
+      c.v4PoolIds = c.v4PoolIds.map((s: string) => '0x' + s.slice(2).toUpperCase());
+      c.tokens.AMC = '0x' + c.tokens.AMC.slice(2).toUpperCase();
+    },
+    (path) => {
+      const c = loadChainConfig(path);
+      expect(c.v4PoolIds.every((s) => s === s.toLowerCase())).toBe(true);
+      expect(c.tokens.AMC).toBe(c.tokens.AMC.toLowerCase());
+    },
+  );
+});
+test('runtime config permits explicit long-run quota and provider limits', () => {
+  withConfig(
+    (c) => {
+      c.maxRpcCalls = null;
+      c.rpcPerSecond = 10;
+      c.timeoutMs = 20000;
+      c.pollIntervalMs = 3000;
+    },
+    (path) => expect(loadChainConfig(path).maxRpcCalls).toBeNull(),
+  );
 });

@@ -1,20 +1,56 @@
-import { setTimeout as delay } from 'node:timers/promises';
 export class RateLimiter {
   private nextMs = 0;
   private tail: Promise<void> = Promise.resolve();
   private penaltyMs = 0;
-  constructor(private readonly perSecond = 5) {
-    if (!(perSecond > 0 && perSecond <= 5)) throw new RangeError('RPC rate must be in (0,5]');
+  private successes = 0;
+  private active = 0;
+  private waiters: Array<() => void> = [];
+  constructor(
+    private readonly perSecond = 5,
+    private readonly maxConcurrent = 2,
+  ) {
+    if (!Number.isFinite(perSecond) || perSecond <= 0)
+      throw new RangeError('RPC rate must be positive');
+    if (!Number.isSafeInteger(maxConcurrent) || maxConcurrent < 1)
+      throw new RangeError('RPC concurrency must be positive');
   }
   penalize(): void {
-    this.penaltyMs = Math.max(1000, this.penaltyMs);
-    this.nextMs = Math.max(this.nextMs, Date.now() + this.penaltyMs);
+    this.successes = 0;
+    this.penaltyMs = Math.min(30000, Math.max(1000, this.penaltyMs * 2));
+    this.defer(this.penaltyMs);
   }
-  acquire(): Promise<void> {
+  defer(ms: number): void {
+    this.nextMs = Math.max(this.nextMs, Date.now() + ms);
+  }
+  succeed(): void {
+    if (++this.successes >= 3) {
+      this.penaltyMs = Math.max(0, this.penaltyMs - 250);
+      this.successes = 0;
+    }
+  }
+  acquire(beforeWait?: () => void, onAcquired?: () => void): Promise<void> {
     const result = this.tail.then(async () => {
-      await delay(Math.max(0, this.nextMs - Date.now()));
+      beforeWait?.();
+      while (this.nextMs > Date.now())
+        await new Promise((resolve) => setTimeout(resolve, this.nextMs - Date.now()));
+      // Commit the call only at the actual slot, before the next queued acquisition.
+      onAcquired?.();
       this.nextMs = Date.now() + Math.max(this.penaltyMs, Math.ceil(1000 / this.perSecond));
     });
-    this.tail = result.catch(() => {}); return result;
+    this.tail = result.catch(() => {});
+    return result;
+  }
+  async enter(): Promise<() => void> {
+    if (this.active >= this.maxConcurrent)
+      await new Promise<void>((resolve) => this.waiters.push(resolve));
+    else this.active++;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const next = this.waiters.shift();
+      if (next) next();
+      else this.active--;
+    };
   }
 }

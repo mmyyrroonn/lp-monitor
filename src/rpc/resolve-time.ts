@@ -1,27 +1,52 @@
-import type { BlockAnchor, ChainReader } from '../domain/types.js';
+import type { BlockAnchor, ChainReader, MinuteBoundary } from '../domain/types.js';
 
 export type BlockSearchBounds = { fromBlock: bigint; toBlock: bigint };
 
 export interface TimeResolver {
   readonly queriedAnchors: readonly BlockAnchor[];
+  resolveMinuteBoundary(timestampSec: number, bounds?: BlockSearchBounds): Promise<MinuteBoundary>;
   resolveBlockAtOrAfter(timestampSec: number, bounds?: BlockSearchBounds): Promise<BlockAnchor>;
 }
 
-export function createTimeResolver(reader: ChainReader): TimeResolver {
-  const cache = new Map<bigint, BlockAnchor>();
-
+export function validateTimeAnchor(
+  anchor: BlockAnchor,
+  sampledAnchors: Iterable<BlockAnchor> = [],
+): void {
+  if (
+    anchor.number < 0n ||
+    !Number.isSafeInteger(anchor.timestampSec) ||
+    anchor.timestampSec < 0 ||
+    (anchor.timestampSec === 0 && anchor.number !== 0n)
+  ) {
+    throw new Error('Invalid block anchor');
+  }
+  for (const sampled of sampledAnchors) {
+    if (
+      (sampled.number < anchor.number && sampled.timestampSec > anchor.timestampSec) ||
+      (sampled.number > anchor.number && sampled.timestampSec < anchor.timestampSec)
+    )
+      throw new Error('Nonmonotonic sampled anchors');
+  }
+}
+export function createTimeResolver(
+  reader: ChainReader,
+  cache: Map<bigint, BlockAnchor> = new Map(),
+): TimeResolver {
   async function query(block: bigint | 'latest'): Promise<BlockAnchor> {
     if (block !== 'latest') {
       const cached = cache.get(block);
-      if (cached) return cached;
+      if (cached) {
+        validateTimeAnchor(cached, cache.values());
+        return cached;
+      }
     }
 
     const anchor = await reader.getAnchor(block);
     if (
-      anchor.number < 0n
-      || !Number.isSafeInteger(anchor.timestampSec)
-      || anchor.timestampSec < 0
-      || (anchor.timestampSec === 0 && anchor.number !== 0n)
+      anchor.number < 0n ||
+      !Number.isSafeInteger(anchor.timestampSec) ||
+      anchor.timestampSec < 0 ||
+      (anchor.timestampSec === 0 && anchor.number !== 0n)
     ) {
       throw new Error(`Invalid block anchor returned for ${String(block)}`);
     }
@@ -39,8 +64,8 @@ export function createTimeResolver(reader: ChainReader): TimeResolver {
 
     for (const sampled of cache.values()) {
       if (
-        (sampled.number < anchor.number && sampled.timestampSec > anchor.timestampSec)
-        || (sampled.number > anchor.number && sampled.timestampSec < anchor.timestampSec)
+        (sampled.number < anchor.number && sampled.timestampSec > anchor.timestampSec) ||
+        (sampled.number > anchor.number && sampled.timestampSec < anchor.timestampSec)
       ) {
         throw new Error(
           `Nonmonotonic sampled anchors at blocks ${sampled.number} and ${anchor.number}`,
@@ -75,6 +100,12 @@ export function createTimeResolver(reader: ChainReader): TimeResolver {
 
     let low = fromBlock;
     let high = toAnchor.number;
+    // Existing sparse anchors narrow subsequent seed/minute searches.
+    for (const sampled of cache.values()) {
+      if (sampled.number < low || sampled.number > high) continue;
+      if (sampled.timestampSec < timestampSec) low = sampled.number + 1n;
+      else high = sampled.number;
+    }
     while (low < high) {
       const middle = low + (high - low) / 2n;
       const sampled = await query(middle);
@@ -89,7 +120,9 @@ export function createTimeResolver(reader: ChainReader): TimeResolver {
     if (result.number > 0n) {
       const predecessor = await query(result.number - 1n);
       if (predecessor.timestampSec >= timestampSec) {
-        throw new Error('Block bounds do not include the first block at or after the target timestamp');
+        throw new Error(
+          'Block bounds do not include the first block at or after the target timestamp',
+        );
       }
     }
     return result;
@@ -97,7 +130,14 @@ export function createTimeResolver(reader: ChainReader): TimeResolver {
 
   return {
     get queriedAnchors() {
-      return [...cache.values()].sort((left, right) => left.number < right.number ? -1 : left.number > right.number ? 1 : 0);
+      return [...cache.values()].sort((left, right) =>
+        left.number < right.number ? -1 : left.number > right.number ? 1 : 0,
+      );
+    },
+    async resolveMinuteBoundary(timestampSec, bounds) {
+      const at = await resolveBlockAtOrAfter(timestampSec, bounds);
+      if (at.number === 0n) throw new Error('Minute boundary has no predecessor before genesis');
+      return { timestampSec, firstBlock: at.number, at, before: await query(at.number - 1n) };
     },
     resolveBlockAtOrAfter,
   };

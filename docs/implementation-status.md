@@ -91,3 +91,13 @@ Node v24.19.0、pnpm 11.19.0；生产 viem 2.56.3 / better-sqlite3 13.0.3 / zod 
 ## 版本控制补记 — 2026-09-08
 
 P0 验收结束后，按用户明确要求初始化本地 Git 并提交 P0 工程、设计文档、验收报告及最终通过的 capture/probe 原始证据。前述无 Git、未提交是验收当时的历史状态。原 research、tooling、.agents、skills-lock.json 与依赖缓存未纳入本次提交；早期失败实测的大体积原始日志保留在本地。P1 尚未开始，未推送远端。
+
+## P0 review 修正 — 2026-09-08
+
+用户确认先修完 CC review 再进入 P1。本轮已处理所有确认的问题，并记录 B6 类型版本、H6 并发原判断等不成立或需要限定的意见，见 [逐项处理记录](reviews/2026-09-08-p0-review-resolution.md)。
+
+最终本地验证：149 个测试通过、0 失败，lint（脚本语法与格式）/typecheck（含 scripts）/build/git diff --check 均退出 0，见 [新验证汇总](../artifacts/p0/review-validation.json)。生产入口为 dist/cli.js；CI 已配置，未推送、未执行远端 CI。开发依赖新增 Prettier 3.9.6，其余锁定主版本保持。
+
+验证使用本地 HTTP 模拟及归档真实 fixtures，包含跨目录离线验收；本轮没有重新调用公共 RPC。8 个已跟踪 raw/request 原始证据字节保持不变，历史元数据相对路径迁移有前后哈希记录。原 P0 单次实链验收仍作为历史证据，不代表 P1 长期运行或多分钟实链归桶通过。
+
+P1 尚未开始：下一步按 docs/superpowers/plans/2026-09-08-p1-recorder.md Task 1.1 建 SQLite store。已有 ingest/fetch-range、registry/identity、双向 codec 和共享时间解析可复用；仍需实现持久化分钟索引、follow 调度、重扫恢复，实链验收显式跨至少 3–5 个分钟边界。

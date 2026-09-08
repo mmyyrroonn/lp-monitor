@@ -101,7 +101,7 @@
       ],
       "failures": [],
       "file": {
-        "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\primary.logs.json",
+        "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/primary.logs.json",
         "sha256": "f6de2198d92f0d1a034b2c9673e9d11711884d8a558214d98b54bbfad5d30a30",
         "bytes": 574962
       }
@@ -140,7 +140,7 @@
       ],
       "failures": [],
       "file": {
-        "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\seed-1-supplement.logs.json",
+        "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/seed-1-supplement.logs.json",
         "sha256": "3256a2d158205a06fd51f4c5f8df5c76134804e6b5b477f39cecf443e5d3bffe",
         "bytes": 1026
       }
@@ -179,7 +179,7 @@
       ],
       "failures": [],
       "file": {
-        "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\seed-2-supplement.logs.json",
+        "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/seed-2-supplement.logs.json",
         "sha256": "e28c4e82b357a6c53084145c39238bb48c002b75212d7ed20ba7579d82bac923",
         "bytes": 1026
       }
@@ -187,32 +187,32 @@
   ],
   "files": [
     {
-      "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\primary.logs.json",
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/primary.logs.json",
       "sha256": "f6de2198d92f0d1a034b2c9673e9d11711884d8a558214d98b54bbfad5d30a30",
       "bytes": 574962
     },
     {
-      "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\seed-1-supplement.logs.json",
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/seed-1-supplement.logs.json",
       "sha256": "3256a2d158205a06fd51f4c5f8df5c76134804e6b5b477f39cecf443e5d3bffe",
       "bytes": 1026
     },
     {
-      "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\seed-2-supplement.logs.json",
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/seed-2-supplement.logs.json",
       "sha256": "e28c4e82b357a6c53084145c39238bb48c002b75212d7ed20ba7579d82bac923",
       "bytes": 1026
     },
     {
-      "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\logs.json",
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/logs.json",
       "sha256": "13d388eaf6702cf28025e064f0f3fdab2c93ecd50cc5069e36e7a45489223126",
       "bytes": 577008
     },
     {
-      "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\anchors.json",
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/anchors.json",
       "sha256": "85bb0d1a0e2db981a7b78ca87681bfbb376188b0e193ad5f2055b344147756ea",
       "bytes": 11515
     },
     {
-      "path": "E:\\lp-monitor\\artifacts\\p0\\raw\\2026-09-08T06-10-51-129Z\\time-boundaries.json",
+      "path": "artifacts/p0/raw/2026-09-08T06-10-51-129Z/time-boundaries.json",
       "sha256": "17e6a540693b345ca73c67d576bc3a8b67979ecf034d7b8eadf328600874d099",
       "bytes": 240
     }
@@ -301,5 +301,6 @@
     "peakOneSecond": 4,
     "averageRpcPerSecond": 1.027601864021986,
     "billingUnits": null
-  }
+  },
+  "pathBase": "repository"
 }

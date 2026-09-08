@@ -1,4 +1,5 @@
-import { cp, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,7 +19,8 @@ const sources = [
     license: 'LICENSE',
     output: 'src/protocols/uniswap-v3/abi.ts',
     exportName: 'v3FactoryAbi',
-    sourceUrl: 'https://unpkg.com/@uniswap/v3-core@1.0.1/contracts/interfaces/IUniswapV3Factory.sol',
+    sourceUrl:
+      'https://unpkg.com/@uniswap/v3-core@1.0.1/contracts/interfaces/IUniswapV3Factory.sol',
   },
   {
     id: 'uniswap-v3-pool',
@@ -46,7 +48,8 @@ const sources = [
 
 const sha256 = (contents) => createHash('sha256').update(contents).digest('hex');
 const packageRoot = (packageName) => join(root, 'node_modules', ...packageName.split('/'));
-const readPackage = async (packageName) => JSON.parse(await readFile(join(packageRoot(packageName), 'package.json'), 'utf8'));
+const readPackage = async (packageName) =>
+  JSON.parse(await readFile(join(packageRoot(packageName), 'package.json'), 'utf8'));
 
 async function copyUpstream(source, path, label) {
   const contents = await readFile(path);
@@ -63,12 +66,14 @@ async function main() {
   for (const source of sources) {
     const installed = await readPackage(source.packageName);
     if (installed.version !== source.version) {
-      throw new Error(`${source.packageName} must be exactly ${source.version}, found ${installed.version}`);
+      throw new Error(
+        `${source.packageName} must be exactly ${source.version}, found ${installed.version}`,
+      );
     }
     const sourceRoot = packageRoot(source.packageName);
     const artifactPath = join(sourceRoot, source.artifact);
     const artifactContents = await readFile(artifactPath);
-    const artifact = JSON.parse(artifactContents);
+    const artifact = JSON.parse(artifactContents.toString('utf8'));
     if (!Array.isArray(artifact.abi)) throw new Error(`${source.id} artifact has no ABI array`);
 
     const [artifactCopy, solidityCopy, licenseCopy] = await Promise.all([
@@ -84,13 +89,16 @@ async function main() {
       version: installed.version,
       packageLicense: installed.license ?? null,
       sourceUrl: source.sourceUrl,
-      sourceSpdx: (await readFile(join(sourceRoot, source.solidity), 'utf8')).match(/SPDX-License-Identifier:\s*([^\s*]+)/)?.[1] ?? null,
+      sourceSpdx:
+        (await readFile(join(sourceRoot, source.solidity), 'utf8')).match(
+          /SPDX-License-Identifier:\s*([^\s*]+)/,
+        )?.[1] ?? null,
       abi: artifactCopy,
       source: solidityCopy,
       notice: licenseCopy,
       importTest: {
         command: 'node node_modules/vitest/vitest.mjs run tests/unit/abi.test.ts',
-        result: verified ? 'passed' : 'not-run-by-generator',
+        result: 'not-run-by-generator',
       },
     });
   }
@@ -120,24 +128,52 @@ async function main() {
     copyUpstream(sdkSource, join(sdkRoot, 'LICENSE'), 'NOTICE_OR_LICENSE'),
   ]);
   evidence.push({
-    id: 'uniswap-v4-sdk-pool-id-cross-check', package: '@uniswap/v4-sdk', version: sdk.version,
+    id: 'uniswap-v4-sdk-pool-id-cross-check',
+    package: '@uniswap/v4-sdk',
+    version: sdk.version,
     packageLicense: sdk.license ?? null,
     sourceUrl: 'https://unpkg.com/@uniswap/v4-sdk@2.3.3/dist/esm/src/entities/pool.js',
-    sourceSpdx: null, abi: null, source: sdkPoolCopy, notice: sdkNoticeCopy,
+    sourceSpdx: null,
+    abi: null,
+    source: sdkPoolCopy,
+    notice: sdkNoticeCopy,
     importTest: {
       command: 'node node_modules/vitest/vitest.mjs run tests/unit/abi.test.ts',
-      result: verified ? 'passed' : 'not-run-by-generator',
+      result: 'not-run-by-generator',
     },
   });
   evidence.push({
-    id: 'lp-terminal-reference', package: 'labrinyang/lp-terminal', version: 'c127e70a2a21ca40f5668d155587e36e80049277',
-    packageLicense: 'MIT', sourceUrl: 'https://github.com/labrinyang/lp-terminal/tree/c127e70a2a21ca40f5668d155587e36e80049277',
-    sourceSpdx: null, abi: null, source: null, notice: null,
-    importTest: 'reference only; no application code copied. Robinhood StateView candidate: 0xF3334192D15450CdD385c8B70e03f9A6bD9E673b (unverified).',
+    id: 'lp-terminal-reference',
+    package: 'labrinyang/lp-terminal',
+    version: 'c127e70a2a21ca40f5668d155587e36e80049277',
+    packageLicense: 'MIT',
+    sourceUrl:
+      'https://github.com/labrinyang/lp-terminal/tree/c127e70a2a21ca40f5668d155587e36e80049277',
+    sourceSpdx: null,
+    abi: null,
+    source: null,
+    notice: null,
+    importTest:
+      'reference only; no application code copied. Robinhood StateView candidate: 0xF3334192D15450CdD385c8B70e03f9A6bD9E673b (unverified).',
   });
 
+  if (verified) {
+    const test = spawnSync(
+      process.execPath,
+      ['node_modules/vitest/vitest.mjs', 'run', 'tests/unit/abi.test.ts'],
+      { cwd: root, stdio: 'inherit' },
+    );
+    if (test.error || test.status !== 0)
+      throw new Error('ABI import tests failed; verification evidence not written');
+    for (const entry of evidence)
+      if (typeof entry.importTest === 'object') entry.importTest.result = 'passed';
+  }
+
   await mkdir(dirname(evidencePath), { recursive: true });
-  await writeFile(evidencePath, `${JSON.stringify({ generatedAt: new Date().toISOString(), entries: evidence }, null, 2)}\n`);
+  await writeFile(
+    evidencePath,
+    `${JSON.stringify({ generatedAt: new Date().toISOString(), entries: evidence }, null, 2)}\n`,
+  );
 }
 
 await main();

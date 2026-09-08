@@ -1,0 +1,12 @@
+{
+  "checkedAt": "2026-09-08",
+  "registryCommand": "npm view @types/better-sqlite3 version --json",
+  "registryLatest": "9.6.0",
+  "installedRuntime": "13.0.3",
+  "installedTypes": "9.6.0",
+  "runtimeHasBundledTypes": false,
+  "decision": "Keep published latest declarations; package major versions are not a compatibility proof. Do not invent a v13 type release.",
+  "contractTest": "tests/unit/sqlite.test.ts",
+  "covered": ["constructor timeout", "exec", "prepare generic parameters and results", "run", "get", "all", "iterate", "safeIntegers", "pragma simple", "transaction immediate and rollback", "inTransaction", "close/open"],
+  "limitation": "Contract validates used storage APIs only, not every SQLite API or future release."
+}

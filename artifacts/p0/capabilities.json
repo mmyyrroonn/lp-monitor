@@ -9,14 +9,14 @@
       "status": "supported",
       "required": true,
       "at": "2026-09-08T06:10:04.953Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": 4663
     },
     "recentAnchor": {
       "status": "supported",
       "required": true,
       "at": "2026-09-08T06:10:05.220Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": {
         "number": "57465368",
         "hash": "0x2bf25e98906192fa5f90177b447894dbf9a95855007965e6377795d0560e0676",
@@ -27,7 +27,7 @@
       "status": "supported",
       "required": true,
       "at": "2026-09-08T06:10:05.514Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": {
         "fromBlock": "57465359",
         "toBlock": "57465368",
@@ -46,7 +46,7 @@
       "status": "supported",
       "required": true,
       "at": "2026-09-08T06:10:05.824Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": {
         "fromBlock": "57465349",
         "toBlock": "57465368",
@@ -65,7 +65,7 @@
       "status": "supported",
       "required": true,
       "at": "2026-09-08T06:10:06.118Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": {
         "fromBlock": "57465269",
         "toBlock": "57465368",
@@ -84,7 +84,7 @@
       "status": "supported",
       "required": true,
       "at": "2026-09-08T06:10:07.888Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": {
         "equal": true,
         "full": 44,
@@ -97,7 +97,7 @@
       "status": "supported",
       "required": true,
       "at": "2026-09-08T06:10:08.182Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": {
         "bytes": 24009,
         "codeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626"
@@ -107,7 +107,7 @@
       "status": "supported",
       "required": true,
       "at": "2026-09-08T06:10:08.448Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": {
         "responseHash": "0xbb8a6a4669ba250d26cd7a459eca9d215f8307e33aebe50379bc5a3617ec3444",
         "decimals": 18
@@ -117,7 +117,7 @@
       "status": "supported",
       "required": false,
       "at": "2026-09-08T06:10:08.734Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": {
         "number": "56465368",
         "hash": "0x8ec613684c99532907d931afd0939fb5943ffc65227a1bd457a09adf8f520c27",
@@ -128,7 +128,7 @@
       "status": "supported",
       "required": false,
       "at": "2026-09-08T06:10:09.040Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": {
         "fromBlock": "56465368",
         "toBlock": "56465387",
@@ -140,7 +140,7 @@
       "status": "supported",
       "required": false,
       "at": "2026-09-08T06:10:09.326Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": {
         "blockNumber": "57465349",
         "raw": "0x0",
@@ -156,7 +156,7 @@
       "status": "supported",
       "required": false,
       "at": "2026-09-08T06:10:09.678Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": {
         "blockNumber": "57465367",
         "raw": "0x6a9fa6b9",
@@ -172,21 +172,21 @@
       "status": "unknown",
       "required": false,
       "at": "2026-09-08T06:10:09.678Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": "not probed: optional for P0"
     },
     "websocket": {
       "status": "unknown",
       "required": false,
       "at": "2026-09-08T06:10:09.678Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": "not probed: optional for P0"
     },
     "trace": {
       "status": "unknown",
       "required": false,
       "at": "2026-09-08T06:10:09.678Z",
-      "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl",
+      "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
       "detail": "not probed: optional for P0"
     }
   },
@@ -224,5 +224,6 @@
     "v4Manager": "86d9ece37ee75f72eb211f37a1ae9b7d8af60e66971f22c4c9ce499302a715c2"
   },
   "identityPassed": true,
-  "evidenceFile": "E:\\lp-monitor\\artifacts\\p0\\probe-2026-09-08T06-10-03-471Z\\requests.jsonl"
+  "evidenceFile": "artifacts/p0/probe-2026-09-08T06-10-03-471Z/requests.jsonl",
+  "pathBase": "repository"
 }

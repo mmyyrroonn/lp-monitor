@@ -2,143 +2,143 @@
   "at": "2026-09-08T06:16:09.834Z",
   "entries": [
     {
-      "file": "src\\cli.ts",
+      "file": "src/cli.ts",
       "sha256": "fda88677042ff76ddf10258ccb9149681d2e6cb4ca55626d4f48a9aefe691b16"
     },
     {
-      "file": "src\\config\\chain.ts",
+      "file": "src/config/chain.ts",
       "sha256": "e71de836133db86a74214be4063c0843c7b7cbe6fe7309aef617ec9a2ba6e179"
     },
     {
-      "file": "src\\config\\env.ts",
+      "file": "src/config/env.ts",
       "sha256": "6e47b43c330cf0e753d8bb713d2302730c3431b4a49b7e086b0cad2c4479a832"
     },
     {
-      "file": "src\\domain\\json.ts",
+      "file": "src/domain/json.ts",
       "sha256": "1f984cbd932bc1ef808ed37d680c9fb5ba73de9b7c65199d26d41e6814b4a58d"
     },
     {
-      "file": "src\\domain\\types.ts",
+      "file": "src/domain/types.ts",
       "sha256": "d885d42b3f4a28dad80d0ecbd86f9b8987ca4baa0950ccd39a2b9b9253278be1"
     },
     {
-      "file": "src\\ops\\files.ts",
+      "file": "src/ops/files.ts",
       "sha256": "408acd92686e07d0205d2e3bdcbdd583a4d9455036ca781550e221358af38ea5"
     },
     {
-      "file": "src\\ops\\fixture-capture.ts",
+      "file": "src/ops/fixture-capture.ts",
       "sha256": "f3b18f8cf743eb8b8c29539174ad52d5dffbd2bee2751915bfad4af3cdc8a7b7"
     },
     {
-      "file": "src\\ops\\request-meter.ts",
+      "file": "src/ops/request-meter.ts",
       "sha256": "2f6b7198ae23bf40be93006e2357e45818ec794dff594e2c974a244489a6984d"
     },
     {
-      "file": "src\\protocols\\uniswap-v3\\abi.ts",
+      "file": "src/protocols/uniswap-v3/abi.ts",
       "sha256": "1275f8b173db07981c6439c24c8ef3ff39d2d157736fce84b8d7fbc0d044525d"
     },
     {
-      "file": "src\\protocols\\uniswap-v3\\decode.ts",
+      "file": "src/protocols/uniswap-v3/decode.ts",
       "sha256": "8dd080597053bc1f60ed3ed50524968f31723758283d2c2fe005924e7e233938"
     },
     {
-      "file": "src\\protocols\\uniswap-v4\\abi.ts",
+      "file": "src/protocols/uniswap-v4/abi.ts",
       "sha256": "5e4820237a29d977fd211ecf44c180eb88fafcdeff623dabc7aca2fb9b3fe79b"
     },
     {
-      "file": "src\\protocols\\uniswap-v4\\pool-key.ts",
+      "file": "src/protocols/uniswap-v4/pool-key.ts",
       "sha256": "bb4de68df8fabe16bd335325cb2914b88279c964c274f8e7a8cc4557e5cf158c"
     },
     {
-      "file": "src\\rpc\\capabilities.ts",
+      "file": "src/rpc/capabilities.ts",
       "sha256": "340d62a9737b5eeb47c3455231559dc30b266851fa4cbd22af1db4002c76f8f0"
     },
     {
-      "file": "src\\rpc\\client.ts",
+      "file": "src/rpc/client.ts",
       "sha256": "096bbcf0badd9761f0e9e11bf771b46d0cefba4732c9133553b8cc0c732cc524"
     },
     {
-      "file": "src\\rpc\\errors.ts",
+      "file": "src/rpc/errors.ts",
       "sha256": "ec871b43dda83b22cb7199dd207bbd00948e80d936560d66ca3d4b4477d7fd5e"
     },
     {
-      "file": "src\\rpc\\identity.ts",
+      "file": "src/rpc/identity.ts",
       "sha256": "79998838cd72ec3619d832be7f0f35d98725c4380dba74231b67cb14209f0b4f"
     },
     {
-      "file": "src\\rpc\\rate-limit.ts",
+      "file": "src/rpc/rate-limit.ts",
       "sha256": "b25a8741d7ac47938aae5eaa54828ab3d816f55dab4f1c7056c8d05f0553ac2c"
     },
     {
-      "file": "src\\rpc\\resolve-time.ts",
+      "file": "src/rpc/resolve-time.ts",
       "sha256": "b55929c4be010f1c9b672f8c91af611286a33254d4cf5fc5be809a83a912668a"
     },
     {
-      "file": "tests\\integration\\p0-fixtures.test.ts",
+      "file": "tests/integration/p0-fixtures.test.ts",
       "sha256": "505dac3a8fdb932350bbc199a6e5f46e6c3c82637458a24b5bbf28dfc11b701d"
     },
     {
-      "file": "tests\\unit\\abi.test.ts",
+      "file": "tests/unit/abi.test.ts",
       "sha256": "8969eb1a1fad1c1e3793bc9e28a6e4e1b908a8d474ff4ad2a862edcb4cbdee61"
     },
     {
-      "file": "tests\\unit\\capabilities.test.ts",
+      "file": "tests/unit/capabilities.test.ts",
       "sha256": "705e4dd614f7ccc1724b852ca3215cdfc7bb610b89c78e19504d148bce56435a"
     },
     {
-      "file": "tests\\unit\\cli.test.ts",
+      "file": "tests/unit/cli.test.ts",
       "sha256": "e376fbce61bd9491518c05b24fa4879135c0be4a374bf77be375f0b1810292fc"
     },
     {
-      "file": "tests\\unit\\client.test.ts",
+      "file": "tests/unit/client.test.ts",
       "sha256": "3827319589ab30b302b7afb1ae58650cd533a8418e21f7f7bfa63b1abdd83c06"
     },
     {
-      "file": "tests\\unit\\config.test.ts",
+      "file": "tests/unit/config.test.ts",
       "sha256": "6a8ce82524236e0d4fb994f796a8332bb4ad72ff709c432550e1f95d7773f7a5"
     },
     {
-      "file": "tests\\unit\\fixture-capture.test.ts",
+      "file": "tests/unit/fixture-capture.test.ts",
       "sha256": "9f8481343f3ba22ae7b5a0176b98adb2c4645129f20da8b39009aac6414f2bef"
     },
     {
-      "file": "tests\\unit\\identity.test.ts",
+      "file": "tests/unit/identity.test.ts",
       "sha256": "dadd9117e836aa7ee86a02c5bebdd341344f5be909f852ddcf2b02b610d3e90d"
     },
     {
-      "file": "tests\\unit\\json.test.ts",
+      "file": "tests/unit/json.test.ts",
       "sha256": "9bd0bbb793a27dc45d0461ae68553f2d2bab28af945d99568fb2a12a398b83f4"
     },
     {
-      "file": "tests\\unit\\rate-limit.test.ts",
+      "file": "tests/unit/rate-limit.test.ts",
       "sha256": "db9e18a9742d56380a82833a5a1f8a054857d96683ca9c44aa63263e7b1802a1"
     },
     {
-      "file": "tests\\unit\\resolve-time.test.ts",
+      "file": "tests/unit/resolve-time.test.ts",
       "sha256": "896da26e00df775105e0943c7eb808edca48452fd423cdbef4736b24d675a0e2"
     },
     {
-      "file": "tests\\unit\\sqlite.test.ts",
+      "file": "tests/unit/sqlite.test.ts",
       "sha256": "a27f1993d4af14bf8b5464163af92000830156cf83178c1ca84fd1cc1de2a6e3"
     },
     {
-      "file": "config\\robinhood.json",
+      "file": "config/robinhood.json",
       "sha256": "d3caed1b22a166b7d7fb887f6159eb48e1ae1dd507b3fb7c9469f5e0aeccc97f"
     },
     {
-      "file": "config\\watchlist.amc.json",
+      "file": "config/watchlist.amc.json",
       "sha256": "c7f67d48c2e36b09d07fbc569e99f876f2987a2585acfbffd4573c2d2461bf31"
     },
     {
-      "file": "scripts\\p0-acceptance.mjs",
+      "file": "scripts/p0-acceptance.mjs",
       "sha256": "ff429ba449dae4b6bc3b529c9af04be2282267ae5c8621dc36a255fc0c5b5a39"
     },
     {
-      "file": "scripts\\source-evidence.mjs",
+      "file": "scripts/source-evidence.mjs",
       "sha256": "dd657f9a233c6c53ffbd1b3e7ba1e884f0f2e88f689fe2ef3bef363f23de3de7"
     },
     {
-      "file": "scripts\\vendor-abis.mjs",
+      "file": "scripts/vendor-abis.mjs",
       "sha256": "e031e6977eacff6175d83bbd5bafa4b366c76d7f9e56f303165ca0b915071a59"
     },
     {
