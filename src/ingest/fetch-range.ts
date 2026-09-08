@@ -3,6 +3,7 @@ import type { ChainReader, RawLog } from '../domain/types.js';
 import { encodeJson } from '../domain/json.js';
 import { sha256 } from '../ops/files.js';
 import { classifyRpcError } from '../rpc/errors.js';
+import { rawLogKey } from '../storage/manifest.js';
 
 type Filter = Parameters<ChainReader['getLogs']>[0];
 
@@ -24,9 +25,6 @@ export interface FetchBoundedOptions {
   /** Keep successful earlier leaves and represent terminal failures in the result. */
   captureCriticalFailures?: boolean;
 }
-
-const rawLogKey = (log: RawLog) =>
-  `${log.blockHash.toLowerCase()}:${log.transactionHash.toLowerCase()}:${log.logIndex}`;
 
 function splitFilter(filter: Filter): readonly [Filter, Filter] | null {
   if (filter.fromBlock < filter.toBlock) {

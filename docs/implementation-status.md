@@ -117,3 +117,7 @@ P1 未开始，仍从 Task 1.1 开始；未实现 store/follow/恢复，未执�
 真实录制与重启：五分钟运行跨 5 个当时分钟边界；最终累计 650 条操作日志、30 个边界，全部操作日志的原始时间为 0x0，分钟已归桶、精确秒数保持 null。最终构建同 DB 重启退出 0，旧 100 块显式重扫退出 0且 added/removed/retimed 均为 0。首轮 max topics 失败和第二轮期限末段 incomplete 均保留；未误推进失败范围。P0 原证据未改。
 
 无新依赖，增加默认 maxFilterValues=1000 及 P1 专用预算/恢复配置；生产部署起点仍未验证，日志上限仍为 null，结果依赖 RPC 一致性且为 provisional。P2–P6 未开始；未启动永久服务、连接钱包或交易。当前改动在 feat/p1-recorder，尚未提交或推送。下一窗口经用户安排后读 P2 计划，从 Task 2.1 开始。
+
+## P1 第二轮 recorder 审查修正 — 2026-09-08
+
+修复 manifest 最终落盘失败分类、bootstrap hash 大小写比较、getLogs 接收对象及 rawLogKey 复用。新增 8 个回归用例，当前全库 281 测试通过；typecheck/build/lint 均通过。详见 [处理与验证记录](reviews/2026-09-08-p1-recorder-review-resolution.md)。原实链验收保留，本轮没有新 RPC 采集；临时运行输出不纳入 Git。

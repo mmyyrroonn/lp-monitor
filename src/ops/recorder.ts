@@ -72,7 +72,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       counts[kind]++;
       return reader.getAnchor(block);
     },
-    getLogs: reader.getLogs,
+    getLogs: (filter) => reader.getLogs(filter),
   });
   const endpointReader = metered('endpointAnchors');
   const batchRecords: {
@@ -143,7 +143,10 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       let tip = store.acceptedTip(discoveryScope);
       if (tip) {
         const current = await endpointReader.getAnchor(tip.number);
-        if (current.hash !== tip.hash || current.timestampSec !== tip.timestampSec) {
+        if (
+          current.hash.toLowerCase() !== tip.hash.toLowerCase() ||
+          current.timestampSec !== tip.timestampSec
+        ) {
           const match = await findMatchingCheckpoint(
             endpointReader,
             store.checkpoints(discoveryScope),
@@ -364,7 +367,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       revisions,
       evidenceMode: options.evidenceMode,
     };
-    try {
+    const persistFinalRun = () => {
       try {
         store.recordRun({
           id,
@@ -375,15 +378,33 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           payload: summary,
         });
       } catch {
-        result.failures.push('run-record-write');
+        if (!result.failures.includes('run-record-write')) result.failures.push('run-record-write');
         result.status = summary.status = 'failed';
-        exitCode = 1;
+        if (exitCode === 0) exitCode = 1;
       }
-      saveJson(resolve(out, 'manifest.json'), summary, out);
+    };
+    try {
+      persistFinalRun();
+      let manifest: string | null = resolve(out, 'manifest.json');
+      try {
+        saveJson(manifest, summary, out);
+      } catch {
+        result.failures.push('manifest-write');
+        result.status = summary.status = 'failed';
+        if (exitCode === 0) exitCode = 1;
+        if (primary instanceof RpcFailure)
+          primary.evidenceFailure ??= new RpcFailure('manifest-write');
+        manifest = null;
+        // The database may still be writable when only the output path failed.
+        persistFinalRun();
+        console.error(
+          encodeJson({ event: 'evidence-failure', failure: 'manifest-write', exitCode }),
+        );
+      }
       console.log(
         encodeJson({
           event: 'finished',
-          manifest: resolve(out, 'manifest.json'),
+          manifest,
           status: result.status,
           exitCode,
           counts,
