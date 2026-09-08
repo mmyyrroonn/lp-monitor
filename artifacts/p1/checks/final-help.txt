@@ -1,0 +1,14 @@
+Robinhood read-only P0/P1 CLI
+  pnpm lp ingest --config config/robinhood.json --from-block N --to-block N
+  pnpm lp follow --config config/robinhood.json --duration 10m
+  P1: --db PATH --watchlist PATH --max-rpc-calls N (default 10000)
+  P1: --evidence full|sampled|off (default sampled); bounded run only.
+  pnpm lp probe --config config/robinhood.json --out artifacts/p0/capabilities.json
+  pnpm lp capture --config config/robinhood.json --last-blocks 300 --out artifacts/p0/raw
+  pnpm lp capture --from-block N --to-block N --out artifacts/p0/raw
+  --evidence full|sampled|off  Request evidence policy (default full).
+  --help  Show this help (no RPC required).
+Environment: RH_RPC_HTTP (required), RH_RPC_WS (optional), RH_PROVIDER_ALIAS, LP_DATA_DIR.
+Capture runs once, bounded to 150 method calls. Output contains a new timestamped run folder.
+Exit codes: 0 success, 1 internal error, 2 configuration, 3 required RPC/identity failure, 4 incomplete data.
+

@@ -1,0 +1,178 @@
+{
+  "version": 1,
+  "runId": "2026-09-08T10-39-47-703Z-89fdf338",
+  "chainId": 4663,
+  "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+  "discoveryScope": "scope-v1-31c2bb795d5b913ca6ebf4ec7cef72201fbe2115f4c00a93abcdc0b62eea3794",
+  "sourceAlias": "robinhood-public",
+  "startedAtMs": 1788863987716,
+  "finishedAtMs": 1788863997833,
+  "configVersion": "2026-09-08.p0-review2",
+  "assetVersion": "2026-09-08.p0-seeds",
+  "configurationHash": "9bd120d8e03371a7f6771194de48d851f367250663c43a39cdda78b4bc696dbb",
+  "finality": "provisional",
+  "coverageAssumption": "RPC filter contract; no independent chain verification",
+  "maxLogsPerResponse": null,
+  "maxFilterValues": 1000,
+  "logResponseGuard": 5000,
+  "status": "complete",
+  "failures": [],
+  "follow": {
+    "acceptedRanges": 1,
+    "reorgs": 0,
+    "warmupResets": 0,
+    "failures": [],
+    "complete": true
+  },
+  "identity": {
+    "status": "unverified",
+    "requiredPassed": true,
+    "currentIdentityStatus": "verified",
+    "anchor": {
+      "number": "57625769",
+      "hash": "0x38a2bdb5833b7ea2058cdd130ad1c4938353c97adb38f4417728bf9d2ecb989d",
+      "timestampSec": 1788863984
+    },
+    "chainId": {
+      "expected": 4663,
+      "observed": 4663,
+      "status": "verified"
+    },
+    "contracts": {
+      "v3Factory": {
+        "address": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0xec72b1abd1f2faee020cfea9c646bd8994f9fb389054f6e574f103a895091739"
+      },
+      "v4Manager": {
+        "address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626"
+      },
+      "stateView": {
+        "address": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
+        "required": false,
+        "status": "verified",
+        "codeHash": "0x7d9c591e0956fd89d98feb4ffcfe8bf1f7a62bd485edd979fa21d104b49878a6"
+      }
+    },
+    "tokens": {
+      "AMC": {
+        "address": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0x6c1fdd40002dcb440c7fff6a84171404d279ccb057803b65826f7546acd65630",
+        "decimals": 18
+      },
+      "USDG": {
+        "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0x864cc9ad53b338b82da1f7cab85ab0b3d5c8861acb422b6fec63cf36234f36a6",
+        "decimals": 6
+      }
+    },
+    "v3Pools": [
+      {
+        "address": "0xaa34fea710a1a737840329051d81d3b0b7c564d5",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0x7285522ff427b6fc303fbae5a66111cf1d30e003c568dd13f5c6522e4b5ce04c",
+        "factory": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+        "token0": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "token1": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "fee": 3000
+      }
+    ],
+    "stateViewPoolManager": {
+      "required": false,
+      "status": "verified",
+      "observed": "0x8366a39cc670b4001a1121b8f6a443a643e40951"
+    },
+    "deployments": {
+      "v3Factory": {
+        "address": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+        "status": "unverified",
+        "firstCodeBlock": null,
+        "candidateBlock": "9070",
+        "candidateChecked": true,
+        "reason": "RPC request-failed"
+      },
+      "v4Manager": {
+        "address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "status": "unverified",
+        "firstCodeBlock": null,
+        "candidateBlock": "9070",
+        "candidateChecked": true,
+        "reason": "RPC request-failed"
+      }
+    },
+    "rpcCallsUsed": 19
+  },
+  "discoveryComplete": true,
+  "timingUnresolved": 0,
+  "timingFailures": [],
+  "counts": {
+    "endpointAnchors": 7,
+    "minuteAnchors": 1,
+    "warmupAnchors": 0,
+    "discoveryBatches": 1,
+    "operationBatches": 1
+  },
+  "meter": {
+    "calls": 37,
+    "retries": 0,
+    "responseBytes": 174347,
+    "methods": {
+      "eth_getBlockByNumber": 9,
+      "eth_chainId": 1,
+      "eth_getCode": 8,
+      "eth_call": 8,
+      "eth_getLogs": 11
+    },
+    "elapsedMs": 10117,
+    "maxCalls": 200,
+    "peakOneSecond": 5,
+    "averageRpcPerSecond": 3.6572106355639025,
+    "billingUnits": null
+  },
+  "acceptedTip": {
+    "number": "57625255",
+    "hash": "0xc03ff86009711d4f95cd2dd255ef54e79dae617873a745221d1e7a70e390dfba",
+    "timestampSec": 1788863932
+  },
+  "batches": [
+    {
+      "id": "fec8093d67b30b6763f750a9330f524d9f6da116e9903feebe08e664d8d2b629",
+      "scopeId": "scope-v1-31c2bb795d5b913ca6ebf4ec7cef72201fbe2115f4c00a93abcdc0b62eea3794",
+      "fromBlock": "57624161",
+      "toBlock": "57625769",
+      "manifestHash": "6b06e9be77b114af204d5eb9945e0857d9918f2ad497f115ce8ab44a7cb1fdfc",
+      "completeness": "complete",
+      "logs": 0,
+      "accepted": true
+    },
+    {
+      "id": "39af51d4d0dafe5452bb9017b91f7e884f4762dcd4fcc8938f0dde60cf577e35",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57622597",
+      "toBlock": "57622696",
+      "manifestHash": "b4662c3107e741b7b75f9d6761397e36b0005ec91ae1c44c9522b0f74c07df1b",
+      "completeness": "complete",
+      "logs": 4,
+      "accepted": true
+    }
+  ],
+  "revisions": [
+    {
+      "cause": "range",
+      "added": 0,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57622597"
+    }
+  ],
+  "evidenceMode": "sampled"
+}

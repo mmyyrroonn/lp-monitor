@@ -1,0 +1,450 @@
+{
+  "version": 1,
+  "runId": "2026-09-08T10-37-00-932Z-b5217f30",
+  "chainId": 4663,
+  "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+  "discoveryScope": "scope-v1-31c2bb795d5b913ca6ebf4ec7cef72201fbe2115f4c00a93abcdc0b62eea3794",
+  "sourceAlias": "robinhood-public",
+  "startedAtMs": 1788863820945,
+  "finishedAtMs": 1788863940959,
+  "configVersion": "2026-09-08.p0-review2",
+  "assetVersion": "2026-09-08.p0-seeds",
+  "configurationHash": "9bd120d8e03371a7f6771194de48d851f367250663c43a39cdda78b4bc696dbb",
+  "finality": "provisional",
+  "coverageAssumption": "RPC filter contract; no independent chain verification",
+  "maxLogsPerResponse": null,
+  "maxFilterValues": 1000,
+  "logResponseGuard": 5000,
+  "status": "complete",
+  "failures": [],
+  "follow": {
+    "acceptedRanges": 17,
+    "reorgs": 0,
+    "warmupResets": 0,
+    "failures": [],
+    "complete": true
+  },
+  "identity": {
+    "status": "unverified",
+    "requiredPassed": true,
+    "currentIdentityStatus": "verified",
+    "anchor": {
+      "number": "57624160",
+      "hash": "0x524b56cdee3dbb6aee769572b15552ddb323c49abf48187fd34b2ca6445c2612",
+      "timestampSec": 1788863823
+    },
+    "chainId": {
+      "expected": 4663,
+      "observed": 4663,
+      "status": "verified"
+    },
+    "contracts": {
+      "v3Factory": {
+        "address": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0xec72b1abd1f2faee020cfea9c646bd8994f9fb389054f6e574f103a895091739"
+      },
+      "v4Manager": {
+        "address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626"
+      },
+      "stateView": {
+        "address": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
+        "required": false,
+        "status": "verified",
+        "codeHash": "0x7d9c591e0956fd89d98feb4ffcfe8bf1f7a62bd485edd979fa21d104b49878a6"
+      }
+    },
+    "tokens": {
+      "AMC": {
+        "address": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0x6c1fdd40002dcb440c7fff6a84171404d279ccb057803b65826f7546acd65630",
+        "decimals": 18
+      },
+      "USDG": {
+        "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0x864cc9ad53b338b82da1f7cab85ab0b3d5c8861acb422b6fec63cf36234f36a6",
+        "decimals": 6
+      }
+    },
+    "v3Pools": [
+      {
+        "address": "0xaa34fea710a1a737840329051d81d3b0b7c564d5",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0x7285522ff427b6fc303fbae5a66111cf1d30e003c568dd13f5c6522e4b5ce04c",
+        "factory": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+        "token0": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "token1": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "fee": 3000
+      }
+    ],
+    "stateViewPoolManager": {
+      "required": false,
+      "status": "verified",
+      "observed": "0x8366a39cc670b4001a1121b8f6a443a643e40951"
+    },
+    "deployments": {
+      "v3Factory": {
+        "address": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+        "status": "unverified",
+        "firstCodeBlock": null,
+        "candidateBlock": "9070",
+        "candidateChecked": true,
+        "reason": "RPC request-failed"
+      },
+      "v4Manager": {
+        "address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "status": "unverified",
+        "firstCodeBlock": null,
+        "candidateBlock": "9070",
+        "candidateChecked": true,
+        "reason": "RPC request-failed"
+      }
+    },
+    "rpcCallsUsed": 20
+  },
+  "discoveryComplete": true,
+  "timingUnresolved": 0,
+  "timingFailures": [],
+  "counts": {
+    "endpointAnchors": 54,
+    "minuteAnchors": 49,
+    "warmupAnchors": 0,
+    "discoveryBatches": 1,
+    "operationBatches": 17
+  },
+  "meter": {
+    "calls": 248,
+    "retries": 4,
+    "responseBytes": 432896,
+    "methods": {
+      "eth_getBlockByNumber": 105,
+      "eth_chainId": 1,
+      "eth_getCode": 8,
+      "eth_call": 8,
+      "eth_getLogs": 126
+    },
+    "elapsedMs": 120015,
+    "maxCalls": 2000,
+    "peakOneSecond": 5,
+    "averageRpcPerSecond": 2.066408365620964,
+    "billingUnits": null
+  },
+  "acceptedTip": {
+    "number": "57625255",
+    "hash": "0xc03ff86009711d4f95cd2dd255ef54e79dae617873a745221d1e7a70e390dfba",
+    "timestampSec": 1788863932
+  },
+  "batches": [
+    {
+      "id": "8d7841eaa2fc69d3db3a19c588a9b410666ebca153fd1d4c036dc89d25caf2ec",
+      "scopeId": "scope-v1-31c2bb795d5b913ca6ebf4ec7cef72201fbe2115f4c00a93abcdc0b62eea3794",
+      "fromBlock": "57619843",
+      "toBlock": "57624160",
+      "manifestHash": "d13e419a43dc3a78a6db7fd815fe7a43dd5fa3acd518d9f6b4a472817a9a8b3e",
+      "completeness": "complete",
+      "logs": 0,
+      "accepted": true
+    },
+    {
+      "id": "035caa826a3f0de7e3ca5ba1d342b19119155b26392de30ce1806b4bd599554a",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57622677",
+      "toBlock": "57623676",
+      "manifestHash": "091ba863e92000e9efa21acb5254a8f8b3d1ba2608108dae016a2df5b9f5b062",
+      "completeness": "complete",
+      "logs": 24,
+      "accepted": true
+    },
+    {
+      "id": "e6ed1ae65063409fe9d7e7f34d3799423587950d61b9fe490060350d795cc570",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57623657",
+      "toBlock": "57624225",
+      "manifestHash": "55a81cff4efbf86c0669abbe4dbaff891085279167980155766eb38e5a80e052",
+      "completeness": "complete",
+      "logs": 10,
+      "accepted": true
+    },
+    {
+      "id": "c02706f0d41d7b876b64ce9869ed801b6b5970d781bd024bae9c7e6ea2583555",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57624206",
+      "toBlock": "57624369",
+      "manifestHash": "7bd3744f6aa5427a212c726aefe07a8a95cce654fb78b08703757b9c638f78f7",
+      "completeness": "complete",
+      "logs": 4,
+      "accepted": true
+    },
+    {
+      "id": "568376b06ccd77b5003dfe8dfc9d4b2a57b2b873bbb917915e78c8c40728876e",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57624350",
+      "toBlock": "57624415",
+      "manifestHash": "90c705c469cc0c064ac5577404e0652e8e821e9b8c7d4ad560353dab83c8d6be",
+      "completeness": "complete",
+      "logs": 3,
+      "accepted": true
+    },
+    {
+      "id": "46b8d0ecdb4403d7bb0fe7e271bb33434b14c7c31ff153749b49e58fc74c87bf",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57624396",
+      "toBlock": "57624507",
+      "manifestHash": "6777199fc6a425416048f055ae893921dfcdb6b45cf373aecfef82732482a306",
+      "completeness": "complete",
+      "logs": 1,
+      "accepted": true
+    },
+    {
+      "id": "da7635f51ab10b17aecd3c91af6f33edf641521c869f3237eab3d3818d515f03",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57624488",
+      "toBlock": "57624583",
+      "manifestHash": "857acb885cc4b0b8f093fb42e731ff88aa5e595cf02ec2ddc69342a89a689038",
+      "completeness": "complete",
+      "logs": 6,
+      "accepted": true
+    },
+    {
+      "id": "fc097aa71e9290c1b33ded47427e263293f4a3ba5a04abb6e989049c145edd54",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57624564",
+      "toBlock": "57624621",
+      "manifestHash": "f62bb52c6ba20fa9786ddd515117d024c449946454febe7d616506f02f8bced5",
+      "completeness": "complete",
+      "logs": 2,
+      "accepted": true
+    },
+    {
+      "id": "ce6111e47f4b034d9b00a3ee99fb0bc032a7e9d8bfb70473d00e3eaa1be34321",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57624602",
+      "toBlock": "57624683",
+      "manifestHash": "a249c2ebf7f9a560b78e93fd4a73df0a18f51b6fe2016b60c3257c4b0412e694",
+      "completeness": "complete",
+      "logs": 0,
+      "accepted": true
+    },
+    {
+      "id": "f1d869b02d415e2c320861c3b175b1bee5a8766d86b83758ba431e17fc3c9fb2",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57624664",
+      "toBlock": "57624731",
+      "manifestHash": "4fad3b8501732190b48b64335f9236c7ab3a9f4df203ccccc3dee1ca685faaa4",
+      "completeness": "complete",
+      "logs": 0,
+      "accepted": true
+    },
+    {
+      "id": "4298be4583796c47237578533111b25fcb78d88e2ea49a80ab420fb253d11e44",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57624712",
+      "toBlock": "57624769",
+      "manifestHash": "32a068e344aff782a89a4438d146735340c38d8b930276b0fdef2bbb204390d8",
+      "completeness": "complete",
+      "logs": 0,
+      "accepted": true
+    },
+    {
+      "id": "61fc54bc7a576da9fb95410cfba114361a6547fdfeea2d1de0cf0c330eb95a2a",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57624750",
+      "toBlock": "57624910",
+      "manifestHash": "ec68ea3f8e1085ce476e8b740b11a93269bb894f0ee7c8d98ba0d995082f3f93",
+      "completeness": "complete",
+      "logs": 0,
+      "accepted": true
+    },
+    {
+      "id": "7d78e9038efd724860cd66de7946bec354ca8e6a81c564646eda51ea9ef3f2ab",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57624891",
+      "toBlock": "57624947",
+      "manifestHash": "d9f88bb94b0ffc67139a591a743a23be8f4471242d0ecd7847781102b49bfff2",
+      "completeness": "complete",
+      "logs": 2,
+      "accepted": true
+    },
+    {
+      "id": "2c2c804c67721b4deb0711fe9974c6b3e7981f90c27340c1b3ed30c0244b2942",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57624928",
+      "toBlock": "57625051",
+      "manifestHash": "0b6ce967fd438b3af9e965a89ebfa06105de46f47c999af2fb9620dda234e771",
+      "completeness": "complete",
+      "logs": 2,
+      "accepted": true
+    },
+    {
+      "id": "9e379e57bb4c473b48cd906d9c6036265f1498851222da01f9058159f944658b",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57625032",
+      "toBlock": "57625110",
+      "manifestHash": "29bc26987235653fcfd83823436fd3e2c3bfda60d28658ed8f02a7c4d7b0c702",
+      "completeness": "complete",
+      "logs": 0,
+      "accepted": true
+    },
+    {
+      "id": "7202bb81b3bff4fc28096aaf6a7d6dfd4b99cc63f5dc9c32f1370e894730b53d",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57625091",
+      "toBlock": "57625160",
+      "manifestHash": "e23977851f131ff9bb510c606dfa4ef592e4757710a6922ec0c79e9be57cc36b",
+      "completeness": "complete",
+      "logs": 0,
+      "accepted": true
+    },
+    {
+      "id": "735359e42855ead03f6fa281778cfeec98167d3d655a8c88d2ebc280d16e285b",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57625141",
+      "toBlock": "57625210",
+      "manifestHash": "4472bdc6fde5c53c8a3f66ac43b08e81367fdd335251ace6b165724d1bcaccd5",
+      "completeness": "complete",
+      "logs": 0,
+      "accepted": true
+    },
+    {
+      "id": "997cc0d0abbbe2d168c47b522fea379d6abd80f16981a4abebc875f5cc9f46a7",
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "fromBlock": "57625191",
+      "toBlock": "57625255",
+      "manifestHash": "5bae8a2961b0848d1836ef0a91aed67300a6d4126732c3a845636b352ee1c723",
+      "completeness": "complete",
+      "logs": 0,
+      "accepted": true
+    }
+  ],
+  "revisions": [
+    {
+      "cause": "range",
+      "added": 24,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57622760"
+    },
+    {
+      "cause": "range",
+      "added": 10,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57623701"
+    },
+    {
+      "cause": "range",
+      "added": 3,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57624351"
+    },
+    {
+      "cause": "range",
+      "added": 0,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57624350"
+    },
+    {
+      "cause": "range",
+      "added": 1,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57624420"
+    },
+    {
+      "cause": "range",
+      "added": 6,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57624533"
+    },
+    {
+      "cause": "range",
+      "added": 0,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57624564"
+    },
+    {
+      "cause": "range",
+      "added": 0,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57624602"
+    },
+    {
+      "cause": "range",
+      "added": 0,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57624664"
+    },
+    {
+      "cause": "range",
+      "added": 0,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57624712"
+    },
+    {
+      "cause": "range",
+      "added": 0,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57624750"
+    },
+    {
+      "cause": "range",
+      "added": 2,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57624937"
+    },
+    {
+      "cause": "range",
+      "added": 0,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57624928"
+    },
+    {
+      "cause": "range",
+      "added": 0,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57625032"
+    },
+    {
+      "cause": "range",
+      "added": 0,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57625091"
+    },
+    {
+      "cause": "range",
+      "added": 0,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57625141"
+    },
+    {
+      "cause": "range",
+      "added": 0,
+      "removed": 0,
+      "retimed": 0,
+      "affectedFromBlock": "57625191"
+    }
+  ],
+  "evidenceMode": "sampled"
+}

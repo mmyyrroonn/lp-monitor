@@ -1,0 +1,242 @@
+{
+  "at": "2026-09-08T10:44:37.143Z",
+  "stage": "P1",
+  "passed": true,
+  "pathBase": "repository",
+  "baseCommit": "af85a228d8945fbd01d6742c17a9a3559ee4fbb6",
+  "branch": "feat/p1-recorder",
+  "workingTree": "uncommitted",
+  "gates": {
+    "finalChecks": true,
+    "tests": true,
+    "sourceHashes": true,
+    "buildHashes": true,
+    "p0EvidenceUnchanged": true,
+    "historicalArchiveAudit": true,
+    "firstFailurePreserved": true,
+    "fiveMinuteRecording": true,
+    "atLeastThreeActualLiveBoundaries": true,
+    "restartExitZero": true,
+    "restartScopeStable": true,
+    "restartFromSavedOverlap": true,
+    "restartPreviousAnchorMatches": true,
+    "restartAdvanced": true,
+    "oldRangeRepeatExitZero": true,
+    "explicitOldRangeActuallyRead": true,
+    "oldRangeDoesNotRewind": true,
+    "oldRangeIdempotent": true,
+    "noScopeCoverageGaps": true,
+    "databaseIntegrity": true,
+    "minuteBoundariesValid": true,
+    "activeTimesResolved": true,
+    "unknownSecondsNotFabricated": true,
+    "realZeroTimestampLogsPresent": true,
+    "noRemainingReviewBlockers": true
+  },
+  "tests": {
+    "passed": 273,
+    "failed": 0,
+    "suites": 31
+  },
+  "live": {
+    "sourceAlias": "robinhood-public",
+    "liveBoundariesDuringFiveMinuteRun": 5,
+    "minuteBoundaryCount": 30,
+    "activeOperationLogs": 650,
+    "zeroTimestampOperationLogs": 650,
+    "unresolvedOperationLogs": 0,
+    "acceptedTip": {
+      "scope_id": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "block_number": 57625255,
+      "block_hash": "0xc03ff86009711d4f95cd2dd255ef54e79dae617873a745221d1e7a70e390dfba",
+      "timestamp_sec": 1788863932
+    },
+    "runs": [
+      {
+        "manifest": "artifacts/p1/live/runs/2026-09-08T10-10-37-716Z-a18cd161/manifest.json",
+        "sha256": "fc53313bd006bcaac82a9f6c4654b406a7bc647c64c3ba7f2412cb7aa148b617",
+        "status": "incomplete",
+        "counts": {
+          "endpointAnchors": 206,
+          "minuteAnchors": 0,
+          "warmupAnchors": 0,
+          "discoveryBatches": 58,
+          "operationBatches": 0
+        },
+        "meter": {
+          "calls": 645,
+          "retries": 9,
+          "responseBytes": 2519608,
+          "methods": {
+            "eth_getBlockByNumber": 208,
+            "eth_chainId": 1,
+            "eth_getCode": 8,
+            "eth_call": 8,
+            "eth_getLogs": 420
+          },
+          "elapsedMs": 300000,
+          "maxCalls": 3000,
+          "peakOneSecond": 5,
+          "averageRpcPerSecond": 2.15,
+          "billingUnits": null
+        },
+        "failures": [
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range",
+          "incomplete-range"
+        ]
+      },
+      {
+        "manifest": "artifacts/p1/live/runs/2026-09-08T10-29-50-452Z-0327f833/manifest.json",
+        "sha256": "7251a258ec8e0d8a12d858752962c26e887c71e552fb8c742c175adfec10a7a7",
+        "status": "incomplete",
+        "counts": {
+          "endpointAnchors": 104,
+          "minuteAnchors": 276,
+          "warmupAnchors": 0,
+          "discoveryBatches": 1,
+          "operationBatches": 33
+        },
+        "meter": {
+          "calls": 643,
+          "retries": 8,
+          "responseBytes": 1591314,
+          "methods": {
+            "eth_getBlockByNumber": 380,
+            "eth_chainId": 1,
+            "eth_getCode": 8,
+            "eth_call": 8,
+            "eth_getLogs": 246
+          },
+          "elapsedMs": 300099,
+          "maxCalls": 3000,
+          "peakOneSecond": 5,
+          "averageRpcPerSecond": 2.1426262666653337,
+          "billingUnits": null
+        },
+        "failures": [
+          "incomplete-range"
+        ]
+      },
+      {
+        "manifest": "artifacts/p1/live/runs/2026-09-08T10-37-00-932Z-b5217f30/manifest.json",
+        "sha256": "18c66edc5d7aee65ac07a4e66b0034fdd62e82c715cca49f3ce186e410623688",
+        "status": "complete",
+        "counts": {
+          "endpointAnchors": 54,
+          "minuteAnchors": 49,
+          "warmupAnchors": 0,
+          "discoveryBatches": 1,
+          "operationBatches": 17
+        },
+        "meter": {
+          "calls": 248,
+          "retries": 4,
+          "responseBytes": 432896,
+          "methods": {
+            "eth_getBlockByNumber": 105,
+            "eth_chainId": 1,
+            "eth_getCode": 8,
+            "eth_call": 8,
+            "eth_getLogs": 126
+          },
+          "elapsedMs": 120015,
+          "maxCalls": 2000,
+          "peakOneSecond": 5,
+          "averageRpcPerSecond": 2.066408365620964,
+          "billingUnits": null
+        },
+        "failures": []
+      },
+      {
+        "manifest": "artifacts/p1/live/runs/2026-09-08T10-39-47-703Z-89fdf338/manifest.json",
+        "sha256": "ff7c6c79c7227fa63e4da6d88024094b82271cc846457d714ee995876c528d83",
+        "status": "complete",
+        "counts": {
+          "endpointAnchors": 7,
+          "minuteAnchors": 1,
+          "warmupAnchors": 0,
+          "discoveryBatches": 1,
+          "operationBatches": 1
+        },
+        "meter": {
+          "calls": 37,
+          "retries": 0,
+          "responseBytes": 174347,
+          "methods": {
+            "eth_getBlockByNumber": 9,
+            "eth_chainId": 1,
+            "eth_getCode": 8,
+            "eth_call": 8,
+            "eth_getLogs": 11
+          },
+          "elapsedMs": 10117,
+          "maxCalls": 200,
+          "peakOneSecond": 5,
+          "averageRpcPerSecond": 3.6572106355639025,
+          "billingUnits": null
+        },
+        "failures": []
+      }
+    ],
+    "firstRestartFrom": "57622677",
+    "priorCursor": {
+      "scope_id": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "block_number": 57622696,
+      "block_hash": "0x66e06cfc70b34f129ca57fcde2dc88b7f31afbec8dc5030a2a9a5a05e008bcba",
+      "timestamp_sec": 1788863675
+    },
+    "repeatRevisions": [
+      {
+        "cause": "range",
+        "added": 0,
+        "removed": 0,
+        "retimed": 0,
+        "affectedFromBlock": "57622597"
+      }
+    ]
+  },
+  "evidence": {
+    "source": "artifacts/p1/final-source.json",
+    "build": "artifacts/p1/live/final-build.json",
+    "checks": "artifacts/p1/checks/final-status.json",
+    "tests": "artifacts/p1/final-tests.json",
+    "databaseSnapshot": "artifacts/p1/live/final-db.json",
+    "databaseLocal": "data/p1-acceptance.sqlite",
+    "review": "docs/reviews/p1-final-review.md"
+  },
+  "limitations": [
+    "RPC consistency assumption; provisional, not independent chain verification",
+    "maxLogsPerResponse remains unknown/null; local filter cap1000 and log guard5000 are distinct",
+    "Five-minute run ended incomplete at deadline; accepted data preserved; final-build restart and explicit repeat independently exit0",
+    "P1 change sets only; P2 business decoding, P3 heat and P4 alerts not implemented",
+    "No long-term or complete historical acceptance; no wallet, trade or permanent service"
+  ]
+}

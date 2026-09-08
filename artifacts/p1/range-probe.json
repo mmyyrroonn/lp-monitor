@@ -1,0 +1,37 @@
+{
+  "at": "2026-09-08T09:50:45.012Z",
+  "sourceAlias": "robinhood-public",
+  "ranges": [
+    {
+      "from": "0",
+      "to": "999999",
+      "count": 0,
+      "status": "success"
+    },
+    {
+      "from": "56596597",
+      "to": "57596596",
+      "count": 0,
+      "status": "success"
+    }
+  ],
+  "head": {
+    "number": "57596596",
+    "hash": "0x6cb7e30b244aca121986850eb22c2d36de8b249480652b333a1bdaefa48a866c",
+    "timestampSec": 1788861041
+  },
+  "meter": {
+    "calls": 3,
+    "retries": 0,
+    "responseBytes": 2310,
+    "methods": {
+      "eth_getBlockByNumber": 1,
+      "eth_getLogs": 2
+    },
+    "elapsedMs": 1105,
+    "maxCalls": 10,
+    "peakOneSecond": 3,
+    "averageRpcPerSecond": 2.7149321266968327,
+    "billingUnits": null
+  }
+}

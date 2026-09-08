@@ -1,0 +1,18 @@
+{
+  "at": "2026-09-08T10:18:22.141Z",
+  "sourceAlias": "robinhood-public",
+  "requests": [
+    {
+      "count": 1000,
+      "status": 200,
+      "error": null,
+      "resultCount": 13
+    },
+    {
+      "count": 512,
+      "status": 200,
+      "error": null,
+      "resultCount": 9
+    }
+  ]
+}

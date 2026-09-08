@@ -1,0 +1,33 @@
+src/cli.ts 51ms (unchanged)
+src/config/chain.ts 15ms (unchanged)
+src/ingest/fetch-range.ts 11ms
+src/ops/fixture-capture.ts 22ms (unchanged)
+src/rpc/client.ts 13ms
+scripts/copy-build-assets.mjs 7ms (unchanged)
+src/ingest/checkpoint.ts 3ms (unchanged)
+src/ingest/completeness.ts 7ms (unchanged)
+src/ingest/filter-plan.ts 7ms
+src/ingest/follow.ts 8ms (unchanged)
+src/ingest/log-time.ts 13ms (unchanged)
+src/ingest/record-range.ts 13ms
+src/ingest/reorg.ts 3ms (unchanged)
+src/ingest/time-index.ts 3ms (unchanged)
+src/ops/health.ts 1ms (unchanged)
+src/ops/recorder-cli.ts 4ms (unchanged)
+src/ops/recorder.ts 12ms
+src/protocols/uniswap-v3/discover.ts 2ms (unchanged)
+src/protocols/uniswap-v4/discover.ts 2ms
+src/registry/assets.ts 3ms
+src/registry/pools.ts 8ms
+src/storage/database.ts 2ms (unchanged)
+src/storage/manifest.ts 2ms (unchanged)
+src/storage/raw-store.ts 31ms
+tests/integration/discovery.test.ts 21ms
+tests/integration/log-time.test.ts 7ms (unchanged)
+tests/integration/raw-store.test.ts 24ms (unchanged)
+tests/integration/recorder.test.ts 13ms
+tests/integration/reorg.test.ts 3ms (unchanged)
+tests/integration/resume.test.ts 10ms (unchanged)
+tests/unit/p1-cli.test.ts 3ms (unchanged)
+tests/unit/recorder-deadline.test.ts 2ms
+tests/unit/time-index.test.ts 3ms (unchanged)

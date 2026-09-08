@@ -1,0 +1,20 @@
+{
+  "at": "2026-09-08T10:37:00.745Z",
+  "args": [
+    "dist/cli.js",
+    "follow",
+    "--config",
+    "config/robinhood.json",
+    "--duration",
+    "2m",
+    "--db",
+    "data/p1-acceptance.sqlite",
+    "--out",
+    "artifacts/p1/live/runs",
+    "--evidence",
+    "sampled",
+    "--max-rpc-calls",
+    "2000"
+  ],
+  "sourceAlias": "robinhood-public"
+}

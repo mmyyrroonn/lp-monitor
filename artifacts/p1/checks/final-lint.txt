@@ -1,0 +1,5 @@
+Already up to date
+Done in 216ms using pnpm v11.19.0
+$ node scripts/check-scripts.mjs && prettier --check "src/**/*.ts" "tests/**/*.ts" "scripts/**/*.mjs"
+Checking formatting...
+All matched files use Prettier code style!

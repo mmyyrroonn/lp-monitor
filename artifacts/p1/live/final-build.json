@@ -1,0 +1,185 @@
+{
+  "at": "2026-09-08T10:37:00.742Z",
+  "files": [
+    {
+      "path": "dist/cli.js",
+      "sha256": "16af294fa195e3b3c03b02b063e4bd616125eb54c542529c5dd726567009f271"
+    },
+    {
+      "path": "dist/config/chain.js",
+      "sha256": "adb67f78185604210db2c6eada1378d421e45f4f3d0b37d13498693f609cc027"
+    },
+    {
+      "path": "dist/config/env.js",
+      "sha256": "164cf7d1784ec1458683db21e57df4d99a0896b397cefdaedce2aca5b38b5816"
+    },
+    {
+      "path": "dist/domain/chain.js",
+      "sha256": "94032593c8d4acfc6b6cd3a0da874683c6fb16122faef5247150840e2b0fdd02"
+    },
+    {
+      "path": "dist/domain/codec.js",
+      "sha256": "64cb4958416eabd743c1ce9bda6202bf92de456075db6a7e7aa1af69065f1ef3"
+    },
+    {
+      "path": "dist/domain/json.js",
+      "sha256": "3777b1bf9090d7409ab72f279a3df611e0b3055825a55cffbe1e8633b19d2a5c"
+    },
+    {
+      "path": "dist/domain/types.js",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881"
+    },
+    {
+      "path": "dist/ingest/checkpoint.js",
+      "sha256": "0562710c88049cbe690a66b0bff5fab0d649f56515118a0afea25ec1202c6eab"
+    },
+    {
+      "path": "dist/ingest/completeness.js",
+      "sha256": "7e97206d3d13f4ad07bccea0aefd8effab1f7368662a7448c15dbe6d437c7add"
+    },
+    {
+      "path": "dist/ingest/fetch-range.js",
+      "sha256": "e4a6839119b54f9ffb93fb438083e04f3b25f62d6109e61bc88dabdb8f96cb98"
+    },
+    {
+      "path": "dist/ingest/filter-plan.js",
+      "sha256": "683a8759cd7d5b719c61602689ccf2e032c5eecc2c18e4dfb084cfa69ec637b5"
+    },
+    {
+      "path": "dist/ingest/follow.js",
+      "sha256": "74abf999f0ad90e6c5c5c46b23aa12ca4e602e0c1ddfc54a5a4612006bf45554"
+    },
+    {
+      "path": "dist/ingest/log-time.js",
+      "sha256": "b0fcee358a5235d858f677387663ab02ec1fdb707816ed48bab82f349beb4178"
+    },
+    {
+      "path": "dist/ingest/record-range.js",
+      "sha256": "405af638db49fb6a06dac127d6c51f8e29c7f1b0161fe84cdd57dd78b6069337"
+    },
+    {
+      "path": "dist/ingest/reorg.js",
+      "sha256": "c2b5cd40c781eb2207a03adf39e8f8b710192dac22689909fb312d394f4b68c3"
+    },
+    {
+      "path": "dist/ingest/time-index.js",
+      "sha256": "6b96d4cac847b6d3910e5239e1f634cd2e714e78d8edd0f815c4f47b893d0884"
+    },
+    {
+      "path": "dist/ops/capabilities.js",
+      "sha256": "67dcdf631b20c81b571b9d0138d359dc2bd13769d03dc75473d2e5d3f62791be"
+    },
+    {
+      "path": "dist/ops/files.js",
+      "sha256": "4618b4445ee43d87fb1f7a5811ea8527292a03522fb6cb313c9092c87aef0b99"
+    },
+    {
+      "path": "dist/ops/fixture-capture.js",
+      "sha256": "41a2d8ceaed7b5eee126cffdaadd43e8cb38ce2c6d9cb87f7fc7f55b9397da15"
+    },
+    {
+      "path": "dist/ops/health.js",
+      "sha256": "a9ff2caadd0ef730be94d61081fdb669ed537461b452af8c012f0ad35dc57a9c"
+    },
+    {
+      "path": "dist/ops/recorder-cli.js",
+      "sha256": "97cfebd69849f8ec1813357e6f9f7c1e6b69bb460f2bf75ed2dcf347a7762910"
+    },
+    {
+      "path": "dist/ops/recorder.js",
+      "sha256": "2ec94a6ca925f172400dc5bef4c6ea17d0bb303bd1c3d617d7e87c6b7bf7cf72"
+    },
+    {
+      "path": "dist/ops/request-meter.js",
+      "sha256": "3761fc0039c6c7a0fa42adf645fc5c2e3d9a129f2d09de42f60b86e60566faa5"
+    },
+    {
+      "path": "dist/protocols/uniswap-v3/abi.js",
+      "sha256": "4a1abb50478af542a24fbb9705aeb58aaf921737216f186f30770f427d9506b7"
+    },
+    {
+      "path": "dist/protocols/uniswap-v3/decode.js",
+      "sha256": "5fa935df7c03098d2a9b91bbc7f948b1bb9c143e03d60a1ec55bbe27a3adf2aa"
+    },
+    {
+      "path": "dist/protocols/uniswap-v3/discover.js",
+      "sha256": "184b15fd32cd2de7ec8b4e990147a21ef9671c51ded98b4857af575758683583"
+    },
+    {
+      "path": "dist/protocols/uniswap-v4/abi.js",
+      "sha256": "2df32368c9238be1e3e231d0ac549fbb1bf6b9b988255b9b1572a89d3b5dd3ab"
+    },
+    {
+      "path": "dist/protocols/uniswap-v4/discover.js",
+      "sha256": "09f18eae24892533ecf596f94e25c4b36263a91b4b57eea0cae3a683ae23af9a"
+    },
+    {
+      "path": "dist/protocols/uniswap-v4/pool-key.js",
+      "sha256": "52d6d105683a375e97292ce3f6ed5698159e10dfd4dddd2d2bfcd72b97930f1d"
+    },
+    {
+      "path": "dist/registry/assets.js",
+      "sha256": "179a8b3923f0b6c6464a033b7e3ebf15c0cc2f0fbe35dd45a621215db02bd9d1"
+    },
+    {
+      "path": "dist/registry/identity.js",
+      "sha256": "b39ea021b13561d651a2b6274bc2bce0217de1558ba06a77fa01f9c6f4167cad"
+    },
+    {
+      "path": "dist/registry/pools.js",
+      "sha256": "4e75a0b3ec248788795b6df55d5f0841b2261db2b8404cb79e0e070a534f94c0"
+    },
+    {
+      "path": "dist/rpc/capabilities.js",
+      "sha256": "eb71f78828577b134b6b3f2e7d868a30fe16d7dbd544f27d1b448273132bab9a"
+    },
+    {
+      "path": "dist/rpc/client.js",
+      "sha256": "45889376de32ea23e6c7d1e8a024e565c76c5cf73525a2a9254db2ecba0fadf4"
+    },
+    {
+      "path": "dist/rpc/errors.js",
+      "sha256": "e34a24cd1b8a448abd8684f1810e986c5b7a48d152fe19545009e4654756d15c"
+    },
+    {
+      "path": "dist/rpc/evidence-writer.js",
+      "sha256": "7577574386c1cc26efa088a86752b85996722fbec4e5981993057ea0d0222f05"
+    },
+    {
+      "path": "dist/rpc/identity.js",
+      "sha256": "62ebe3e6b1a39ec755ad5c4eac17d727e58bb3f7bf3b731f905debe93f54e60c"
+    },
+    {
+      "path": "dist/rpc/quantity.js",
+      "sha256": "d9d9dee38967b4bc958f5d61ad57ca48fe9a21a48de72af177d150245a351f91"
+    },
+    {
+      "path": "dist/rpc/rate-limit.js",
+      "sha256": "1183c1b18b2ea1da64f0a4f8501e9a4683e07be5680a3c0b0a0d5f58728beef7"
+    },
+    {
+      "path": "dist/rpc/request-meter.js",
+      "sha256": "91df95cf5bb7e5ba66a510148a1a66028b6d655eb19b56a4a6d1a9be24015bd4"
+    },
+    {
+      "path": "dist/rpc/resolve-time.js",
+      "sha256": "874a8424731fa1a4e1a21c2822639b8f1e66e994c45297bf1cee821bcc26c576"
+    },
+    {
+      "path": "dist/storage/database.js",
+      "sha256": "d20f7b5b0e695d6d435d7169ecaa6608e8e52d0c3e529b3140cbce216a263afa"
+    },
+    {
+      "path": "dist/storage/manifest.js",
+      "sha256": "39ab8e18ee521e93255dc78d2aeff276ee79ae10e5fdf7c17778ab2e7abe1313"
+    },
+    {
+      "path": "dist/storage/migrations/001-raw.sql",
+      "sha256": "dccabe00cb92cf9a95b9bc007b4baa4b8a3e781042603730cf4d1c0a380743df"
+    },
+    {
+      "path": "dist/storage/raw-store.js",
+      "sha256": "c699868d7fbe0959df2d83a42aef28eeec603628549bac81634840f249deb344"
+    }
+  ]
+}
