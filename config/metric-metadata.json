@@ -1,0 +1,9 @@
+{
+  "version": "2026-09-08.p3-metadata1",
+  "chainId": 4663,
+  "source": "artifacts/p0/identity-evidence.json",
+  "entries": [
+    { "address": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b", "decimals": 18, "observedAtBlock": "57465417", "blockHash": "0xb5da78426a0c188e7eec4710d275a21a5b487aee2275b010a99afe5be430052a" },
+    { "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168", "decimals": 6, "observedAtBlock": "57465417", "blockHash": "0xb5da78426a0c188e7eec4710d275a21a5b487aee2275b010a99afe5be430052a" }
+  ]
+}

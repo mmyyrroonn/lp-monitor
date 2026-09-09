@@ -1,6 +1,6 @@
-# Robinhood RWA monitor — P0/P1/P2
+# Robinhood RWA monitor — P0/P1/P2/P3
 
-只读数据采集与有界运行工具。阶段入口为 [START_HERE.md](START_HERE.md)，验收状态见 [实施状态](docs/implementation-status.md)。P1 记录器的实现与验收进度见阶段状态；分钟热度和提醒属于后续阶段。
+只读数据采集与有界运行工具。阶段入口为 [START_HERE.md](START_HERE.md)，验收状态见 [实施状态](docs/implementation-status.md)。P1 记录器的实现与验收进度见阶段状态；P3 已提供离线分钟热度，P4 提醒属于后续阶段。
 
 ## 环境与命令
 
@@ -74,7 +74,7 @@ P1 使用 `pollIntervalMs`、`overlapBlocks` 和 `config/watchlist.amc.json`。`
 
 ## P1 范围记录与恢复
 
-`ingest` 和 `follow` 使用 SQLite WAL 保存原始批次、分片、有效日志、独立 scope 游标、池登记、分钟证据与检查点。P1 提供记录与修订集合；P2 已提供离线协议解码与观测，P3–P4 再接热度和提醒。
+`ingest` 和 `follow` 使用 SQLite WAL 保存原始批次、分片、有效日志、独立 scope 游标、池登记、分钟证据与检查点。P1 提供记录与修订集合；P2 已提供离线协议解码与观测，P3 已接离线热度，P4 再接提醒。
 
 ```powershell
 pnpm lp ingest --config config/robinhood.json --from-block 100 --to-block 200
@@ -111,4 +111,26 @@ pnpm lp inspect-pool --config config/robinhood.json --db data/recorder.sqlite --
 
 输出 price/tick/L 仅代表最后 Swap 事件的观测。之后发生 Burn 不推算当前 L；`currentPoolStateKnown=false`。分钟时间继续保留精确秒数 null，actor 不作为真实用户数。本阶段没有自动接入每个录制批次；全量重建和过期检查成本随保留历史增长。
 
-[P2 验收](docs/reviews/2026-09-08-p2-acceptance.md)记录 344 个测试、650 条真实历史事件的 ethers 对照、源库保护与限制。下一阶段 P3 由用户安排。
+[P2 验收](docs/reviews/2026-09-08-p2-acceptance.md)记录 344 个测试、650 条真实历史事件的 ethers 对照、源库保护与限制。P3 已完成，见下方运行入口。
+
+## P3 分钟热度与排名
+
+```powershell
+pnpm lp metrics --db data/p3-acceptance.sqlite --rwa AMC --window 5m
+pnpm lp rank --db data/p3-acceptance.sqlite --sort volume5mClosed
+pnpm lp rank --db data/p3-acceptance.sqlite --sort volumeMultiplier
+pnpm lp metrics --db data/p3-acceptance.sqlite --rwa AMC --window 5m --out artifacts/p3/amc-view.json
+pnpm lp metrics --db data/p3-acceptance.sqlite --save --out artifacts/p3/saved-view.json
+```
+
+命令无需 RPC 环境，默认只读；`--save` 才更新派生分钟缓存，`--out` 导出 JSON。已有录制库先运行 `project --rebuild`；过期投影返回 4。默认 DB 为 `LP_DATA_DIR/recorder.sqlite`；仅支持 `--window 5m`。`--watchlist`、`--config` 继续决定独立 scope；`--metadata` 默认 `config/metric-metadata.json`。
+
+输出分列 `partialCurrent`、`recentClosed1m`、`recentClosed5x1m`、`naturalClosed5m`，显示窗口时间、覆盖、基线样本数与计价单位。当前前缀失败时 RWA 与池累计均不可用。CLI 仅展示窗口摘要；全分钟列表由业务核心返回，并可通过 `--save` 存入 `metric_windows`，不可跳过新鲜度检查直接消费旧缓存。
+
+同一 Swap 只计一个侧的成交；USDG 等值量和 `usdMicros` 为整数，十进制字符串无损保存。RWA 合计称 `poolActivity`，跨池交易重新去重；原币单位分开。未知估值、手续费、精确秒数继续为 null。默认比较前60个完整1m/12个完整5m，样本不足或零中位数不输出倍率。`baselineMedianNumerator/Denominator` 保留半整数中位数；`baselineMedian` 只在中位数为整数时显示。
+
+登记池没有成交仍保留零窗口，但不制造出生前的零历史。`activeMinutes` 统计有 Swap 的分钟；流动性动作另计。新池标签用最近5分钟发现位置；观察到的再活跃仅指已有活动后连续3个闭合安静分钟再次有 Swap，未替代 P4 提醒状态机。
+
+P0 身份快照中的 decimals 自记录块向后沿用；若与已知同高度哈希冲突则停用该条缓存，未知高度明确是历史沿用假设。新代币不默认18位；无价成交原币量和次数仍保留。USDG 近似美元只是显示假设，毛费不是 LP 净收益。
+
+[验收报告](docs/reviews/2026-09-09-p3-acceptance.md)与[独立审查](docs/reviews/2026-09-09-p3-review.md)包含453项通过测试及历史副本结果。原始源库未改、无新增RPC；全scope复核/重建和完整缓存体积随历史与登记池数增长。尚未持续运行；下一窗口由用户安排P4。

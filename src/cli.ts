@@ -11,7 +11,10 @@ import { saveJson, repositoryRelativePath } from './ops/files.js';
 import { CHAIN_ID } from './domain/chain.js';
 import { encodeJson } from './domain/json.js';
 
-const help = `Robinhood read-only P0/P1/P2 CLI
+const help = `Robinhood read-only P0/P1/P2/P3 CLI
+  pnpm lp metrics --db data/recorder.sqlite --rwa AMC --window 5m
+  pnpm lp rank --db data/recorder.sqlite --sort volume5mClosed
+  P3: offline; --out PATH saves JSON, --save persists derived cache.
   pnpm lp project --db data/recorder.sqlite --rebuild
   pnpm lp inspect-pool --db data/recorder.sqlite --pool amc-usdg-v3
   P2 commands are offline; no RPC environment required.
@@ -47,6 +50,14 @@ export async function runCli(
   ) {
     const { runProjectionCli } = await import('./ops/projection-cli.js');
     return runProjectionCli(args, options.environment ?? process.env);
+  }
+  if (
+    ['metrics', 'rank'].includes(args[0] ?? '') &&
+    !args.includes('--help') &&
+    !args.includes('-h')
+  ) {
+    const { runMetricsCli } = await import('./ops/metrics-cli.js');
+    return runMetricsCli(args, options.environment ?? process.env);
   }
   let parsed: ReturnType<typeof parseArgs>;
   try {

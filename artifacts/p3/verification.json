@@ -1,0 +1,21 @@
+{
+  "verifiedAt": "2026-09-09T00:15:33.8414528+08:00",
+  "commands": [
+    {
+      "command": "pnpm lint",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm test --reporter=json --outputFile=artifacts/p3/tests.json",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm build",
+      "exitCode": 0
+    }
+  ]
+}

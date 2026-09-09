@@ -1,6 +1,6 @@
 # 实施状态与窗口交接
 
-更新：2026-09-08。当前状态：**P0 passed；P1 passed；P2 passed**，P3–P6 未开始。下方旧记录保留为设计阶段历史证据；本轮完整验收与限制见文末。
+更新：2026-09-09。当前状态：**P0 passed；P1 passed；P2 passed；P3 passed**，P4–P6 未开始。下方旧记录保留为设计阶段历史证据；本轮完整验收与限制见文末。
 
 此前13份Markdown的本地链接、代码围栏、计划头部顺序、占位符与行尾空白检查通过；并已按架构逐项核对P0–P6覆盖。批量查询补充后的文档检查另记于下方。文档验收不代表应用测试通过。
 
@@ -21,7 +21,7 @@
 | P0 工程与能力 | passed | P0 最终修正后 188 测试通过；历史 RPC 证据保留 | 沿用既有合同 |
 | P1 记录与恢复 | passed | 273 测试；5 个实时分钟边界；重启/旧段重扫退出 0；[验收](../artifacts/p1/acceptance.json) | 已完成；沿用 P1 合同 |
 | P2 协议与观测 | passed | 344 测试；650 条真实历史事件 ethers 对照；[验收](../artifacts/p2/acceptance.json) | 用户安排后进入 P3 Task 3.1 |
-| P3 分钟热度 | pending | 已有研究定义；尚无分钟热度输出 | P2 验收后开始 |
+| P3 分钟热度 | passed | 453 测试；603 笔历史 Swap、29 闭合分钟；[验收](../artifacts/p3/acceptance.json) | 用户安排 P4 Task 4.1 |
 | P4 告警 | pending | 尚无运行中通知 | P3 验收后开始 |
 | P5 历史验证 | pending | GMGN/公共 API 案例仅供参照 | P4 验收后开始 |
 | P6 实时验收 | pending | 未启动服务 | P5 数据质量验收后开始 |
@@ -143,3 +143,19 @@ P1 未开始，仍从 Task 1.1 开始；未实现 store/follow/恢复，未执�
 最终 34 文件、401 测试通过，typecheck/build/lint/diff 检查通过，独立复核无开放问题。原 P2 验收库经只读 online backup 后在临时副本重放，仍为 650 事件、0 质量错误、29 个有观测池；分钟已知、精确秒数仍 null。源库与副本的 P1 表未改，历史 artifacts 未改，无新增 RPC。
 
 P3 查询改造、稀疏观测、自动版本门槛和 V3 fee 来源建模继续待办。P3 尚未开始；本批不推送远端。
+
+## P3 验收记录 — 2026-09-09
+
+最终范围：分钟计价、池/RWA 聚合、分钟闭合、基线/排名、流动性/毛费附注、离线 metrics/rank CLI 与派生 SQLite 缓存。新增 src/metrics、metric-store、metrics-cli、003-metrics 迁移、历史 decimals 缓存及专项测试；更新 README、START_HERE 和阶段计划。P4–P6 尚未开始。
+
+命令结果：`pnpm lint`、`pnpm typecheck`、`pnpm test --reporter=json --outputFile=artifacts/p3/tests.json`、`pnpm build` 均退出0；453个测试通过、0失败、0跳过。[逐项退出码](../artifacts/p3/verification.json)、[测试结果](../artifacts/p3/tests.json)。本轮开始前实际基线为401个测试；P2原344时点记录保留。
+
+真实历史验证：`node artifacts/p3/verify-acceptance.mjs` 退出0；从P2验收库备份到 `data/p3-acceptance.sqlite`，逐表确认源P1内容不变。650个事件中603笔Swap、313个不同交易、34笔未计价，1827个登记池全部保留，其中29个有Swap/流动性动作；29个闭合分钟、当前分钟partial。两条构建后CLI命令退出0。没有新RPC；[源库保护](../artifacts/p3/source-db.json)、[热度](../artifacts/p3/amc-heat.json)、[覆盖](../artifacts/p3/coverage.json)、[排名](../artifacts/p3/rank.json)。
+
+独立审查发现的分片短扫、原币静默基线、零事件池、L观测锚点、筛选证据、metadata哈希及RWA当前前缀问题均已修复并回归；[最终审查PASS](reviews/2026-09-09-p3-review.md)、[完整验收与限制](reviews/2026-09-09-p3-acceptance.md)。
+
+无依赖/ABI/原链配置版本变更。新增 metric version=p3-v1、metadata version=2026-09-08.p3-metadata1。金额保持bigint，默认基线需要60个完整1m或12个完整5m，现有约半小时样本不足，倍率为null。decimals是带历史锚点的沿用缓存，遇到已知同高度哈希冲突即停用；USDG兑美元仅显示假设。
+
+默认只读CLI，显式 `--save` 保存派生缓存；录制/重扫/retime后仍需先project，P3不是持续后台服务。窗口分钟证据最多取末端180分钟；完整读取、分片复核和缓存重建随历史增长。原研究与技能保留。未交易、连接钱包、启动永久服务、提交或推送。
+
+下一窗口读取 `docs/superpowers/plans/2026-09-08-p4-alerts.md` 从Task4.1开始；从新鲜P3业务结果实现提醒、冷却、修订/撤回，禁止直接消费旧缓存。由用户安排。

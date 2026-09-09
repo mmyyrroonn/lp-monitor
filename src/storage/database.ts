@@ -15,7 +15,9 @@ function loadMigration(name: string): string {
   }
 }
 
-const migration = ['001-raw.sql', '002-projections.sql'].map(loadMigration).join('\n');
+const migration = ['001-raw.sql', '002-projections.sql', '003-metrics.sql']
+  .map(loadMigration)
+  .join('\n');
 
 /** Inspect validates the schema but never migrates or changes journal mode.
  * SQLite may still need WAL/SHM sidecars when reading a live WAL database. */

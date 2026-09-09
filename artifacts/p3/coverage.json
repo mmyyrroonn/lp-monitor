@@ -1,0 +1,252 @@
+{
+  "sourceHash": "f1c679bb5adcc1afe2e0e8f025397c018468b24683a881ae7a4fdd8ae052ccb9",
+  "at": {
+    "number": "57625255",
+    "hash": "0xc03ff86009711d4f95cd2dd255ef54e79dae617873a745221d1e7a70e390dfba",
+    "timestampSec": 1788863932
+  },
+  "coverage": [
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862140,
+      "fromBlock": "57607481",
+      "toBlock": "57608073",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862200,
+      "fromBlock": "57608074",
+      "toBlock": "57608665",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862260,
+      "fromBlock": "57608666",
+      "toBlock": "57609276",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862320,
+      "fromBlock": "57609277",
+      "toBlock": "57609867",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862380,
+      "fromBlock": "57609868",
+      "toBlock": "57610453",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862440,
+      "fromBlock": "57610454",
+      "toBlock": "57611047",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862500,
+      "fromBlock": "57611048",
+      "toBlock": "57611640",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862560,
+      "fromBlock": "57611641",
+      "toBlock": "57612234",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862620,
+      "fromBlock": "57612235",
+      "toBlock": "57612828",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862680,
+      "fromBlock": "57612829",
+      "toBlock": "57613436",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862740,
+      "fromBlock": "57613437",
+      "toBlock": "57614028",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862800,
+      "fromBlock": "57614029",
+      "toBlock": "57614621",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862860,
+      "fromBlock": "57614622",
+      "toBlock": "57615215",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862920,
+      "fromBlock": "57615216",
+      "toBlock": "57615808",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788862980,
+      "fromBlock": "57615809",
+      "toBlock": "57616402",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863040,
+      "fromBlock": "57616403",
+      "toBlock": "57617002",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863100,
+      "fromBlock": "57617003",
+      "toBlock": "57617594",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863160,
+      "fromBlock": "57617595",
+      "toBlock": "57618187",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863220,
+      "fromBlock": "57618188",
+      "toBlock": "57618779",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863280,
+      "fromBlock": "57618780",
+      "toBlock": "57619370",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863340,
+      "fromBlock": "57619371",
+      "toBlock": "57619964",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863400,
+      "fromBlock": "57619965",
+      "toBlock": "57620556",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863460,
+      "fromBlock": "57620557",
+      "toBlock": "57621167",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863520,
+      "fromBlock": "57621168",
+      "toBlock": "57621759",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863580,
+      "fromBlock": "57621760",
+      "toBlock": "57622352",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863640,
+      "fromBlock": "57622353",
+      "toBlock": "57622939",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863700,
+      "fromBlock": "57622940",
+      "toBlock": "57623534",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863760,
+      "fromBlock": "57623535",
+      "toBlock": "57624127",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863820,
+      "fromBlock": "57624128",
+      "toBlock": "57624734",
+      "complete": true,
+      "reasons": []
+    },
+    {
+      "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+      "minuteStartSec": 1788863880,
+      "fromBlock": "57624735",
+      "toBlock": "57625255",
+      "complete": false,
+      "reasons": [
+        "watermark-partial"
+      ]
+    }
+  ]
+}
