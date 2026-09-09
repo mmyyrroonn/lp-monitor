@@ -203,7 +203,7 @@ describe('buildMinuteMetrics', () => {
     const coverage = Array.from({ length: 9 }, (_, i) => covered(i * 60));
     const events = [1n, 3n, 100n, 9n].map((value, i) => valued(swap(p, i * 60, i + 1), value));
     const result = buildMinuteMetrics(events, coverage, watermark(540), {
-      minimumBaselineSamples: 3,
+      minimumOneMinuteSamples: 3,
     })[0]!;
     const at180 = result.minutes.find((m) => m.minuteStartSec === 180)!;
 
@@ -216,7 +216,7 @@ describe('buildMinuteMetrics', () => {
       coverage.slice(0, 4),
       watermark(240),
       {
-        minimumBaselineSamples: 3,
+        minimumOneMinuteSamples: 3,
       },
     )[0]!;
     expect(zero.minutes.find((m) => m.minuteStartSec === 180)).toMatchObject({
@@ -235,7 +235,7 @@ test('rankPools excludes unpriced volume, breaks ties by tx count then stable po
     [covered(0), covered(60), covered(120), covered(180), covered(240)],
     watermark(300),
     {
-      minimumBaselineSamples: 1,
+      minimumOneMinuteSamples: 1,
     },
   );
 
@@ -258,7 +258,7 @@ test('unpriced native-unit baseline includes quiet zeros and earlier priced raw 
     ],
     [covered(0), covered(60), covered(120)],
     watermark(180),
-    { minimumBaselineSamples: 1, pools: [{ pool: p, discoveredAtBlock: null, rawToken }] },
+    { minimumOneMinuteSamples: 1, pools: [{ pool: p, discoveredAtBlock: null, rawToken }] },
   )[0]!;
   expect(result.minutes[1]?.rawNotional).toEqual({ token: rawToken, raw: 0n });
   expect(result.recentClosed1m).toMatchObject({
@@ -282,7 +282,7 @@ test('current prefix gaps preserve unknown values and reasons, and stale multipl
     [valued(swap(p, 0, 1))],
     [covered(0), covered(60, false, ['range-gap'])],
     watermark(90),
-    { minimumBaselineSamples: 1 },
+    { minimumOneMinuteSamples: 1 },
   )[0]!;
   expect(result.partialCurrent).toMatchObject({
     status: 'gap',
@@ -298,4 +298,177 @@ test('current prefix gaps preserve unknown values and reasons, and stale multipl
 test('fractional median keeps exact multiplier and oversized result never becomes Infinity', () => {
   expect(volumeBaseline(3n, [1n, 2n], 2).multiplier).toBe(2);
   expect(volumeBaseline(10n ** 400n, [1n], 1).multiplier).toBeNull();
+});
+test('uses independent one-minute and five-minute minimum sample thresholds', () => {
+  const p = pool('9');
+  const starts = Array.from({ length: 65 }, (_, i) => i * 60);
+  const events = starts.map((start, i) => valued(swap(p, start, i + 1), start >= 3600 ? 2n : 1n));
+  const enough = buildMinuteMetrics(
+    events,
+    starts.map((start) => covered(start)),
+    watermark(3900),
+    {
+      minimumOneMinuteSamples: 1,
+    },
+  )[0]!;
+  expect(enough.recentClosed5x1m).toMatchObject({ baselineSampleCount: 12, volumeMultiplier: 2 });
+  expect(enough.naturalClosed5m).toMatchObject({ baselineSampleCount: 12, volumeMultiplier: 2 });
+  const insufficient = buildMinuteMetrics(
+    events,
+    starts.map((start) => covered(start)),
+    watermark(3900),
+    {
+      minimumOneMinuteSamples: 1,
+      minimumFiveMinuteSamples: 13,
+    },
+  )[0]!;
+  expect(insufficient.recentClosed5x1m).toMatchObject({
+    baselineSampleCount: 12,
+    volumeMultiplier: null,
+  });
+  expect(insufficient.naturalClosed5m).toMatchObject({
+    baselineSampleCount: 12,
+    volumeMultiplier: null,
+  });
+});
+
+test('canonicalizes raw token casing so quiet minutes remain baseline samples', () => {
+  const p = pool('a');
+  const rawToken = `0x${'Aa'.repeat(20)}`;
+  const canonicalToken = rawToken.toLowerCase();
+  const result = buildMinuteMetrics(
+    [
+      { ...valued(swap(p, 60, 1), null), rawNotional: { token: canonicalToken, raw: 100n } },
+      { ...valued(swap(p, 120, 2), null), rawNotional: { token: canonicalToken, raw: 200n } },
+    ],
+    [covered(0), covered(60), covered(120)],
+    watermark(180),
+    { minimumOneMinuteSamples: 2, pools: [{ pool: p, discoveredAtBlock: null, rawToken }] },
+  )[0]!;
+  expect(result.minutes[0]?.rawNotional).toEqual({ token: canonicalToken, raw: 0n });
+  expect(result.recentClosed1m).toMatchObject({
+    baselineSampleCount: 2,
+    baselineMedianNumerator: 100n,
+    baselineMedianDenominator: 2n,
+    volumeMultiplier: 4,
+    baselineUnit: canonicalToken,
+  });
+});
+
+test('normalizes transaction hashes in minute, aggregate, and unresolved block counts', () => {
+  const p = pool('b');
+  const events = [
+    valued(swap(p, 0, 1), 1n),
+    valued(swap(p, 0, 2), 1n),
+    valued(swap(p, null, 3), null),
+    valued(swap(p, null, 4), null),
+  ];
+  const shared = hash('a');
+  for (const [index, item] of events.entries()) {
+    (item.event.ref as { transactionHash: Hex; blockNumber: bigint }).transactionHash = (
+      index % 2 === 0 ? shared : shared.toUpperCase()
+    ) as Hex;
+    if (index >= 2)
+      (item.event.ref as { transactionHash: Hex; blockNumber: bigint }).blockNumber = 77n;
+  }
+  const result = buildMinuteMetrics(
+    events,
+    [0, 60, 120, 180, 240].map((start) => covered(start)),
+    watermark(300),
+  )[0]!;
+  expect(result.minutes[0]?.txCount).toBe(1);
+  expect(result.recentClosed5x1m?.txCount).toBe(1);
+  expect(result.unknownTimeBlockCounts[0]?.txCount).toBe(1);
+});
+
+test('volume rank excludes empty pools but retains real swaps rounded to zero', () => {
+  const active = pool('c');
+  const quiet = pool('d');
+  const windows = buildMinuteMetrics(
+    [valued(swap(active, 0, 1), 0n)],
+    [0, 60, 120, 180, 240].map((start) => covered(start)),
+    watermark(300),
+    {
+      pools: [
+        { pool: active, discoveredAtBlock: null, rawToken: null },
+        { pool: quiet, discoveredAtBlock: null, rawToken: null },
+      ],
+    },
+  );
+  expect(rankPools(windows, 'volume5mClosed').map((item) => item.poolId)).toEqual([
+    '4663:v3:0xcccccccccccccccccccccccccccccccccccccccc',
+  ]);
+});
+
+test('does not emit a natural five-minute bucket when its fifth minute is current partial', () => {
+  const p = pool('e');
+  const result = buildMinuteMetrics(
+    [valued(swap(p, 0, 1), 1n)],
+    [0, 60, 120, 180, 240].map((start) => covered(start)),
+    watermark(299),
+  )[0]!;
+  expect(result.natural5mBuckets).toEqual([]);
+  expect(result.naturalClosed5m).toBeNull();
+});
+
+test('keeps a pool warming when coverage has multiple scopes and no scope can be selected', () => {
+  const p = pool('f');
+  const result = buildMinuteMetrics(
+    [],
+    [
+      { ...covered(0), scopeId: 'a' },
+      { ...covered(0), scopeId: 'b' },
+    ],
+    watermark(60),
+    {
+      pools: [{ pool: p, discoveredAtBlock: null, rawToken: null }],
+    },
+  )[0]!;
+  expect(result.minutes.every((minute) => minute.status === 'warming')).toBe(true);
+});
+
+test('default five-minute threshold stays twelve even when one-minute threshold is one', () => {
+  const p = pool('9');
+  const starts = Array.from({ length: 60 }, (_, i) => i * 60);
+  const events = starts.map((start, i) => valued(swap(p, start, i + 1), 1n));
+  const result = buildMinuteMetrics(
+    events,
+    starts.map((start) => covered(start)),
+    watermark(3600),
+    { minimumOneMinuteSamples: 1 },
+  )[0]!;
+  expect(result.minutes[1]!.volumeMultiplier).toBe(1);
+  expect(result.recentClosed5x1m).toMatchObject({
+    baselineSampleCount: 11,
+    volumeMultiplier: null,
+  });
+  expect(result.naturalClosed5m).toMatchObject({ baselineSampleCount: 11, volumeMultiplier: null });
+  const fiveOnly = buildMinuteMetrics(
+    events.slice(0, 10),
+    starts.slice(0, 10).map((start) => covered(start)),
+    watermark(600),
+    { minimumFiveMinuteSamples: 1 },
+  )[0]!;
+  expect(fiveOnly.recentClosed5x1m!.volumeMultiplier).toBe(1);
+  expect(fiveOnly.naturalClosed5m!.volumeMultiplier).toBe(1);
+  expect(fiveOnly.recentClosed1m!.volumeMultiplier).toBeNull();
+});
+
+test('volume ties use transaction count then stable pool ID', () => {
+  const a = pool('a'),
+    b = pool('b'),
+    c = pool('c');
+  const events = [
+    valued(swap(c, 0, 1), 10n),
+    valued(swap(b, 0, 2), 5n),
+    valued(swap(b, 60, 3), 5n),
+    valued(swap(a, 0, 4), 5n),
+    valued(swap(a, 60, 5), 5n),
+  ];
+  const windows = buildMinuteMetrics(
+    events,
+    [0, 60, 120, 180, 240].map((start) => covered(start)),
+    watermark(300),
+  );
+  expect(rankPools(windows, 'volume5mClosed').map((w) => w.pool)).toEqual([a, b, c]);
 });

@@ -47,6 +47,11 @@ export function openDatabase(
           pools:
             'scope_id,protocol,discovered_block_number,discovered_block_hash,pool_key,payload_json',
           accepted_ranges: 'scope_id,batch_id,filter_id,from_block,to_block',
+          ingest_batches: 'id,scope_id,payload_json',
+          fetch_shards: 'batch_id,shard_id,status,response_hash,log_count,error',
+          anchors: 'scope_id,block_number,block_hash,timestamp_sec',
+          minute_boundaries:
+            'scope_id,timestamp_sec,first_block,before_number,before_hash,before_timestamp_sec,at_number,at_hash,at_timestamp_sec',
         }))
           database.prepare('select ' + columns + ' from ' + table + ' limit 0').all();
       } catch (error) {

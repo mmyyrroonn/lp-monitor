@@ -69,7 +69,7 @@ export function findPrecedingQuote(
   let selected: QuoteObservation | null = null;
   for (const candidate of quotes) {
     if (!sameAddress(candidate.token, token) || !sameAddress(candidate.quote, quoteToken)) continue;
-    if (candidate.denominator <= 0n || candidate.numerator < 0n) continue;
+    if (candidate.denominator <= 0n || candidate.numerator <= 0n) continue;
     if (compareRef(candidate.effectiveAt, swap.ref) >= 0) continue;
     const age = upperAgeSec(swap.time, candidate.time);
     const allowedAge = Math.min(maxQuoteAgeSec, candidate.maxAgeSec);
@@ -102,8 +102,8 @@ export function quoteFromRwaUsdgSwap(
   const usdgRaw = sameAddress(token0.address, metadata.usdg) ? swap.rawAmount0 : swap.rawAmount1;
   const rwaAmount = rwaRaw < 0n ? -rwaRaw : rwaRaw;
   const usdgAmount = usdgRaw < 0n ? -usdgRaw : usdgRaw;
-  if (rwaAmount <= 0n || usdgAmount < 0n)
-    throw new RangeError('RWA quote denominator amount must be positive');
+  if (rwaAmount <= 0n || usdgAmount <= 0n)
+    throw new RangeError('RWA and USDG quote amounts must be positive');
   return {
     token: metadata.rwa,
     quote: metadata.usdg,

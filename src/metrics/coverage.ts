@@ -2,7 +2,7 @@ import type Database from 'better-sqlite3';
 import type { BlockAnchor, MinuteBoundary } from '../domain/types.js';
 import type { ProjectionQualityError } from '../state/project-range.js';
 import { verifySuccessfulShardCoverage } from '../ingest/completeness.js';
-import type { RecordedRangeBatch } from '../storage/manifest.js';
+import { rawLogKey, type RecordedRangeBatch } from '../storage/manifest.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
 
 export interface MetricCoverage {
@@ -223,9 +223,7 @@ export function readMetricCoverage(
       // invalidates both its claimed bucket and its actual block interval.
       if (
         logs.some((log) => {
-          const time = times.get(
-            `4663:${log.blockHash.toLowerCase()}:${log.transactionHash.toLowerCase()}:${log.logIndex}`,
-          );
+          const time = times.get(rawLogKey(log));
           const inside = log.blockNumber >= fromBlock && log.blockNumber <= toBlock;
           return inside
             ? !time ||

@@ -228,3 +228,24 @@ test('quoteFromRwaUsdgSwap represents human USDG per human RWA', () => {
   expect(quote!.numerator * 2n).toBe(quote!.denominator * 5n);
   expect(quote!.effectiveAt).toEqual(swap().ref);
 });
+
+test('a zero USDG quote cannot replace a preceding positive quote', () => {
+  const positive = quoteFromRwaUsdgSwap(
+    swap({ ref: { ...swap().ref, blockNumber: 8n }, time: exact(990) }),
+    directMetadata,
+  )!;
+  const zero = {
+    ...positive,
+    numerator: 0n,
+    effectiveAt: { ...positive.effectiveAt, blockNumber: 9n },
+  };
+  const result = valueSwap(memeSwap(), memeMetadata, [positive, zero]);
+  expect(result.quoteEvidence).toEqual(positive);
+  expect(result.usdMicros).toBe(5_000_000n);
+  expect(valueSwap(memeSwap(), memeMetadata, [zero]).usdMicros).toBeNull();
+});
+test('quote construction rejects a zero USDG side', () => {
+  expect(() =>
+    quoteFromRwaUsdgSwap(swap({ rawAmount1: 0n, amountOut: 0n }), directMetadata),
+  ).toThrow(/amount/i);
+});

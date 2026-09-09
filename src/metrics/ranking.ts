@@ -9,7 +9,8 @@ export function rankPools(
   const included = windows.filter((window) =>
     sortBy === 'volume5mClosed'
       ? window.recentClosed5x1m?.usdMicros !== null &&
-        window.recentClosed5x1m?.usdMicros !== undefined
+        window.recentClosed5x1m?.usdMicros !== undefined &&
+        window.recentClosed5x1m.swapCount > 0
       : window.recentClosed1m?.minuteStartSec ===
           (window.partialCurrent?.minuteStartSec ?? -Infinity) - 60 &&
         window.recentClosed1m?.volumeMultiplier !== null &&

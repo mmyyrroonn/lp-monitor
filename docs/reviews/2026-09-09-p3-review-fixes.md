@@ -13,7 +13,7 @@
 - 禁止修改：`src/storage/migrations/*.sql`、`src/protocols/`、`src/state/`、`src/ingest/`、`src/registry/`、`artifacts/`、`data/`、`config/`、`pnpm-lock.yaml`、任何 P0–P2 已验收逻辑。不新增依赖。
 - 全局约束不变：金额 bigint、持久化无损字符串、缺口不补零、未知不写零、业务结果绑定 chainId/blockHash/版本、日志不含带凭据的 URL。
 - 每条修复都要有对应回归测试；已有测试不得删除或 skip，只能修正其期望值并在本文说明理由。
-- 改动了 `src/metrics/**` 的归桶、基线、排名或计价语义时，必须 bump `src/storage/metric-store.ts:21` 的 `METRIC_VERSION`（例如 `p3-v2`），否则旧派生缓存会被判为 fresh。F1/F2/F3/F4 都属于这一类。
+- 改动了 `src/metrics/**` 的归桶、基线、排名或计价语义时，必须 bump `src/storage/metric-store.ts:21` 的 `METRIC_VERSION`（本轮为 `p3-v2`），用于区分指标语义与审计证据。当前 P3 表只写不读，公开读取重新计算；不是因为现有读取路径会把旧 P3 缓存判为 fresh。
 - 完成后运行全部验证命令，把真实输出贴进「修复记录」。任何一条失败先停下报告，不要为了让测试变绿改测试。
 
 ## 必修（合入前完成）
@@ -48,10 +48,10 @@
 - 位置：`src/storage/metric-store.ts:76-80`（`related[0]?.address` 选侧）、`metric-store.ts:101-105`（同一 valuation push 进每个相关资产的桶）。
 - 现状：`input.assets.assets` 在 `src/registry/assets.ts:34` 按地址排序，`related[0]` 是地址最小的资产，不是任何语义选择。同一笔 valuation 会计入所有相关资产，资产 B 的 `blockRangeActivity.nativeTotals` 里出现以资产 A 计价的原币量。
 - 今天不可达：`config/watchlist.amc.json` 只有 AMC 一个 rwa。
-- 修法（二选一，选前者）：
+- 原建议的两种方案（复核后本轮采用方案 2；计价归属不能替代资产参与关系）：
   1. valuation 显式携带 `pricedAsset` 字段，聚合时只归入该资产；池含多个受监控资产时按固定规则选侧（建议：USDG 对手方优先，否则拒绝计价并记 `ambiguous-rwa-side` 原因，不写零）。
   2. 若决定不支持多 RWA 池，在 `metric-store.ts` 显式检测 `related.length > 1` 抛 `ConfigError`，并在 plan Task 3.1 写明限制。
-- 测试：两个受监控资产共池的合成用例，断言每笔成交只计入一个资产、另一资产的 nativeTotals 不含该笔。
+- 测试：两个受监控资产共池，有成交及无成交时都在报告生成前抛 ConfigError；多资产 watchlist 未出现共池时继续正常输出。
 
 ### F5. rank 输出被零成交池淹没
 
@@ -122,10 +122,11 @@ pnpm lint
 pnpm typecheck
 pnpm test
 pnpm build
+# 以下命令仅在隔离验收副本的根目录执行，禁止在主工作区直接运行
 node artifacts/p3/verify-acceptance.mjs
 ```
 
-`pnpm test` 当前基线：42 文件 / 453 用例通过。修复后用例数只能增加。若 `METRIC_VERSION` 已 bump，`artifacts/p3/*.json` 里的历史 `version: 'p3-v1'` 不要改，验收脚本若因版本号失败先停下报告。
+`pnpm test` 当前基线：42 文件 / 453 用例通过。修复后用例数只能增加。若 `METRIC_VERSION` 已 bump，主工作区 `artifacts/p3/*.json` 中历史 `version: 'p3-v1'` 保持不变。原验收脚本会覆盖输出并写验收数据库，且不检查版本差异；本轮在隔离副本运行，再显式检查新输出为 p3-v2。
 
 ## 停止条件
 
@@ -135,4 +136,87 @@ node artifacts/p3/verify-acceptance.mjs
 
 ## 修复记录
 
-（修复完成后填写：修复日期、分支、基线提交、逐项状态表、测试期望变化与理由、验证命令真实输出。）
+修复日期：2026-09-09。分支：`fix/p3-review`。基线：`f1f267c`。完整验证通过，集成范围审查及最终整体独立审查均 PASS，无待修复发现。
+
+### 已确认执行口径（2026-09-09）
+
+用户确认按 Codex 复核结论修复；基线 f1f267c，任务分支 fix/p3-review。
+- 本轮完成 F1–F7、S1/S2/S6/S8；S9 补与修复相关的集成成功路径和窗口边界测试。S3/S4/S5/S7 的扩展不在本轮。
+- F4 采用方案 2：任何登记池同时含两个受监控资产时，在生成报告前抛 ConfigError（含无成交池）。不按地址任选计价侧，也不以仅归一个资产的方式丢弃参与关系。支持多 RWA watchlist，但暂不支持共池。
+- F3 同时统一 metadata schema 和报告 chainId，均取 CHAIN_ID。
+- 升级 p3-v2 用于区分指标语义和审计材料。当前 P3 派生表只写不读，公开读取重新计算；升级原因不是当前代码会误读旧 P3 缓存。
+- 原验收脚本会写 artifacts/p3 和 data/p3-acceptance.sqlite，且不拒绝新版本。仅在隔离副本中执行原脚本，主工作区历史证据保持字节不变。
+- 测试期望变化：现有 minimumBaselineSamples 参数改为 minimumOneMinuteSamples，原断言保持不变；新增测试分别控制两个门槛。其余现有断言不计划修改。
+- TDD 阶段新增回归的预期失败属于修复证据；完整验收中的意外失败须先定位真实原因，不为通过验收削弱断言。
+### 实现与验证结果
+
+| 项目 | 状态 | 实现与回归证据 |
+| --- | --- | --- |
+| F1 | 已修复 | 1m / 5m 参数独立，默认 60 / 12；11 个前置 5m 样本保持 null，12 个可用；单独调低 5m 不降低 1m 门槛。 |
+| F2 | 已修复 | 安静分钟 rawToken 归一为小写，尺度比较忽略大小写；校验和地址的零样本不再丢失。 |
+| F3 | 已修复 | coverage 复用 rawLogKey，metadata schema / 报告复用 CHAIN_ID；mock 9999 三条回归覆盖三处。 |
+| F4 | 已修复 | 报告生成前扫描所有登记池，共池包含两个 watched RWA 则抛 ConfigError，包括无成交池；普通多资产 watchlist 保持可用。 |
+| F5 | 已修复 | 成交量榜要求 swapCount > 0；真实成交取整为 0 保留；量相同时按 txCount / poolId 排序。 |
+| F6 | 已修复 | blockRangeActivity 增加 fromBlock / toBlock / coverageVerified:false。范围为保留 accepted 区间和仍保留的投影事件的包络，不保证区间连续；CLI / 持久化无损字符串均验证。 |
+| F7 | 已修复 | CLI 排名行复用 baselineUnit；无完整分钟时单位为 null。序列化提取为 summarizeRankedPool 以直接检验该防御分支。 |
+| S1 | 已修复 | 零 USDG 侧无法生成报价，零分子候选不会替换有效先前报价；无有效报价保持 null。 |
+| S2 | 已修复 | 分钟、5m、未知时间块计数均按小写 tx hash 去重。 |
+| S6 | 已修复 | 只读 schema 检查补齐 ingest_batches / fetch_shards / minute_boundaries / anchors 的读取列。 |
+| S8 | 已修复 | plan 明确紧邻当前分钟的连续 5 个 closed 1m；多 RWA 共池限制也已写入。 |
+| S9 | 已补测 | 离线 metrics / rank 成功路径、排名 tie-break、自然 5m 第五分钟 partial、多 scope warming、exactTimestampSec 越界。未扩展多 scope 状态语义。 |
+| S3 / S4 / S5 / S7 | 后续事项 | 分别为回溯性能与时间策略、格式化 helper 接入、出生分钟单独展示、派生缓存读取门禁；本轮保持现有行为。 |
+
+回归新增 24 条，原有 453 条未删除或 skip；现有断言保持不变，仅将旧 minimumBaselineSamples 调用迁移为 minimumOneMinuteSamples。窗口新增断言在原始实现上验证了 5 个预期失败，恢复修复后 19/19 通过。零报价、多 RWA 拒绝、区间标记、缺表、链标识、倍率单位均记录过旧实现的失败，再确认修复后通过。新增夹具最初因发现事件未落库、出生分钟 warming 失败，修正了夹具，未放宽生产约束。
+
+完整验证命令及关键输出（原文节选，所有命令 exit 0）：
+
+```text
+pnpm lint
+$ node scripts/check-scripts.mjs && prettier --check "src/**/*.ts" "tests/**/*.ts" "scripts/**/*.mjs"
+Checking formatting...
+All matched files use Prettier code style!
+
+pnpm typecheck
+$ tsc --noEmit && tsc -p tsconfig.scripts.json
+
+pnpm test
+$ vitest run
+ Test Files  44 passed (44)
+      Tests  477 passed (477)
+   Start at  11:12:37
+   Duration  9.13s (tests 58%, import 30%, transform 12%)
+
+pnpm build
+$ node scripts/clean-build.mjs && tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs
+```
+
+全量测试仍有既有 Uniswap SDK sourcemap 指向未打包源码的警告，未出现失败或跳过。
+
+隔离验收实际入口：`node .superpowers/sdd/run-p3-review-acceptance.mjs`（exit 0）。该本地脚本先复制当前 src / dist / config 与原验收脚本，再将 P2 数据库通过 SQLite backup 复制至 `.superpowers/sdd/p3-review-acceptance/data/`；随后以 `.superpowers/sdd/p3-review-acceptance` 为 cwd 执行原命令 `node artifacts/p3/verify-acceptance.mjs`。不修改原验收脚本、历史输出、迁移或依赖。可复验方式是按相同目录结构建立隔离副本，再在副本根目录运行该原命令。派生输出保留在本地隔离目录，不替换已提交的 p3-v1 材料。
+
+实际验收结果节选：
+
+```json
+{
+  "version": "p3-v2",
+  "sourceHash": "e5806b32b831b46affcc810bb18b4d2804619ba31054961015b8cb2d7068b768",
+  "projectionSourceHash": "e0c4fcca4b4331e479ec7b8144b6f4bc2bdf4c7accd4bd7d8f850721398464d6",
+  "eventsValued": 603,
+  "unpriced": 34,
+  "quotes": 219,
+  "metricPools": 1827,
+  "closedMinutes": 29,
+  "nonClosedMinutes": 1,
+  "baselineReadyPools": 0,
+  "blockRangeActivity": { "swapCount": 603, "txCount": 313 },
+  "rpcCalls": 0,
+  "rankRows": 10,
+  "historicalFilesVerified": 17,
+  "historicalBytesUnchanged": true
+}
+```
+
+metrics / rank CLI 均 exit 0、status observed。锚点仍为 block 57625255 / hash 0xc03ff86009711d4f95cd2dd255ef54e79dae617873a745221d1e7a70e390dfba。历史原榜 1824 行中的 1814 个零成交池被过滤，10 个有成交池保留；登记池 roster 仍为 1827。历史样本不足以形成倍率基线，倍率继续保持 null。
+
+主工作区历史保护检查覆盖 `artifacts/p3/` 全部文件及 `data/` 中除 SQLite 临时共享内存 `-shm` 外的文件，共 17 个，前后 SHA256 均一致。
+最终审查：集成修复审查与整体 source/test 审查均无 actionable findings；审查基线 f1f267c。修复保留在 fix/p3-review 工作区，未提交、未 push。

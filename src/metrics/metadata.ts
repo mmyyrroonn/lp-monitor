@@ -1,9 +1,10 @@
+import { CHAIN_ID } from '../domain/chain.js';
 import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { ConfigError } from '../config/env.js';
 const schema = z.strictObject({
   version: z.string().min(1),
-  chainId: z.literal(4663),
+  chainId: z.literal(CHAIN_ID),
   source: z.string().min(1),
   entries: z.array(
     z.strictObject({

@@ -133,20 +133,13 @@ export function runMetricsCli(
       ...(command === 'rank'
         ? {
             sort,
-            ranked: rankPools(windows, sort as PoolRankSort).map((w) => ({
-              poolId: w.poolId,
-              volume5mClosed: w.recentClosed5x1m?.usdMicros ?? null,
-              volumeMultiplier: w.recentClosed1m?.volumeMultiplier ?? null,
-              multiplierUnit:
-                w.recentClosed1m?.usdMicros !== null
-                  ? 'usdMicros'
-                  : (w.recentClosed1m?.rawNotional?.token ?? null),
-              txCount:
-                (sort === 'volume5mClosed' ? w.recentClosed5x1m : w.recentClosed1m)?.txCount ??
-                null,
-              partialCurrent: w.partialCurrent,
-              annotation: report.annotations.find((a) => a.poolId === w.poolId),
-            })),
+            ranked: rankPools(windows, sort as PoolRankSort).map((w) =>
+              summarizeRankedPool(
+                w,
+                sort as PoolRankSort,
+                report.annotations.find((a) => a.poolId === w.poolId),
+              ),
+            ),
           }
         : {}),
     };
@@ -183,5 +176,21 @@ export function filterMetricEvidence(
     valuations,
     quotes: report.quotes.filter((q) => quoteIds.has(rawLogKey(q.effectiveAt))),
     grossFees: report.grossFees.filter((f) => eventIds.has(f.eventId)),
+  };
+}
+
+export function summarizeRankedPool(
+  w: MetricsReport['windows'][number],
+  sort: PoolRankSort,
+  annotation: MetricsReport['annotations'][number] | undefined,
+) {
+  return {
+    poolId: w.poolId,
+    volume5mClosed: w.recentClosed5x1m?.usdMicros ?? null,
+    volumeMultiplier: w.recentClosed1m?.volumeMultiplier ?? null,
+    multiplierUnit: w.recentClosed1m?.baselineUnit ?? null,
+    txCount: (sort === 'volume5mClosed' ? w.recentClosed5x1m : w.recentClosed1m)?.txCount ?? null,
+    partialCurrent: w.partialCurrent,
+    annotation,
   };
 }

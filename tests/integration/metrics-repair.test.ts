@@ -1,3 +1,13 @@
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, realpathSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, sep } from 'node:path';
+import { vi } from 'vitest';
+import { runCli } from '../../src/cli.js';
+import { loadChainConfig } from '../../src/config/chain.js';
+import { loadAssetVersion } from '../../src/registry/assets.js';
+import { computeWatchScopeId } from '../../src/ingest/filter-plan.js';
+import { ConfigError } from '../../src/config/env.js';
+
 import { filterMetricEvidence } from '../../src/ops/metrics-cli.js';
 import { afterEach, expect, test } from 'vitest';
 import { toHex, encodeAbiParameters, encodeEventTopics, type Hex } from 'viem';
@@ -242,4 +252,190 @@ test('RWA partial current is unavailable when the current accepted prefix is inc
   db.prepare('delete from fetch_shards').run();
   const report = buildMetricsReport(db, input);
   expect(report.rwa[0]?.partialCurrent).toMatchObject({ available: false, activity: null });
+});
+
+test.each([true, false])(
+  'rejects a shared watched RWA pool before emitting metrics (has swaps: %s)',
+  (hasSwaps) => {
+    const { db, raw, projection } = setup();
+    const record = batch('multi', [swap(4750)]);
+    record.poolRegistrations = [{ ...registration, token1: addr(4), discoveredAt: swap(4750) }];
+    raw.acceptRange(record);
+    projection.rebuild('s', 's', 'c');
+    if (!hasSwaps) {
+      const empty = batch('empty', []);
+      empty.poolRegistrations = [];
+      raw.acceptRange(empty);
+      projection.rebuild('s', 's', 'c');
+    }
+    const multi = { ...input, assets: createAssetRegistry('multi', [rwa, addr(4)]) };
+    expect(() => buildMetricsReport(db, multi)).toThrow(/Multiple watched RWA assets.*unsupported/);
+    expect(db.prepare('select count(*) as n from metric_cursors').get()).toEqual({ n: 0 });
+  },
+);
+
+test('retained block range is explicit and remains uncertified across gaps and unresolved time', () => {
+  const { db, raw, projection } = setup();
+  const record = batch('range', [swap(4750)]);
+  record.logTimes = record.logTimes!.map(({ ref }) => ({
+    ref,
+    time: { minuteStartSec: null, exactTimestampSec: null, source: 'unresolved' },
+  }));
+  raw.acceptRange(record);
+  projection.rebuild('s', 's', 'c');
+  const report = buildMetricsReport(db, input);
+  expect(report.rwa[0]!.blockRangeActivity).toMatchObject({
+    fromBlock: 60n,
+    toBlock: 4800n,
+    coverageVerified: false,
+    swapCount: 1,
+  });
+  expect(report.rwa[0]!.closed5m.available).toBe(false);
+  new SqliteMetricStore(db).replace(report);
+  const row = db.prepare('select payload_json from metric_cursors').get() as {
+    payload_json: string;
+  };
+  expect(JSON.parse(row.payload_json).rwa[0].blockRangeActivity).toMatchObject({
+    fromBlock: '60',
+    toBlock: '4800',
+    coverageVerified: false,
+    swapCount: 1,
+  });
+});
+
+const cliDirs: string[] = [];
+afterEach(() => {
+  vi.restoreAllMocks();
+  for (const dir of cliDirs.splice(0)) {
+    const base = realpathSync(tmpdir()),
+      target = realpathSync(dir);
+    if (!target.startsWith(base + sep) || !target.split(sep).at(-1)!.startsWith('p3-review-'))
+      throw new Error('cleanup boundary');
+    rmSync(target, { recursive: true });
+  }
+});
+
+test('offline metrics and rank publish observed output, explicit retained bounds, and lossless saved payloads', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'p3-review-'));
+  cliDirs.push(dir);
+  const configPath = join(dir, 'chain.json'),
+    watchPath = join(dir, 'watch.json'),
+    metadataPath = join(dir, 'metadata.json'),
+    dbPath = join(dir, 'recording.sqlite');
+  const chain = JSON.parse(readFileSync('config/robinhood.json', 'utf8'));
+  chain.version = 'c';
+  chain.tokens.USDG = usdg;
+  writeFileSync(configPath, JSON.stringify(chain));
+  writeFileSync(
+    watchPath,
+    JSON.stringify({
+      chainId: 4663,
+      version: 'test',
+      rwa: [{ address: rwa, symbol: 'TEST', identityStatus: 'synthetic' }],
+    }),
+  );
+  writeFileSync(metadataPath, JSON.stringify(input.metadata));
+  const config = loadChainConfig(configPath),
+    watched = loadAssetVersion(watchPath);
+  const scope = computeWatchScopeId(watched, 'operations', config),
+    registryScope = computeWatchScopeId(watched, 'discovery-only', config);
+  const { db, raw, projection } = setup();
+  const record = batch('cli', [swap(4750)]);
+  record.scopeId = scope;
+  record.poolRegistrations = record.poolRegistrations!.map((r) => ({
+    ...r,
+    source: 'seed-config',
+  }));
+  raw.acceptRange(record);
+  projection.rebuild(scope, registryScope, 'c');
+  await db.backup(dbPath);
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const readerFactory = vi.fn(() => {
+    throw new Error('No RPC allowed');
+  });
+  for (const command of ['metrics', 'rank']) {
+    const args = [
+      command,
+      '--db',
+      dbPath,
+      '--config',
+      configPath,
+      '--watchlist',
+      watchPath,
+      '--metadata',
+      metadataPath,
+      '--save',
+    ];
+    expect(await runCli(args, { environment: {}, readerFactory })).toBe(0);
+    const output = JSON.parse(log.mock.calls.at(-1)![0] as string);
+    expect(output.status).toBe('observed');
+    expect(output.rwa[0].blockRangeActivity).toMatchObject({
+      fromBlock: '60',
+      toBlock: '4800',
+      coverageVerified: false,
+      swapCount: 1,
+    });
+    if (command === 'rank')
+      expect(output.ranked).toMatchObject([
+        { volume5mClosed: '2000000', txCount: 1, multiplierUnit: 'usdMicros' },
+      ]);
+  }
+  expect(readerFactory).not.toHaveBeenCalled();
+  const saved = openDatabase(dbPath, { readonly: true });
+  try {
+    const row = saved.prepare('select payload_json from metric_cursors').get() as {
+      payload_json: string;
+    };
+    expect(JSON.parse(row.payload_json).rwa[0].blockRangeActivity).toMatchObject({
+      fromBlock: '60',
+      toBlock: '4800',
+      coverageVerified: false,
+    });
+  } finally {
+    saved.close();
+  }
+});
+
+test.each(['ingest_batches', 'fetch_shards', 'minute_boundaries', 'anchors'])(
+  'readonly schema rejects a missing P3 input table: %s',
+  (table) => {
+    const dir = mkdtempSync(join(tmpdir(), 'p3-review-'));
+    cliDirs.push(dir);
+    const path = join(dir, 'schema.sqlite');
+    const db = openDatabase(path);
+    db.pragma('foreign_keys=OFF');
+    db.exec(`drop table ${table}`);
+    db.close();
+    expect(() => {
+      const opened = openDatabase(path, { readonly: true });
+      opened.close();
+    }).toThrow(ConfigError);
+  },
+);
+
+test('multiple watched assets in separate pools remain supported', () => {
+  const { db, raw, projection } = setup();
+  raw.acceptRange(batch('separate', [swap(4750)]));
+  projection.rebuild('s', 's', 'c');
+  const report = buildMetricsReport(db, {
+    ...input,
+    assets: createAssetRegistry('multi', [rwa, addr(4)]),
+  });
+  expect(report.rwa.find((r) => r.asset.address === rwa)!.blockRangeActivity.swapCount).toBe(1);
+  expect(report.rwa.find((r) => r.asset.address === addr(4))!.blockRangeActivity.swapCount).toBe(0);
+});
+
+test('retained bounds still contain active swaps after whole accepted intervals are invalidated', () => {
+  const { db, raw, projection } = setup();
+  raw.acceptRange(batch('retained', [swap(4750)]));
+  db.prepare('delete from accepted_ranges where scope_id=?').run('s');
+  projection.rebuild('s', 's', 'c');
+  const report = buildMetricsReport(db, input);
+  expect(report.rwa[0]!.blockRangeActivity).toMatchObject({
+    fromBlock: 4750n,
+    toBlock: 4750n,
+    coverageVerified: false,
+    swapCount: 1,
+  });
+  expect(report.coverage.every((c) => !c.complete)).toBe(true);
 });

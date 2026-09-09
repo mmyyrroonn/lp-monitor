@@ -1,3 +1,5 @@
+import { CHAIN_ID } from '../domain/chain.js';
+import { ConfigError } from '../config/env.js';
 import type Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import type { Address } from 'viem';
@@ -18,7 +20,7 @@ import { buildMinuteMetrics, type MetricEvent } from '../metrics/windows.js';
 import { summarizeLiquidityActions, annotateLatestSwapLiquidity } from '../metrics/liquidity.js';
 import { estimateGrossSwapFee } from '../metrics/fees.js';
 
-export const METRIC_VERSION = 'p3-v1';
+export const METRIC_VERSION = 'p3-v2';
 export class StaleMetricProjectionError extends Error {
   constructor() {
     super('P2 projection is stale or missing; run project --rebuild');
@@ -57,7 +59,31 @@ export function buildMetricsReport(db: Database.Database, input: MetricInput) {
       ...raw.pools(input.scopeId),
     ]);
     const registrations = registry.snapshot();
+    // Multi-asset watchlists are supported; a shared RWA/RWA pool needs an
+    // explicit attribution contract before its activity can be published.
+    for (const registration of registrations) {
+      const related = input.assets.addresses.filter(
+        (address) => address === registration.token0 || address === registration.token1,
+      );
+      if (related.length > 1)
+        throw new ConfigError(
+          `Multiple watched RWA assets in pool ${poolRegistrationId(registration)} are unsupported`,
+        );
+    }
     const byId = new Map(registrations.map((r) => [poolRegistrationId(r), r]));
+    const retained = db
+      .prepare(
+        'select min(from_block) as fromBlock, max(to_block) as toBlock from accepted_ranges where scope_id=?',
+      )
+      .safeIntegers(true)
+      .get(input.scopeId) as { fromBlock: bigint | null; toBlock: bigint | null };
+    // Invalidation can remove a whole accepted interval while retaining earlier
+    // active events. Bounds describe the retained envelope, not proven coverage.
+    for (const event of projection.events) {
+      const block = event.ref.blockNumber;
+      if (retained.fromBlock === null || block < retained.fromBlock) retained.fromBlock = block;
+      if (retained.toBlock === null || block > retained.toBlock) retained.toBlock = block;
+    }
     const coverage = readMetricCoverage(
       db,
       input.scopeId,
@@ -153,7 +179,11 @@ export function buildMetricsReport(db: Database.Database, input: MetricInput) {
         poolIds: registrations
           .filter((r) => r.token0 === asset.address || r.token1 === asset.address)
           .map(poolRegistrationId),
-        blockRangeActivity: aggregateRwa(swaps),
+        blockRangeActivity: {
+          ...aggregateRwa(swaps),
+          ...retained,
+          coverageVerified: false as const,
+        },
         closed5m: {
           startSec: current - 300,
           endSec: current,
@@ -227,7 +257,7 @@ export function buildMetricsReport(db: Database.Database, input: MetricInput) {
       .digest('hex');
     return {
       version: METRIC_VERSION,
-      chainId: 4663 as const,
+      chainId: CHAIN_ID,
       scopeId: input.scopeId,
       registryScopeId: input.registryScopeId,
       configVersion: input.configVersion,

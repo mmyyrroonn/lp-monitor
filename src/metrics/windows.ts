@@ -88,7 +88,8 @@ export type BuildMinuteMetricOptions = {
     discoveredAtBlock: bigint | null;
     rawToken: string | null;
   }[];
-  readonly minimumBaselineSamples?: number;
+  readonly minimumOneMinuteSamples?: number;
+  readonly minimumFiveMinuteSamples?: number;
   readonly oneMinuteBaselineLimit?: number;
   readonly fiveMinuteBaselineLimit?: number;
 };
@@ -107,8 +108,8 @@ export function buildMinuteMetrics(
   watermark: BlockAnchor,
   options: BuildMinuteMetricOptions = {},
 ): readonly PoolMetricWindows[] {
-  const minuteMinimumSamples = options.minimumBaselineSamples ?? 60;
-  const fiveMinuteMinimumSamples = options.minimumBaselineSamples ?? 12;
+  const minuteMinimumSamples = options.minimumOneMinuteSamples ?? 60;
+  const fiveMinuteMinimumSamples = options.minimumFiveMinuteSamples ?? 12;
   const oneMinuteLimit = options.oneMinuteBaselineLimit ?? 60;
   const fiveMinuteLimit = options.fiveMinuteBaselineLimit ?? 12;
   const groups = new Map<string, PoolGroup>();
@@ -284,10 +285,10 @@ function minuteMetric(
     usdgNotionalRaw: sumValued(usdgValues),
     rawNotional:
       swaps.length === 0 && rawToken !== null
-        ? { token: rawToken, raw: 0n }
+        ? { token: rawToken.toLowerCase(), raw: 0n }
         : sumRaw(swaps.map((item) => item.rawNotional ?? null)),
     swapCount: swaps.length,
-    txCount: new Set(swaps.map((item) => item.event.ref.transactionHash)).size,
+    txCount: new Set(swaps.map((item) => item.event.ref.transactionHash.toLowerCase())).size,
     addCount: liquidity.filter((item) => item.event.kind === 'liquidity' && item.event.delta > 0n)
       .length,
     removeCount: liquidity.filter(
@@ -323,7 +324,9 @@ function comparableVolume(item: Pick<MinuteMetric, 'usdMicros' | 'rawNotional'>)
 function sameScale(a: MinuteMetric, b: MinuteMetric): boolean {
   if (a.usdMicros !== null) return b.usdMicros !== null;
   return (
-    a.usdMicros === null && a.rawNotional !== null && a.rawNotional.token === b.rawNotional?.token
+    a.usdMicros === null &&
+    a.rawNotional !== null &&
+    a.rawNotional.token.toLowerCase() === b.rawNotional?.token.toLowerCase()
   );
 }
 function applyMinuteBaselines(minutes: MinuteMetric[], minimum: number, limit: number): void {
@@ -365,7 +368,7 @@ function aggregate(
     usdgNotionalRaw: sumValued(swaps.map((item) => item.usdgNotionalRaw)),
     rawNotional: sumRaw(selected.map((item) => item.rawNotional)),
     swapCount: swaps.length,
-    txCount: new Set(swaps.map((item) => item.event.ref.transactionHash)).size,
+    txCount: new Set(swaps.map((item) => item.event.ref.transactionHash.toLowerCase())).size,
     addCount: liquidity.filter((item) => item.event.kind === 'liquidity' && item.event.delta > 0n)
       .length,
     removeCount: liquidity.filter(
@@ -421,7 +424,9 @@ function aggregateVolume(item: AggregateMetric): bigint | null {
 function sameAggregateScale(a: AggregateMetric, b: AggregateMetric): boolean {
   if (a.usdMicros !== null) return b.usdMicros !== null;
   return (
-    a.usdMicros === null && a.rawNotional !== null && a.rawNotional.token === b.rawNotional?.token
+    a.usdMicros === null &&
+    a.rawNotional !== null &&
+    a.rawNotional.token.toLowerCase() === b.rawNotional?.token.toLowerCase()
   );
 }
 function recentFive(
@@ -470,7 +475,7 @@ function unknownBlockMetric(
     blockNumber,
     eventCount: events.length,
     swapCount: swaps.length,
-    txCount: new Set(swaps.map((item) => item.event.ref.transactionHash)).size,
+    txCount: new Set(swaps.map((item) => item.event.ref.transactionHash.toLowerCase())).size,
     addCount: liquidity.filter((item) => item.event.kind === 'liquidity' && item.event.delta > 0n)
       .length,
     removeCount: liquidity.filter(
