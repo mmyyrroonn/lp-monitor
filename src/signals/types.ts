@@ -1,0 +1,75 @@
+import type { BlockAnchor, PoolRef } from '../domain/types.js';
+import type { PoolMetricWindows } from '../metrics/windows.js';
+import type { SignalBaseline } from './baseline.js';
+export type AlertKind = 'candidate' | 'hot' | 'reheat' | 'cooling' | 'liquidity-watch';
+export type SignalCoverage = 'complete' | 'gap' | 'warming' | 'rechecking';
+export type SignalPresentation = {
+  rwaSymbol?: string;
+  pairLabel?: string;
+  associatedTokens?: readonly string[];
+  evidenceTxs?: readonly string[];
+  liquidityNote?: string;
+};
+export type SignalInput = {
+  pool: PoolRef;
+  batchId: string;
+  endAnchor: BlockAnchor;
+  watermarkSec: number;
+  observedAtMs: number;
+  metrics: PoolMetricWindows;
+  coverage: SignalCoverage;
+  presentation?: SignalPresentation;
+  epoch?: string;
+};
+export type RuleMatch = { ruleId: string; version: string; matched: boolean; reason: string };
+export type SignalSnapshot = {
+  state: 'watch' | 'candidate' | 'hot' | 'cooling';
+  episodeId: string | null;
+  configVersion: string | null;
+  lastAlertSec: number | null;
+  lastAlertVolume: bigint | null;
+  lastAlertScale: '1m' | '5m' | null;
+  lastFiveEndSec: number | null;
+  lowBuckets: number;
+  entryThreshold: bigint | null;
+  lastAlertKind: AlertKind | null;
+  alertSequence: number;
+};
+export type AlertDraft = {
+  id: string;
+  revision: 1;
+  status: 'provisional';
+  kind: AlertKind;
+  pool: PoolRef;
+  poolId: string;
+  ruleVersion: string;
+  episodeId: string;
+  atBatchId: string;
+  observedAtMs: number;
+  endAnchor: BlockAnchor;
+  watermarkSec: number;
+  reasons: readonly string[];
+  metrics: PoolMetricWindows;
+  coverage: SignalCoverage;
+  presentation?: SignalPresentation;
+  baseline: { minute: SignalBaseline; fiveMinute: SignalBaseline };
+};
+export type AlertRecord = Omit<AlertDraft, 'revision' | 'status' | 'kind'> & {
+  provenance?: {
+    metricSourceHash: string;
+    projectionSourceHash: string;
+    metricVersion: string;
+    chainConfigVersion: string;
+    assetVersion: string;
+    metadataVersion: string;
+    evidenceEventIds: readonly string[];
+  };
+  revision: number;
+  status: 'provisional' | 'retracted';
+  kind: AlertKind | 'retracted';
+};
+export type SignalDecision = {
+  nextSnapshot: SignalSnapshot;
+  alertDraft: AlertDraft | null;
+  matches: readonly RuleMatch[];
+};

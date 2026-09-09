@@ -1,6 +1,6 @@
 # 实施状态与窗口交接
 
-更新：2026-09-09。当前状态：**P0 passed；P1 passed；P2 passed；P3 passed**，P4–P6 未开始。下方旧记录保留为设计阶段历史证据；本轮完整验收与限制见文末。
+更新：2026-09-09。当前状态：**P0 passed；P1 passed；P2 passed；P3 passed；P4 passed**，P5/P6 未开始。下方旧记录保留为设计阶段历史证据；本轮完整验收与限制见文末。
 
 此前13份Markdown的本地链接、代码围栏、计划头部顺序、占位符与行尾空白检查通过；并已按架构逐项核对P0–P6覆盖。批量查询补充后的文档检查另记于下方。文档验收不代表应用测试通过。
 
@@ -22,7 +22,7 @@
 | P1 记录与恢复 | passed | 273 测试；5 个实时分钟边界；重启/旧段重扫退出 0；[验收](../artifacts/p1/acceptance.json) | 已完成；沿用 P1 合同 |
 | P2 协议与观测 | passed | 344 测试；650 条真实历史事件 ethers 对照；[验收](../artifacts/p2/acceptance.json) | 用户安排后进入 P3 Task 3.1 |
 | P3 分钟热度 | passed | 453 测试；603 笔历史 Swap、29 闭合分钟；[验收](../artifacts/p3/acceptance.json) | 用户安排 P4 Task 4.1 |
-| P4 告警 | pending | 尚无运行中通知 | P3 验收后开始 |
+| P4 告警 | passed | 539测试；本机通知、修订撤回；[验收](reviews/2026-09-09-p4-acceptance.md) | 用户安排P5 |
 | P5 历史验证 | pending | GMGN/公共 API 案例仅供参照 | P4 验收后开始 |
 | P6 实时验收 | pending | 未启动服务 | P5 数据质量验收后开始 |
 
@@ -159,3 +159,19 @@ P3 查询改造、稀疏观测、自动版本门槛和 V3 fee 来源建模继续
 默认只读CLI，显式 `--save` 保存派生缓存；录制/重扫/retime后仍需先project，P3不是持续后台服务。窗口分钟证据最多取末端180分钟；完整读取、分片复核和缓存重建随历史增长。原研究与技能保留。未交易、连接钱包、启动永久服务、提交或推送。
 
 下一窗口读取 `docs/superpowers/plans/2026-09-08-p4-alerts.md` 从Task4.1开始；从新鲜P3业务结果实现提醒、冷却、修订/撤回，禁止直接消费旧缓存。由用户安排。
+
+## P4 验收记录 — 2026-09-09
+
+状态：**passed**，仅完成P4。基线main的0c2e2e1、477个测试；当前codex/p4-alerts，未提交或推送。
+
+最终交付：本分钟候选、两条独立自然5m确认规则、300秒同级冷却、同口径翻倍升级、降温和再热；持久快照、稳定id/revision、事务outbox及修订撤回；follow --notify local、本机JSONL与人可读控制台。默认follow只记录。新池出生分钟可使用已观测partial量，闭合出生分钟和出生前历史仍不补零；metric version升至p3-v3以绑定这一适配，其余依赖/ABI/链配置未变。
+
+验证：539个测试通过，0失败/跳过；pnpm lint/typecheck/build、全库test、node artifacts/p4/verify-acceptance.mjs、git diff --check均退出0。[命令记录](../artifacts/p4/verification.json)、[测试结果](../artifacts/p4/tests.json)、[验收报告](reviews/2026-09-09-p4-acceptance.md)、[独立审查PASS](reviews/2026-09-09-p4-review.md)。
+
+历史：只读online backup复制P3验收库到data/p4-acceptance.sqlite，逐表核对P1记录及源库不变。1827登记池、603 Swap、34未计价、29闭合分钟，本轮历史提醒0；没有新增RPC。[原库保护](../artifacts/p4/source-db.json)、[历史报告](../artifacts/p4/historical-alerts.json)。合成序列展示候选、确认、10秒冷却内升级、降温、再热与撤回；liquidity-watch只有明确标注的格式示例。[JSONL](../artifacts/p4/alerts.jsonl)、[可读示例](../artifacts/p4/rendered.txt)。
+
+审查修复已覆盖：独立升级不再被初次确认条件屏蔽；历史缺口修复与当前前缀变缺口会重检旧提醒；含来源provenance的重复决策不新建修订；异步投递期间被替代的记录不会复活；登记重扫失败/无下一批时仍投递已提交撤回。范围/P2/P3/信号事务一致性、重启及分叉均有离线回归。
+
+限制：提醒仍为provisional，修订采取保守证据失效撤回并重评当前条件，未实现P5完整历史策略重演。JSONL写后sent前崩溃可能重复id/revision；普通backfill/synthetic不进live sink。全scope每批重建仍有处理开销，2秒仅是轮询配置；未做P6实链持续运行或延迟验收，无交易/钱包/永久服务。
+
+P4完成后停止。P5/P6保持pending；下一窗口由用户明确安排后再按P5计划Task5.1继续。

@@ -1,0 +1,193 @@
+合成离线示例，不是当前行情或已验证收益。liquidity-watch 仅为格式示例，未配置自动触发规则。
+
+AMC / USDG — 候选观察（暂未最终确认）
+RWA：AMC (synthetic)；pool：4663:v3:0x1111111111111111111111111111111111111111
+最近5m：unknown；过去基线：unknown；unknown
+自然完整5m：unknown；过去基线：unknown；unknown
+本分钟累计：25,000 USDG（仍在更新）
+最近5m次数：Swap：unknown次；不同tx：unknown笔；加池动作unknown次、减池动作unknown次
+自然5m次数：Swap：unknown次；不同tx：unknown笔；加池动作unknown次、减池动作unknown次
+本分钟次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟过去基线：unknown；unknown
+时间：分钟归桶；本分钟累计可能仍在更新；数据可能修订
+归桶分钟：1970-01-01T01:00Z
+关联代币：MEME (synthetic)（同交易共现，尚未证实完整路由）
+流动性附注：Synthetic observed Swap L, no verified withdrawal amount
+到达时间：1970-01-01T01:00:01.000Z；完整至区块3,601
+证据：0xe45f13a72f5a43b2c3463a3cc35d703779c364be536a70fb076d653532e3f42c；告警：c44605efa85dc5b93d3b11cc03af34d419dd4b3706cbbb4730d1ade333256f36/revision 1
+命中原因：candidate、warming/absolute-only、partial
+
+---
+
+AMC / USDG — 热度确认（暂未最终确认）
+RWA：AMC (synthetic)；pool：4663:v3:0x1111111111111111111111111111111111111111
+最近5m：unknown；过去基线：unknown；unknown
+自然完整5m：120,000 USDG；过去基线：10,000 USDG；12倍
+本分钟累计：0 USDG（仍在更新）
+最近5m次数：Swap：unknown次；不同tx：unknown笔；加池动作unknown次、减池动作unknown次
+自然5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟过去基线：2,000 USDG；0倍
+时间：分钟归桶；本分钟累计可能仍在更新；数据可能修订
+归桶分钟：1970-01-01T01:09Z
+关联代币：MEME (synthetic)（同交易共现，尚未证实完整路由）
+流动性附注：Synthetic observed Swap L, no verified withdrawal amount
+到达时间：1970-01-01T01:09:50.000Z；完整至区块4,190
+证据：0xe45f13a72f5a43b2c3463a3cc35d703779c364be536a70fb076d653532e3f42c；告警：8b7db7edc795fcdb542142621994a39491e9f744f5ab76e6d69bb3cd2edd989e/revision 1
+命中原因：confirmRelative
+
+---
+
+AMC / USDG — 热度确认（暂未最终确认）
+RWA：AMC (synthetic)；pool：4663:v3:0x1111111111111111111111111111111111111111
+最近5m：300,000 USDG；过去基线：unknown；unknown
+自然完整5m：300,000 USDG；过去基线：10,000 USDG；30倍
+本分钟累计：0 USDG（仍在更新）
+最近5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+自然5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟过去基线：2,000 USDG；0倍
+时间：分钟归桶；本分钟累计可能仍在更新；数据可能修订
+归桶分钟：1970-01-01T01:10Z
+关联代币：MEME (synthetic)（同交易共现，尚未证实完整路由）
+流动性附注：Synthetic observed Swap L, no verified withdrawal amount
+到达时间：1970-01-01T01:10:00.000Z；完整至区块4,200
+证据：0xe45f13a72f5a43b2c3463a3cc35d703779c364be536a70fb076d653532e3f42c；告警：8b7db7edc795fcdb542142621994a39491e9f744f5ab76e6d69bb3cd2edd989e/revision 2
+命中原因：confirmRelative、confirmConsecutive、upgrade
+
+---
+
+AMC / USDG — 热度降温（暂未最终确认）
+RWA：AMC (synthetic)；pool：4663:v3:0x1111111111111111111111111111111111111111
+最近5m：10,000 USDG；过去基线：unknown；unknown
+自然完整5m：10,000 USDG；过去基线：10,000 USDG；1倍
+本分钟累计：0 USDG（仍在更新）
+最近5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+自然5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟过去基线：2,000 USDG；0倍
+时间：分钟归桶；本分钟累计可能仍在更新；数据可能修订
+归桶分钟：1970-01-01T01:25Z
+关联代币：MEME (synthetic)（同交易共现，尚未证实完整路由）
+流动性附注：Synthetic observed Swap L, no verified withdrawal amount
+到达时间：1970-01-01T01:25:00.000Z；完整至区块5,100
+证据：0xe45f13a72f5a43b2c3463a3cc35d703779c364be536a70fb076d653532e3f42c；告警：ed174357302680ec38ebcf2684990ea36c50d7c2cddf01a592f4685d2609ca26/revision 1
+命中原因：three-complete-low-natural5m
+
+---
+
+AMC / USDG — 再次升温（暂未最终确认）
+RWA：AMC (synthetic)；pool：4663:v3:0x1111111111111111111111111111111111111111
+最近5m：120,000 USDG；过去基线：unknown；unknown
+自然完整5m：120,000 USDG；过去基线：10,000 USDG；12倍
+本分钟累计：0 USDG（仍在更新）
+最近5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+自然5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟过去基线：2,000 USDG；0倍
+时间：分钟归桶；本分钟累计可能仍在更新；数据可能修订
+归桶分钟：1970-01-01T01:30Z
+关联代币：MEME (synthetic)（同交易共现，尚未证实完整路由）
+流动性附注：Synthetic observed Swap L, no verified withdrawal amount
+到达时间：1970-01-01T01:30:00.000Z；完整至区块5,400
+证据：0xe45f13a72f5a43b2c3463a3cc35d703779c364be536a70fb076d653532e3f42c；告警：66a3ab9b07ae9d999a00339cfd5b1a7241373a7d194dd5d21fdfa2f9213627c3/revision 1
+命中原因：confirmRelative
+
+---
+
+AMC / USDG — 提醒撤回（暂未最终确认）
+RWA：AMC (synthetic)；pool：4663:v3:0x1111111111111111111111111111111111111111
+最近5m：120,000 USDG；过去基线：unknown；unknown
+自然完整5m：120,000 USDG；过去基线：10,000 USDG；12倍
+本分钟累计：0 USDG（仍在更新）
+最近5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+自然5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟过去基线：2,000 USDG；0倍
+时间：分钟归桶；本分钟累计可能仍在更新；数据可能修订
+归桶分钟：1970-01-01T01:30Z
+关联代币：MEME (synthetic)（同交易共现，尚未证实完整路由）
+流动性附注：Synthetic observed Swap L, no verified withdrawal amount
+到达时间：1970-01-01T01:30:01.000Z；完整至区块5,400
+证据：0xe45f13a72f5a43b2c3463a3cc35d703779c364be536a70fb076d653532e3f42c；告警：66a3ab9b07ae9d999a00339cfd5b1a7241373a7d194dd5d21fdfa2f9213627c3/revision 2
+命中原因：confirmRelative、synthetic-fork-evidence-removed、evidence-invalidated-rechecking
+覆盖状态：rechecking；缺失数据按unknown展示
+
+---
+
+AMC / USDG — 提醒撤回（暂未最终确认）
+RWA：AMC (synthetic)；pool：4663:v3:0x1111111111111111111111111111111111111111
+最近5m：300,000 USDG；过去基线：unknown；unknown
+自然完整5m：300,000 USDG；过去基线：10,000 USDG；30倍
+本分钟累计：0 USDG（仍在更新）
+最近5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+自然5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟过去基线：2,000 USDG；0倍
+时间：分钟归桶；本分钟累计可能仍在更新；数据可能修订
+归桶分钟：1970-01-01T01:10Z
+关联代币：MEME (synthetic)（同交易共现，尚未证实完整路由）
+流动性附注：Synthetic observed Swap L, no verified withdrawal amount
+到达时间：1970-01-01T01:30:01.000Z；完整至区块4,200
+证据：0xe45f13a72f5a43b2c3463a3cc35d703779c364be536a70fb076d653532e3f42c；告警：8b7db7edc795fcdb542142621994a39491e9f744f5ab76e6d69bb3cd2edd989e/revision 3
+命中原因：confirmRelative、confirmConsecutive、upgrade、synthetic-fork-evidence-removed、evidence-invalidated-rechecking
+覆盖状态：rechecking；缺失数据按unknown展示
+
+---
+
+AMC / USDG — 提醒撤回（暂未最终确认）
+RWA：AMC (synthetic)；pool：4663:v3:0x1111111111111111111111111111111111111111
+最近5m：unknown；过去基线：unknown；unknown
+自然完整5m：unknown；过去基线：unknown；unknown
+本分钟累计：25,000 USDG（仍在更新）
+最近5m次数：Swap：unknown次；不同tx：unknown笔；加池动作unknown次、减池动作unknown次
+自然5m次数：Swap：unknown次；不同tx：unknown笔；加池动作unknown次、减池动作unknown次
+本分钟次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟过去基线：unknown；unknown
+时间：分钟归桶；本分钟累计可能仍在更新；数据可能修订
+归桶分钟：1970-01-01T01:00Z
+关联代币：MEME (synthetic)（同交易共现，尚未证实完整路由）
+流动性附注：Synthetic observed Swap L, no verified withdrawal amount
+到达时间：1970-01-01T01:30:01.000Z；完整至区块3,601
+证据：0xe45f13a72f5a43b2c3463a3cc35d703779c364be536a70fb076d653532e3f42c；告警：c44605efa85dc5b93d3b11cc03af34d419dd4b3706cbbb4730d1ade333256f36/revision 2
+命中原因：candidate、warming/absolute-only、partial、synthetic-fork-evidence-removed、evidence-invalidated-rechecking
+覆盖状态：rechecking；缺失数据按unknown展示
+
+---
+
+AMC / USDG — 提醒撤回（暂未最终确认）
+RWA：AMC (synthetic)；pool：4663:v3:0x1111111111111111111111111111111111111111
+最近5m：10,000 USDG；过去基线：unknown；unknown
+自然完整5m：10,000 USDG；过去基线：10,000 USDG；1倍
+本分钟累计：0 USDG（仍在更新）
+最近5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+自然5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟过去基线：2,000 USDG；0倍
+时间：分钟归桶；本分钟累计可能仍在更新；数据可能修订
+归桶分钟：1970-01-01T01:25Z
+关联代币：MEME (synthetic)（同交易共现，尚未证实完整路由）
+流动性附注：Synthetic observed Swap L, no verified withdrawal amount
+到达时间：1970-01-01T01:30:01.000Z；完整至区块5,100
+证据：0xe45f13a72f5a43b2c3463a3cc35d703779c364be536a70fb076d653532e3f42c；告警：ed174357302680ec38ebcf2684990ea36c50d7c2cddf01a592f4685d2609ca26/revision 2
+命中原因：three-complete-low-natural5m、synthetic-fork-evidence-removed、evidence-invalidated-rechecking
+覆盖状态：rechecking；缺失数据按unknown展示
+
+---
+
+AMC / USDG — 流动性观察（暂未最终确认）
+RWA：AMC (synthetic)；pool：4663:v3:0x1111111111111111111111111111111111111111
+最近5m：120,000 USDG；过去基线：unknown；unknown
+自然完整5m：120,000 USDG；过去基线：10,000 USDG；12倍
+本分钟累计：0 USDG（仍在更新）
+最近5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+自然5m次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟次数：Swap：10次；不同tx：9笔；加池动作2次、减池动作1次
+本分钟过去基线：2,000 USDG；0倍
+时间：分钟归桶；本分钟累计可能仍在更新；数据可能修订
+归桶分钟：1970-01-01T01:30Z
+关联代币：MEME (synthetic)（同交易共现，尚未证实完整路由）
+流动性附注：Synthetic observed Swap L, no verified withdrawal amount
+到达时间：1970-01-01T01:30:00.000Z；完整至区块5,400
+证据：0xe45f13a72f5a43b2c3463a3cc35d703779c364be536a70fb076d653532e3f42c；告警：fbbb7e2d51966db9ac7fb167be1cab84050354eba0d290025a733b55d1d84859/revision 1
+命中原因：format-example-only、observed-liquidity-actions-not-withdrawal-value

@@ -1,3 +1,12 @@
+import { ConfigError } from '../config/env.js';
+import type { SignalConfig } from '../signals/config.js';
+import type { MetricMetadata } from '../metrics/metadata.js';
+import { commitAcceptedSignalBatch, projectSignals, retractSignals } from '../signals/project.js';
+import { SqliteProjectionStore } from '../storage/projection-store.js';
+import { AlertOutbox } from '../notify/outbox.js';
+import { createConsoleSink } from '../notify/console.js';
+import { createJsonlSink } from '../notify/jsonl.js';
+import type { FollowStore } from '../ingest/follow.js';
 import { randomUUID, createHash } from 'node:crypto';
 import { mkdirSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -22,6 +31,9 @@ import { RpcFailure, classifyRpcError } from '../rpc/errors.js';
 import { saveJson } from './files.js';
 export interface RecorderOptions {
   command: 'ingest' | 'follow';
+  notify?: 'local';
+  signalConfig?: SignalConfig;
+  metricMetadata?: MetricMetadata;
   config: ChainConfig;
   env: RuntimeEnv;
   watchlistPath: string;
@@ -36,6 +48,16 @@ export interface RecorderOptions {
 }
 export async function runRecorder(options: RecorderOptions): Promise<number> {
   const { config, env } = options;
+  if (
+    options.notify !== undefined &&
+    (options.notify !== 'local' ||
+      options.command !== 'follow' ||
+      !options.signalConfig ||
+      !options.metricMetadata)
+  )
+    throw new ConfigError(
+      'notify local requires follow and validated signal/metadata configuration',
+    );
   const assets = loadAssetVersion(options.watchlistPath);
   const deployments = { v3Factory: config.v3Factory, v4Manager: config.v4Manager };
   const scopeId = computeWatchScopeId(assets, 'operations', deployments);
@@ -46,6 +68,56 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
   mkdirSync(dirname(options.databasePath), { recursive: true });
   const db = openDatabase(options.databasePath);
   const store = new SqliteRangeStore(db);
+  const metricInput = {
+    scopeId,
+    registryScopeId: discoveryScope,
+    configVersion: config.version,
+    assets,
+    usdg: config.tokens.USDG,
+    metadata: options.metricMetadata!,
+  };
+  const outbox = new AlertOutbox(db);
+  const fileSink = createJsonlSink(options.databasePath + '.alerts.jsonl');
+  const consoleSink = createConsoleSink();
+  const drain = async (retractionsOnly = false) => {
+    if (options.notify !== 'local') return;
+    await outbox.deliverPending(
+      async (alert) => {
+        await fileSink(alert);
+        await consoleSink(alert);
+      },
+      scopeId,
+      retractionsOnly ? 'retracted' : undefined,
+    );
+  };
+  const recoveryContext = () => ({
+    batchId: 'recovery-' + randomUUID(),
+    observedAtMs: Date.now(),
+    captureMode: 'live' as const,
+  });
+  const recover = (targetScope: string, anchor: BlockAnchor | null) =>
+    db.transaction(() => {
+      const changes = anchor
+        ? store.invalidateAfter(targetScope, anchor)
+        : store.resetForWarmup(targetScope);
+      if (options.notify === 'local')
+        retractSignals(
+          db,
+          scopeId,
+          recoveryContext(),
+          'scope-rechecking',
+          // Registry revalidation follows; every active reminder is provisional again.
+          0n,
+        );
+      return changes;
+    })();
+  const followStore: FollowStore = {
+    acceptedTip: (scope) => store.acceptedTip(scope),
+    checkpoints: (scope) => store.checkpoints(scope),
+    invalidateAfter: (scope, anchor) => recover(scope, anchor),
+    resetForWarmup: (scope) => recover(scope, null),
+    pruneCheckpoints: (scope, min) => store.pruneCheckpoints(scope, min),
+  };
   const startedAtMs = Date.now();
   const stopAtMs = startedAtMs + (options.durationMs ?? 3600000);
   const reader = (options.readerFactory ?? createChainReader)(env, {
@@ -128,6 +200,8 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         sourceAlias: env.providerAlias,
       },
     });
+    // Retry only already-established withdrawals before any new RPC can fail.
+    await drain(true);
     const initial = await endpointReader.getAnchor('latest');
     const identity = await verifyIdentity(reader, config, initial);
     result.identity = identity;
@@ -151,8 +225,10 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
             endpointReader,
             store.checkpoints(discoveryScope),
           );
-          if (match) recordChanges(store.invalidateAfter(discoveryScope, match), 'discovery-reorg');
-          else recordChanges(store.resetForWarmup(discoveryScope), 'discovery-rebuild');
+          if (match) recordChanges(recover(discoveryScope, match), 'discovery-reorg');
+          else recordChanges(recover(discoveryScope, null), 'discovery-rebuild');
+          // Invalidation is committed: withdrawals must survive registry outages.
+          await drain(true);
           tip = store.acceptedTip(discoveryScope);
         }
       }
@@ -202,12 +278,31 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     if (!result.discoveryComplete) {
       result.status = 'incomplete';
     } else {
+      // Verify the operation checkpoint before delivering a persisted backlog.
+      // This also reconciles config/source changes when no new range is available.
+      const priorTip = store.acceptedTip(scopeId);
+      if (options.notify === 'local' && priorTip) {
+        const current = await endpointReader.getAnchor(priorTip.number);
+        if (
+          current.hash.toLowerCase() === priorTip.hash.toLowerCase() &&
+          current.timestampSec === priorTip.timestampSec
+        ) {
+          db.transaction(() => {
+            new SqliteProjectionStore(db).rebuild(scopeId, discoveryScope, config.version);
+            projectSignals(db, metricInput, options.signalConfig!, {
+              ...recoveryContext(),
+              captureMode: 'backfill',
+            });
+          })();
+          await drain();
+        }
+      }
       const start =
         options.fromBlock ??
         (store.acceptedTip(scopeId)?.number !== undefined
           ? 0n
           : await warmupStart(metered('warmupAnchors'), initial, floor, config.warmupMinutes));
-      const followResult = await follow(endpointReader, store, stopAtMs, {
+      const followResult = await follow(endpointReader, followStore, stopAtMs, {
         scopeId,
         startBlock: start,
         ...(options.toBlock === undefined ? {} : { toBlock: options.toBlock }),
@@ -220,6 +315,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         deploymentFloor: floor,
         onChanges: recordChanges,
         onRecovery: async () => {
+          await drain(true);
           // Revalidate historical registry evidence before applying a new branch.
           const head = await endpointReader.getAnchor('latest');
           if (!(await bootstrap(head))) throw new RpcFailure('discovery-incomplete');
@@ -300,7 +396,11 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           });
           if (batch.completeness !== 'complete') return null;
           await reader.flush?.();
-          const changes = store.acceptRange(timed);
+          const changes =
+            options.notify === 'local'
+              ? commitAcceptedSignalBatch(db, metricInput, options.signalConfig!, timed).changes
+              : store.acceptRange(timed);
+          await drain();
           batchRecords.at(-1)!.accepted = true;
           counts.operationBatches++;
           return changes;

@@ -1,0 +1,21 @@
+{
+  "version": "p4-v1",
+  "candidate": {
+    "enabled": true,
+    "threshold": "20000000000",
+    "multiple": 5,
+    "samples": 60,
+    "version": "1"
+  },
+  "confirmRelative": {
+    "enabled": true,
+    "threshold": "100000000000",
+    "multiple": 5,
+    "samples": 12,
+    "version": "1"
+  },
+  "confirmConsecutive": { "enabled": true, "threshold": "50000000000", "version": "1" },
+  "cooldown": { "enabled": true, "threshold": 300, "version": "1" },
+  "upgrade": { "enabled": true, "threshold": 2, "version": "1" },
+  "cooling": { "enabled": true, "threshold": 25, "buckets": 3, "version": "1" }
+}

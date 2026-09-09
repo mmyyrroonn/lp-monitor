@@ -11,7 +11,7 @@ import { saveJson, repositoryRelativePath } from './ops/files.js';
 import { CHAIN_ID } from './domain/chain.js';
 import { encodeJson } from './domain/json.js';
 
-const help = `Robinhood read-only P0/P1/P2/P3 CLI
+const help = `Robinhood read-only P0/P1/P2/P3/P4 CLI
   pnpm lp metrics --db data/recorder.sqlite --rwa AMC --window 5m
   pnpm lp rank --db data/recorder.sqlite --sort volume5mClosed
   P3: offline; --out PATH saves JSON, --save persists derived cache.
@@ -20,6 +20,9 @@ const help = `Robinhood read-only P0/P1/P2/P3 CLI
   P2 commands are offline; no RPC environment required.
   pnpm lp ingest --config config/robinhood.json --from-block N --to-block N
   pnpm lp follow --config config/robinhood.json --duration 10m
+  P4: follow --notify local [--signals config/signals.initial.json] [--metadata PATH]
+  Local alerts: console and <db>.alerts.jsonl; default follow only records.
+  Full-scope P2/P3 rebuild runs per accepted batch; 2s polling is not a latency guarantee.
   P1: --db PATH --watchlist PATH --max-rpc-calls N (default 10000)
   P1: --evidence full|sampled|off (default sampled); bounded run only.
   pnpm lp probe --config config/robinhood.json --out artifacts/p0/capabilities.json

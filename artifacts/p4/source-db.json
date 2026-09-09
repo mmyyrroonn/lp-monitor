@@ -1,0 +1,20 @@
+{
+  "sourcePath": "data/p3-acceptance.sqlite",
+  "targetPath": "data/p4-acceptance.sqlite",
+  "p1TableHashes": {
+    "ingest_batches": "e6055880f1145daebd44870f495954536d2847aec17918f72e128d8a579d06ed",
+    "fetch_shards": "dbe512aa40d9ef614def8073ccf41899d4aa01d68796763c385263eb65c4453b",
+    "raw_logs": "b0a6bd2a58fc1ccb02e3490c6477179536bee153409b613919a4154e9c887544",
+    "accepted_ranges": "a7d9f43184599e82a6cf47df418d7c9df1d71e50ef0b932520d05c4494b7de8d",
+    "active_logs": "979d89bcf46329b2dd02a2e79405a99726c19140ea1a2e2a3d2bdc3333b51c5c",
+    "scope_cursors": "ab52b7f6bcd63937306bb5767851abf8ad90159fde5222e3cafe72bd72072465",
+    "anchors": "bcaa47ae89fdd5824c561f714cea2055549372651751d8640f3c55555d5afe6a",
+    "minute_boundaries": "aeb722bdcf2b0e7c7891977b0a690b9718429637600a9ee685497093bd21fb92",
+    "log_times": "8e6bc08b08e934bb35aaf2f4cbc31d2786c3859e38b285b90119021c34966a21",
+    "pools": "80d1cc7316c6bf29cf63ec0c0b5a225b3b93b9186840b084b0a99905c29fd77e",
+    "range_invalidations": "4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+    "runs": "644f88a8e90b0fea305f18049ae0b7102ffe7e0ef6520ab802977bf6077e8cfb",
+    "checkpoints": "5729a8db78d74dfdec8b938bc0d4c5e38c3435033f720281182c7265d6015c2a"
+  },
+  "rpcCalls": 0
+}

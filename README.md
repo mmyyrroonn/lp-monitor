@@ -1,6 +1,6 @@
-# Robinhood RWA monitor — P0/P1/P2/P3
+# Robinhood RWA monitor — P0/P1/P2/P3/P4
 
-只读数据采集与有界运行工具。阶段入口为 [START_HERE.md](START_HERE.md)，验收状态见 [实施状态](docs/implementation-status.md)。P1 记录器的实现与验收进度见阶段状态；P3 已提供离线分钟热度，P4 提醒属于后续阶段。
+只读数据采集与有界运行工具。阶段入口为 [START_HERE.md](START_HERE.md)，验收状态见 [实施状态](docs/implementation-status.md)。P1 记录器的实现与验收进度见阶段状态；P3 提供离线分钟热度，P4 提供显式启用的本机提醒。
 
 ## 环境与命令
 
@@ -134,3 +134,21 @@ pnpm lp metrics --db data/p3-acceptance.sqlite --save --out artifacts/p3/saved-v
 P0 身份快照中的 decimals 自记录块向后沿用；若与已知同高度哈希冲突则停用该条缓存，未知高度明确是历史沿用假设。新代币不默认18位；无价成交原币量和次数仍保留。USDG 近似美元只是显示假设，毛费不是 LP 净收益。
 
 [验收报告](docs/reviews/2026-09-09-p3-acceptance.md)与[独立审查](docs/reviews/2026-09-09-p3-review.md)包含453项通过测试及历史副本结果。原始源库未改、无新增RPC；全scope复核/重建和完整缓存体积随历史与登记池数增长。尚未持续运行；下一窗口由用户安排P4。
+
+## P4 本机提醒
+
+```powershell
+pnpm lp follow --config config/robinhood.json --duration 10m --notify local
+# 可选：--signals config/signals.initial.json --metadata config/metric-metadata.json
+pnpm build
+node artifacts/p4/verify-acceptance.mjs
+```
+
+follow 默认只记录；--notify local 才在每个完整范围事务中更新P2/P3与信号，并在提交后输出控制台和数据库路径后追加 .alerts.jsonl 的文件。只接受local，不接受聊天/email/webhook地址。初始参数与开关见config/signals.initial.json：金额是USDG估值micro单位，20k为20000000000；更改阈值会改变配置hash并重检旧提醒。
+
+候选使用本分钟partial；热度确认使用自然完整5m，两种确认规则独立留痕。300秒冷却不屏蔽同口径翻倍升级或再热；缺口不判降温。样本不足/零基线/未知量保持null或unknown；原币不能套估值阈值。流动性动作与Swap后L仅作附注，不等于已验证撤资或LP收益。
+
+每条提醒有稳定id、递增revision和provisional标记。历史事件/时间/覆盖/登记修正会撤回受影响证据并重评当前状态；修复范围尚未恢复时也能保留撤回。文件写完而sent未落盘时允许重试，JSONL消费者应以id/revision识别重复。旧pending修订被新修订替代后跳过；普通backfill/synthetic不会投递到live sink。重启先重检历史锚点，再恢复旧live队列，旧历史不会自动提升为实时提醒。
+
+P4每批仍全scope重建及复核；轮询配置保持2秒，但处理/写盘开销、实际通知延迟与长期运行尚未实链验证。P5/P6仍待用户安排。离线验收保留源库，历史样本提醒数为0；合成示例包含状态序列，liquidity-watch仅用于格式展示。详见[P4验收](docs/reviews/2026-09-09-p4-acceptance.md)与[示例](artifacts/p4/rendered.txt)。
+新池出生分钟只要已扫前缀完整，即可用已观测partial量判断绝对候选；出生前及不完整出生分钟仍不进入历史基线。该P4适配使metric version变为p3-v3，未修改链配置或ABI。

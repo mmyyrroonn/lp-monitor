@@ -231,19 +231,31 @@ function minuteMetric(
     coverage.fromBlock !== null &&
     coverage.toBlock !== null &&
     (coverage.complete || coverage.reasons.every((r) => r === 'watermark-partial'));
-  const status: MinuteStatus = beforeBirth
-    ? 'warming'
-    : start === currentMinute
-      ? prefixValid
-        ? 'partial'
-        : coverage
-          ? 'gap'
-          : 'warming'
-      : coverage?.complete && coverage.fromBlock !== null && coverage.toBlock !== null
-        ? 'closed'
-        : coverage
-          ? 'gap'
-          : 'warming';
+  // A newly registered pool can already have observed activity in the current
+  // prefix. Expose that partial evidence, but never close or baseline its
+  // incomplete birth minute (or manufacture any pre-birth zero history).
+  const bornInCurrentPrefix =
+    start === currentMinute &&
+    prefixValid &&
+    beforeBirth &&
+    discoveredAtBlock !== null &&
+    coverage?.toBlock !== null &&
+    coverage?.toBlock !== undefined &&
+    discoveredAtBlock <= coverage.toBlock;
+  const status: MinuteStatus =
+    beforeBirth && !bornInCurrentPrefix
+      ? 'warming'
+      : start === currentMinute
+        ? prefixValid
+          ? 'partial'
+          : coverage
+            ? 'gap'
+            : 'warming'
+        : coverage?.complete && coverage.fromBlock !== null && coverage.toBlock !== null
+          ? 'closed'
+          : coverage
+            ? 'gap'
+            : 'warming';
   if (status === 'gap' || status === 'warming') {
     return {
       minuteStartSec: start,
@@ -280,7 +292,13 @@ function minuteMetric(
     fromBlock: coverage?.fromBlock ?? null,
     toBlock: coverage?.toBlock ?? null,
     reasons:
-      status === 'partial' ? [...(coverage?.reasons ?? []), 'watermark-before-minute-end'] : [],
+      status === 'partial'
+        ? [
+            ...(coverage?.reasons ?? []),
+            'watermark-before-minute-end',
+            ...(bornInCurrentPrefix ? ['pool-born-in-current-minute'] : []),
+          ]
+        : [],
     usdMicros: sumValued(usdValues),
     usdgNotionalRaw: sumValued(usdgValues),
     rawNotional:

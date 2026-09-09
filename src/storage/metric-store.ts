@@ -20,7 +20,7 @@ import { buildMinuteMetrics, type MetricEvent } from '../metrics/windows.js';
 import { summarizeLiquidityActions, annotateLatestSwapLiquidity } from '../metrics/liquidity.js';
 import { estimateGrossSwapFee } from '../metrics/fees.js';
 
-export const METRIC_VERSION = 'p3-v2';
+export const METRIC_VERSION = 'p3-v3';
 export class StaleMetricProjectionError extends Error {
   constructor() {
     super('P2 projection is stale or missing; run project --rebuild');

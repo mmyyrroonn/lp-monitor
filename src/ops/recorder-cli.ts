@@ -1,3 +1,6 @@
+import { readFileSync } from 'node:fs';
+import { parseSignalConfig } from '../signals/config.js';
+import { loadMetricMetadata } from '../metrics/metadata.js';
 import { parseArgs } from 'node:util';
 import { resolve } from 'node:path';
 import { ConfigError, loadEnv } from '../config/env.js';
@@ -24,6 +27,9 @@ export async function runRecorderCli(
       strict: true,
       options: {
         config: { type: 'string' },
+        notify: { type: 'string' },
+        signals: { type: 'string' },
+        metadata: { type: 'string' },
         watchlist: { type: 'string' },
         out: { type: 'string' },
         db: { type: 'string' },
@@ -76,6 +82,22 @@ export async function runRecorderCli(
       Number(budget) < 1)
   )
     throw new ConfigError('Invalid RPC budget');
+  if (values.notify !== undefined && (values.notify !== 'local' || command !== 'follow'))
+    throw new ConfigError('notify local is supported only for follow');
+  let signalConfig;
+  if (values.notify === 'local' || values.signals !== undefined) {
+    try {
+      signalConfig = parseSignalConfig(
+        JSON.parse(readFileSync(String(values.signals ?? 'config/signals.initial.json'), 'utf8')),
+      );
+    } catch {
+      throw new ConfigError('Invalid signal configuration');
+    }
+  }
+  const metricMetadata =
+    values.notify === 'local' || values.metadata !== undefined
+      ? loadMetricMetadata(String(values.metadata ?? 'config/metric-metadata.json'))
+      : undefined;
   const config = loadChainConfig(String(values.config ?? 'config/robinhood.json'));
   if (config.overlapBlocks >= config.maxRangeBlocks)
     throw new ConfigError('overlapBlocks must be smaller than maxRangeBlocks');
@@ -83,6 +105,9 @@ export async function runRecorderCli(
   const { runRecorder } = await import('./recorder.js');
   return runRecorder({
     command: command as 'ingest' | 'follow',
+    ...(values.notify === 'local'
+      ? { notify: 'local' as const, signalConfig: signalConfig!, metricMetadata: metricMetadata! }
+      : {}),
     config,
     env,
     watchlistPath: String(values.watchlist ?? 'config/watchlist.amc.json'),
