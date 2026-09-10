@@ -466,7 +466,11 @@ export class SqliteRangeStore {
       .prepare('select id, payload_json from raw_logs where raw_key = ?')
       .get(key) as { id: number; payload_json: string } | undefined;
     if (existing !== undefined) {
-      if (existing.payload_json !== payloadJson) throw new Error('Raw log payload is immutable');
+      // rawBlockTimestamp is an untrusted provider annotation and may drift across
+      // overlapping fetches. Keep the first raw row byte-for-byte; each ingest batch
+      // still preserves the exact annotation observed in its transport payload.
+      if (canonicalRawLogPayload(existing.payload_json) !== canonicalRawLogPayload(payloadJson))
+        throw new Error('Raw log payload is immutable');
       return existing.id;
     }
     const result = this.database
@@ -766,6 +770,12 @@ function normalizeRawLog(log: RawLog): object {
     data: normalizeHex(log.data),
     rawBlockTimestamp: log.rawBlockTimestamp === null ? null : normalizeHex(log.rawBlockTimestamp),
   };
+}
+
+function canonicalRawLogPayload(payloadJson: string): string {
+  const parsed = JSON.parse(payloadJson) as Record<string, unknown>;
+  const { rawBlockTimestamp: _providerAnnotation, ...canonical } = parsed;
+  return losslessJson(canonical);
 }
 
 function normalizeRequest(shard: FetchShardManifest): object {

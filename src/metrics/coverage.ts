@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { createHash } from 'node:crypto';
 import type { BlockAnchor, MinuteBoundary } from '../domain/types.js';
 import type { ProjectionQualityError } from '../state/project-range.js';
 import { verifySuccessfulShardCoverage } from '../ingest/completeness.js';
@@ -15,6 +16,12 @@ export interface MetricCoverage {
 }
 type Interval = { fromBlock: bigint; toBlock: bigint };
 type RangeRow = { batch_id: string; filter_id: string; from_block: number; to_block: number };
+type CachedBatch = { fromBlock: bigint; toBlock: bigint; filters: string[] } | null;
+const caches = new WeakMap<
+  Database.Database,
+  Map<string, { signature: string; value: CachedBatch }>
+>();
+const CACHE_LIMIT = 2048;
 
 function covers(ranges: readonly Interval[], from: bigint, to: bigint): boolean {
   if (to < from) return true;
@@ -75,15 +82,48 @@ function decodeBatch(text: string): RecordedRangeBatch {
 
 /** Only current accepted ranges count. Failed raw attempts are historical evidence,
  * and cannot create either a complete minute or erase prior accepted coverage. */
-export function acceptedMetricRanges(db: Database.Database, scopeId: string): Interval[] {
-  const rows = db
-    .prepare('select batch_id,filter_id,from_block,to_block from accepted_ranges where scope_id=?')
-    .all(scopeId) as RangeRow[];
+export function acceptedMetricRanges(
+  db: Database.Database,
+  scopeId: string,
+  bounds?: Readonly<Interval>,
+): Interval[] {
+  // Bounds select whole batches, never individual family rows. Invalid or
+  // unrepresentable bounds conservatively retain full validation.
+  const bounded =
+    bounds !== undefined &&
+    bounds.fromBlock >= 0n &&
+    bounds.toBlock >= bounds.fromBlock &&
+    bounds.toBlock <= BigInt(Number.MAX_SAFE_INTEGER);
+  const rows = (
+    bounded
+      ? db
+          .prepare(
+            'select batch_id,filter_id,from_block,to_block from accepted_ranges as accepted ' +
+              'where scope_id=? and exists (select 1 from accepted_ranges as candidate ' +
+              'where candidate.scope_id=accepted.scope_id and candidate.batch_id=accepted.batch_id ' +
+              'and candidate.from_block<=? and candidate.to_block>=?)',
+          )
+          .all(scopeId, Number(bounds.toBlock), Number(bounds.fromBlock))
+      : db
+          .prepare(
+            'select batch_id,filter_id,from_block,to_block from accepted_ranges where scope_id=?',
+          )
+          .all(scopeId)
+  ) as RangeRow[];
   const groups = new Map<string, RangeRow[]>();
   for (const row of rows) {
     const group = groups.get(row.batch_id) ?? [];
     group.push(row);
     groups.set(row.batch_id, group);
+  }
+  const cache = caches.get(db) ?? new Map<string, { signature: string; value: CachedBatch }>();
+  caches.set(db, cache);
+  const scopePrefix = scopeId + '\0';
+  // Release this scope's previous window before admitting the next one. Other
+  // scopes remain untouched; full reads retain every currently selected batch.
+  for (const key of cache.keys()) {
+    if (key.startsWith(scopePrefix) && !groups.has(key.slice(scopePrefix.length)))
+      cache.delete(key);
   }
   const result: Interval[] = [];
   for (const [batchId, accepted] of groups) {
@@ -91,16 +131,9 @@ export function acceptedMetricRanges(db: Database.Database, scopeId: string): In
       .prepare('select payload_json from ingest_batches where id=? and scope_id=?')
       .get(batchId, scopeId) as { payload_json: string } | undefined;
     if (!row) continue;
-    const batch = decodeBatch(row.payload_json);
-    if (batch.scopeId !== scopeId) continue;
-    try {
-      verifySuccessfulShardCoverage(batch);
-    } catch {
-      continue;
-    }
     const stored = db
       .prepare(
-        'select shard_id,status,response_hash,log_count,error from fetch_shards where batch_id=?',
+        'select shard_id,status,response_hash,log_count,error from fetch_shards where batch_id=? order by shard_id',
       )
       .all(batchId) as {
       shard_id: string;
@@ -109,23 +142,48 @@ export function acceptedMetricRanges(db: Database.Database, scopeId: string): In
       log_count: number;
       error: string | null;
     }[];
-    if (
-      stored.length !== batch.manifest.expectedShardIds.length ||
-      batch.manifest.shards.some(
-        (s) =>
-          !stored.some(
-            (r) =>
-              r.shard_id === s.shardId &&
-              r.status === 'success' &&
-              r.response_hash === s.responseHash &&
-              r.log_count === s.logCount &&
-              r.error === null,
-          ),
-      )
-    )
-      continue;
-    if (!completePartitions(batch)) continue;
-    const filters = [...new Set(batch.manifest.shards.map((s) => s.filterId))];
+    const signature = createHash('sha256')
+      .update(row.payload_json)
+      .update(JSON.stringify(stored))
+      .digest('hex');
+    const key = scopeId + '\0' + batchId;
+    let value = cache.get(key)?.signature === signature ? cache.get(key)!.value : undefined;
+    if (value === undefined) {
+      value = null;
+      try {
+        const decoded = decodeBatch(row.payload_json);
+        if (decoded.scopeId === scopeId) {
+          verifySuccessfulShardCoverage(decoded);
+          const complete =
+            stored.length === decoded.manifest.expectedShardIds.length &&
+            decoded.manifest.shards.every((shard) =>
+              stored.some(
+                (item) =>
+                  item.shard_id === shard.shardId &&
+                  item.status === 'success' &&
+                  item.response_hash === shard.responseHash &&
+                  item.log_count === shard.logCount &&
+                  item.error === null,
+              ),
+            );
+          if (complete && completePartitions(decoded))
+            value = {
+              fromBlock: decoded.fromBlock,
+              toBlock: decoded.toBlock,
+              filters: [...new Set(decoded.manifest.shards.map((shard) => shard.filterId))],
+            };
+        }
+      } catch {
+        value = null;
+      }
+      // Saturating admission avoids sequential scans evicting every useful
+      // entry once history exceeds capacity. Changed admitted entries still
+      // replace their old validation, including failed validation.
+      if (cache.has(key) || cache.size < CACHE_LIMIT) cache.set(key, { signature, value });
+    }
+    if (!value) continue;
+    const batch = value;
+    const filters = batch.filters;
     // P1 removes whole accepted intervals on invalidation. Intersect surviving
     // family coverage rather than using the original batch bounds after a reorg.
     const points = [
@@ -190,10 +248,27 @@ export function readMetricCoverage(
     throw new RangeError('Metric horizon must be 65..10080 minutes');
   const raw = new SqliteRangeStore(db),
     boundaries = raw.boundaries(scopeId);
-  const ranges = acceptedMetricRanges(db, scopeId);
   const current = Math.floor(watermark.timestampSec / 60) * 60;
   const first = Math.max(boundaries[0]?.timestampSec ?? current, current - historyMinutes * 60);
   const map = new Map(boundaries.map((b) => [b.timestampSec, b]));
+  // Match the exact intervals evaluated below, including current prefixes and
+  // invalid boundaries. Empty intervals need no accepted blocks; missing bounds
+  // are not evaluated. With no nonempty interval, retain the full fallback.
+  let bounds: Interval | undefined;
+  for (let minute = first; minute <= current; minute += 60) {
+    const from = map.get(minute)?.firstBlock;
+    const right = map.get(minute + 60);
+    const to = minute === current ? watermark.number : right ? right.firstBlock - 1n : undefined;
+    if (from === undefined || to === undefined || to < from) continue;
+    bounds =
+      bounds === undefined
+        ? { fromBlock: from, toBlock: to }
+        : {
+            fromBlock: from < bounds.fromBlock ? from : bounds.fromBlock,
+            toBlock: to > bounds.toBlock ? to : bounds.toBlock,
+          };
+  }
+  const ranges = acceptedMetricRanges(db, scopeId, bounds);
   const times = raw.logTimes(scopeId);
   const logs = raw.activeLogs(scopeId);
   const result: MetricCoverage[] = [];

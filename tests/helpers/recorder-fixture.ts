@@ -51,6 +51,7 @@ export function recorderFixture() {
     createChainReader(env, {
       ...options,
       perSecond: 100000,
+      maxBackfillRpcRps: 100000,
       maxRetries: 0,
       fetchFn: async (_input, init) => {
         const req = JSON.parse(init!.body as string);

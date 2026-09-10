@@ -1,0 +1,165 @@
+{
+  "sourceAlias": "robinhood-public",
+  "startedAtMs": 1789035317903,
+  "finishedAtMs": 1789035333611,
+  "status": "complete",
+  "failure": null,
+  "measurements": [
+    {
+      "rangeBlocks": 10,
+      "fromBlock": "59324061",
+      "toBlock": "59324070",
+      "completeness": "complete",
+      "logs": 0,
+      "rawZeroTimestampLogs": 0,
+      "acquisitionMs": 2100,
+      "withMinuteEvidenceMs": 3131,
+      "timingFailures": [],
+      "unresolvedTimes": 0,
+      "timeEntries": 0,
+      "calls": 9,
+      "responseBytes": 4666,
+      "methods": {
+        "eth_chainId": 0,
+        "eth_getBlockByNumber": 2,
+        "eth_getLogs": 7
+      },
+      "evidence": {
+        "path": "range-10.json",
+        "sha256": "b25f2cb9b542abaef85e586831a86a23a4515e85f56febde30ed0fffe60bbfda",
+        "bytes": 3447000
+      }
+    },
+    {
+      "rangeBlocks": 20,
+      "fromBlock": "59324051",
+      "toBlock": "59324070",
+      "completeness": "complete",
+      "logs": 0,
+      "rawZeroTimestampLogs": 0,
+      "acquisitionMs": 2135,
+      "withMinuteEvidenceMs": 3152,
+      "timingFailures": [],
+      "unresolvedTimes": 0,
+      "timeEntries": 0,
+      "calls": 9,
+      "responseBytes": 5156,
+      "methods": {
+        "eth_chainId": 0,
+        "eth_getBlockByNumber": 2,
+        "eth_getLogs": 7
+      },
+      "evidence": {
+        "path": "range-20.json",
+        "sha256": "ecc77434b85264559a311305724f7633235736645e3bec5be86d56a6dbb8ebea",
+        "bytes": 3447000
+      }
+    },
+    {
+      "rangeBlocks": 100,
+      "fromBlock": "59323971",
+      "toBlock": "59324070",
+      "completeness": "complete",
+      "logs": 0,
+      "rawZeroTimestampLogs": 0,
+      "acquisitionMs": 2087,
+      "withMinuteEvidenceMs": 3109,
+      "timingFailures": [],
+      "unresolvedTimes": 0,
+      "timeEntries": 0,
+      "calls": 9,
+      "responseBytes": 5018,
+      "methods": {
+        "eth_chainId": 0,
+        "eth_getBlockByNumber": 2,
+        "eth_getLogs": 7
+      },
+      "evidence": {
+        "path": "range-100.json",
+        "sha256": "47349a962167a1bfdeee2f34916f359c51734c467c4835d0e350e478f1eabd4c",
+        "bytes": 3447000
+      }
+    }
+  ],
+  "meter": {
+    "calls": 30,
+    "retries": 1,
+    "responseBytes": 17120,
+    "methods": {
+      "eth_chainId": 2,
+      "eth_getBlockByNumber": 7,
+      "eth_getLogs": 21
+    },
+    "methodMetrics": {
+      "eth_chainId": {
+        "calls": 2,
+        "retries": 1,
+        "responseBytes": 43,
+        "rpcMs": 5497
+      },
+      "eth_getBlockByNumber": {
+        "calls": 7,
+        "retries": 0,
+        "responseBytes": 16286,
+        "rpcMs": 1778
+      },
+      "eth_getLogs": {
+        "calls": 21,
+        "retries": 0,
+        "responseBytes": 791,
+        "rpcMs": 5533
+      }
+    },
+    "purposes": {
+      "metadata": {
+        "calls": 2,
+        "retries": 1,
+        "responseBytes": 43,
+        "rpcMs": 5497
+      },
+      "endpoint-anchor": {
+        "calls": 4,
+        "retries": 0,
+        "responseBytes": 8951,
+        "rpcMs": 1013
+      },
+      "logs": {
+        "calls": 21,
+        "retries": 0,
+        "responseBytes": 791,
+        "rpcMs": 5533
+      },
+      "minute-boundary": {
+        "calls": 3,
+        "retries": 0,
+        "responseBytes": 7335,
+        "rpcMs": 765
+      }
+    },
+    "elements": {
+      "total": 30,
+      "byPurpose": {
+        "metadata": 2,
+        "endpoint-anchor": 4,
+        "logs": 21,
+        "minute-boundary": 3
+      }
+    },
+    "queueDepth": 0,
+    "peakQueueDepth": 1,
+    "activeRpc": 0,
+    "peakConcurrentRpc": 1,
+    "timings": {
+      "queueWaitMs": 2746,
+      "rpcMs": 12808,
+      "processingMs": 0
+    },
+    "elapsedMs": 15708,
+    "maxCalls": 200,
+    "peakOneSecond": 5,
+    "backfillPeakOneSecond": 1,
+    "averageRpcPerSecond": 1.9098548510313216,
+    "billingUnits": null
+  },
+  "limitation": "Three overlapping bounded samples from one fixed observed head. Not a sustained-throughput or independent-chain-coverage guarantee."
+}

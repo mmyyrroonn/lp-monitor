@@ -1,0 +1,5 @@
+{
+  "registrationRowsAcrossScopeQuery": 3802,
+  "uniquePoolWindowsAndAnnotations": 1901,
+  "interpretation": "The 3802 count is registration rows selected across operation and registry scopes; it is not a distinct-pool count. buildMetrics emitted 1901 pool windows/annotations."
+}

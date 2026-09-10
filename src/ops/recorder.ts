@@ -30,6 +30,27 @@ import type { BlockAnchor, ChainReader, RangeChangeSet } from '../domain/types.j
 import { encodeJson } from '../domain/json.js';
 import { RpcFailure, classifyRpcError } from '../rpc/errors.js';
 import { saveJson } from './files.js';
+import {
+  createShutdownController,
+  ShutdownRequested,
+  type ShutdownController,
+} from './shutdown.js';
+import { RuntimeTelemetry } from './runtime-telemetry.js';
+class RawSaveFailure extends Error {
+  constructor(
+    readonly phase: 'discovery' | 'operations',
+    cause: unknown,
+  ) {
+    super('Raw save failed', { cause });
+  }
+}
+function rawSaveStage(phase: RawSaveFailure['phase'], action: () => void): void {
+  try {
+    action();
+  } catch (cause) {
+    throw new RawSaveFailure(phase, cause);
+  }
+}
 class SignalEvaluationFailure extends Error {
   constructor(
     readonly phase: 'startup' | 'accepted-batch' | 'recovery',
@@ -61,6 +82,7 @@ export interface RecorderOptions {
   maxCalls: number;
   evidenceMode: 'full' | 'sampled' | 'off';
   readerFactory?: typeof createChainReader;
+  shutdown?: ShutdownController;
 }
 export async function runRecorder(options: RecorderOptions): Promise<number> {
   const { config, env } = options;
@@ -100,11 +122,14 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
   const consoleSink = createConsoleSink();
   const alertDelivery = { sent: 0, failed: 0, status: 'ok' as 'ok' | 'degraded' };
   const drain = async (retractionsOnly = false) => {
-    if (options.notify !== 'local') return;
+    if (options.notify !== 'local')
+      return { sent: 0, failed: 0, deliveredAtMs: null as number | null };
+    let deliveredAtMs: number | null = null;
     const delivered = await outbox.deliverPending(
       async (alert) => {
         await fileSink(alert);
         await consoleSink(alert);
+        deliveredAtMs = Date.now();
       },
       scopeId,
       retractionsOnly ? 'retracted' : undefined,
@@ -112,6 +137,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     alertDelivery.sent += delivered.sent;
     alertDelivery.failed += delivered.failed;
     if (delivered.failed > 0) alertDelivery.status = 'degraded';
+    else if (delivered.sent > 0) alertDelivery.status = 'ok';
     if (delivered.sent > 0 || delivered.failed > 0)
       console.log(
         encodeJson({
@@ -122,6 +148,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           retractionsOnly,
         }),
       );
+    return { ...delivered, deliveredAtMs };
   };
   const recoveryContext = () => ({
     batchId: 'recovery-' + randomUUID(),
@@ -155,15 +182,27 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
   };
   const startedAtMs = Date.now();
   const stopAtMs = startedAtMs + (options.durationMs ?? 3600000);
+  // Stop admitting batches at the requested cutoff; let the current batch finish bounded RPC work.
+  const rpcDrainDeadlineMs = stopAtMs + 30_000;
   const reader = (options.readerFactory ?? createChainReader)(env, {
     maxCalls: options.maxCalls,
-    deadlineMs: stopAtMs,
+    deadlineMs: rpcDrainDeadlineMs,
     perSecond: config.rpcPerSecond,
     maxConcurrentRpc: config.maxConcurrentRpc,
+    maxBackfillRpcRps: config.maxBackfillRpcRps,
     timeoutMs: config.timeoutMs,
     maxRetries: config.maxRetries,
     evidenceMode: options.evidenceMode,
     evidenceFile: resolve(out, 'requests.jsonl'),
+  });
+  const shutdown = options.shutdown ?? createShutdownController();
+  const telemetry = new RuntimeTelemetry({
+    db,
+    databasePath: options.databasePath,
+    scopeId,
+    sourceAlias: env.providerAlias,
+    chainId: config.chainId,
+    meter: reader.meter,
   });
   const counts = {
     endpointAnchors: 0,
@@ -176,10 +215,24 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     kind: keyof Pick<typeof counts, 'endpointAnchors' | 'minuteAnchors' | 'warmupAnchors'>,
   ): ChainReader => ({
     getAnchor: async (block) => {
+      shutdown.throwIfRequested();
       counts[kind]++;
-      return reader.getAnchor(block);
+      const purpose =
+        kind === 'minuteAnchors'
+          ? 'minute-boundary'
+          : kind === 'warmupAnchors'
+            ? 'warmup-anchor'
+            : 'endpoint-anchor';
+      const work = () => reader.meter.withPurpose(purpose, () => reader.getAnchor(block));
+      // Numeric anchors are historical acquisition, including recovery and minute searches.
+      const anchor = await (block === 'latest' ? work() : reader.meter.withBackfill(work));
+      if (block === 'latest') telemetry.observeHead(anchor);
+      return anchor;
     },
-    getLogs: (filter) => reader.getLogs(filter),
+    getLogs: (filter) => {
+      shutdown.throwIfRequested();
+      return reader.meter.withPurpose('logs', () => reader.getLogs(filter));
+    },
   });
   const endpointReader = metered('endpointAnchors');
   const batchRecords: {
@@ -201,6 +254,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     discoveryComplete: boolean;
     timingUnresolved: number;
     timingFailures: unknown[];
+    localFailure: { category: 'raw-save'; phase: RawSaveFailure['phase'] } | null;
   } = {
     status: 'running',
     failures: [],
@@ -209,8 +263,10 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     discoveryComplete: false,
     timingUnresolved: 0,
     timingFailures: [],
+    localFailure: null,
   };
   const recordChanges = (changes: RangeChangeSet, cause: string) => {
+    if (cause !== 'range') telemetry.invalidateProjection();
     revisions.push({
       cause,
       added: changes.added.length,
@@ -235,11 +291,33 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         sourceAlias: env.providerAlias,
       },
     });
+    telemetry.transition('starting');
     // Retry only already-established withdrawals before any new RPC can fail.
     await drain(true);
+    shutdown.throwIfRequested();
     const initial = await endpointReader.getAnchor('latest');
-    const identity = await verifyIdentity(reader, config, initial);
+    const identity = await reader.meter
+      .withBackfill(() =>
+        verifyIdentity(
+          {
+            ...reader,
+            getAnchor: endpointReader.getAnchor,
+            getLogs: endpointReader.getLogs,
+            request: (method, params) => {
+              shutdown.throwIfRequested();
+              return reader.request(method, params);
+            },
+          },
+          config,
+          initial,
+        ),
+      )
+      .catch((error: unknown) => {
+        shutdown.throwIfRequested();
+        throw error;
+      });
     result.identity = identity;
+    shutdown.throwIfRequested();
     if (!identity.requiredPassed) throw new RpcFailure('identity-unverified');
     const verifiedDeployments = [identity.deployments.v3Factory, identity.deployments.v4Manager];
     const floor = verifiedDeployments.every((d) => d.firstCodeBlock !== null)
@@ -269,6 +347,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       }
       let from = tip ? tip.number + 1n : floor;
       while (from <= head.number && Date.now() < stopAtMs) {
+        shutdown.throwIfRequested();
         const top = from + BigInt(config.discoveryMaxRangeBlocks) - 1n;
         const end = top < head.number ? await endpointReader.getAnchor(top) : head;
         const batch = await fetchRange(endpointReader, {
@@ -287,7 +366,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           observedAtMs: Date.now(),
           captureMode: 'backfill',
         });
-        store.saveRaw(batch);
+        rawSaveStage('discovery', () => store.saveRaw(batch));
         batchRecords.push({
           id: batch.id,
           scopeId: batch.scopeId,
@@ -301,6 +380,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         saveJson(resolve(out, 'discovery-' + batch.id + '.json'), batch, out);
         if (batch.completeness !== 'complete') return false;
         await reader.flush?.();
+        shutdown.throwIfRequested();
         store.acceptRange(batch);
         batchRecords.at(-1)!.accepted = true;
         counts.discoveryBatches++;
@@ -309,7 +389,9 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       }
       return (store.acceptedTip(discoveryScope)?.number ?? -1n) >= head.number;
     };
-    result.discoveryComplete = await bootstrap(initial);
+    telemetry.setPhase('backfill');
+    result.discoveryComplete = await reader.meter.withPurpose('backfill', () => bootstrap(initial));
+    shutdown.throwIfRequested();
     if (!result.discoveryComplete) {
       result.status = 'incomplete';
     } else {
@@ -335,6 +417,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
               });
             })(),
           );
+          telemetry.markProjectionFresh();
           await drain();
         }
       }
@@ -354,35 +437,79 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         warmupMinutes: config.warmupMinutes,
         checkpointRetentionMinutes: config.checkpointRetentionMinutes,
         deploymentFloor: floor,
+        shouldStop: () => shutdown.requested,
+        sleep: (ms) => shutdown.wait(ms),
+        onWait: (ms) => telemetry.addWait(ms),
+        onStateChange: (state) => {
+          if (telemetry.transition(state))
+            console.log(encodeJson({ event: 'health-change', runId: id, state }));
+        },
+        onFailure: () => telemetry.sample(null),
+        onResult: (partial) => {
+          result.follow = partial;
+          result.failures.push(...partial.failures);
+        },
         onChanges: recordChanges,
         onRecovery: async () => {
           await drain(true);
           // Revalidate historical registry evidence before applying a new branch.
           const head = await endpointReader.getAnchor('latest');
-          if (!(await bootstrap(head))) throw new RpcFailure('discovery-incomplete');
+          telemetry.setPhase('backfill');
+          if (!(await reader.meter.withPurpose('backfill', () => bootstrap(head))))
+            throw new RpcFailure('discovery-incomplete');
         },
-        recordRange: async (from, end, previous, head) => {
+        recordRange: async (from, end, previous, head, acquisitionStartedAtMs) => {
+          shutdown.throwIfRequested();
+          const phase =
+            options.command === 'ingest' || end.number !== head.number || end.hash !== head.hash
+              ? 'backfill'
+              : 'steady';
+          telemetry.setPhase(phase);
+          telemetry.sample(null);
+          const acquisitionAt = acquisitionStartedAtMs;
           const pools = new PoolRegistry([...store.pools(discoveryScope), ...store.pools(scopeId)]);
-          const batch = await fetchRange(endpointReader, {
-            mode: 'operations',
-            fromBlock: from,
-            toBlock: end.number,
-            end,
-            previous,
-            assets,
-            pools,
-            ...deployments,
-            logResponseGuard: config.logResponseGuard,
-            maxLogsPerResponse: config.maxLogsPerResponse,
-            maxFilterValues: config.maxFilterValues,
-            maxRangeBlocks: config.maxRangeBlocks,
-            observedAtMs: Date.now(),
-            captureMode:
-              options.command === 'ingest' || end.number !== head.number || end.hash !== head.hash
-                ? 'backfill'
-                : 'live',
-          });
-          store.saveRaw(batch);
+          const batch = await reader.meter.withPurpose(
+            phase === 'backfill' ? 'backfill' : 'logs',
+            () =>
+              fetchRange(endpointReader, {
+                mode: 'operations',
+                fromBlock: from,
+                toBlock: end.number,
+                end,
+                previous,
+                assets,
+                pools,
+                ...deployments,
+                logResponseGuard: config.logResponseGuard,
+                maxLogsPerResponse: config.maxLogsPerResponse,
+                maxFilterValues: config.maxFilterValues,
+                maxRangeBlocks: config.maxRangeBlocks,
+                observedAtMs: Date.now(),
+                captureMode:
+                  options.command === 'ingest' ||
+                  end.number !== head.number ||
+                  end.hash !== head.hash
+                    ? 'backfill'
+                    : 'live',
+              }),
+          );
+          const rawWriteAt = Date.now();
+          rawSaveStage('operations', () => store.saveRaw(batch));
+          const rawWriteMs = Date.now() - rawWriteAt;
+          if (shutdown.requested) {
+            saveJson(resolve(out, 'range-' + batch.id + '.json'), batch, out);
+            batchRecords.push({
+              id: batch.id,
+              scopeId: batch.scopeId,
+              fromBlock: from,
+              toBlock: end.number,
+              manifestHash: batch.manifestHash,
+              completeness: batch.completeness,
+              logs: batch.logs.length,
+              accepted: false,
+            });
+            shutdown.throwIfRequested();
+          }
           const priorTimes = store.logTimes(scopeId);
           const unresolved = store
             .activeLogs(scopeId)
@@ -427,6 +554,9 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
               (item) => item.time.source === 'unresolved',
             ).length;
           }
+          const completeEvidenceAtMs =
+            batch.completeness === 'complete' && result.timingUnresolved === 0 ? Date.now() : null;
+          const rpcAcquisitionMs = Date.now() - acquisitionAt;
           saveJson(resolve(out, 'range-' + batch.id + '.json'), { ...timed, timingFailures }, out);
           batchRecords.push({
             id: batch.id,
@@ -440,39 +570,88 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           });
           if (batch.completeness !== 'complete') return null;
           await reader.flush?.();
+          shutdown.throwIfRequested();
+          const commitAt = Date.now();
           const changes =
             metricInput && options.signalConfig
               ? signalStage('accepted-batch', () =>
                   commitAcceptedSignalBatch(db, metricInput, options.signalConfig!, timed),
                 ).changes
               : store.acceptRange(timed);
-          await drain(batch.captureMode !== 'live');
+          const outboxDurableAtMs = metricInput ? Date.now() : null;
+          const writeLatencyMs = rawWriteMs + Date.now() - commitAt;
+          if (metricInput) telemetry.markProjectionFresh();
+          const processingLatencyMs =
+            completeEvidenceAtMs !== null && outboxDurableAtMs !== null
+              ? outboxDurableAtMs - completeEvidenceAtMs
+              : null;
+          if (processingLatencyMs !== null) reader.meter.recordProcessing(processingLatencyMs);
+          const delivery = await drain(batch.captureMode !== 'live');
+          telemetry.batchTimings.push({
+            phase,
+            batchId: batch.id,
+            fromBlock: from,
+            toBlock: end.number,
+            logs: batch.logs.length,
+            rpcAcquisitionMs,
+            completeEvidenceAtMs,
+            outboxDurableAtMs,
+            acquisitionStartedAtMs: acquisitionAt,
+            headObservedAtMs: telemetry.headObservedAtMs,
+            notifyAttemptCompletedAtMs: metricInput ? Date.now() : null,
+            deliveredAtMs: delivery.deliveredAtMs,
+            writeLatencyMs,
+            processingLatencyMs:
+              completeEvidenceAtMs !== null && outboxDurableAtMs !== null
+                ? outboxDurableAtMs - completeEvidenceAtMs
+                : null,
+            headAcquisitionLagMs:
+              head.timestampSec > 0 ? Math.max(0, acquisitionAt - head.timestampSec * 1000) : null,
+          });
           batchRecords.at(-1)!.accepted = true;
           counts.operationBatches++;
+          telemetry.sample(null);
           return changes;
         },
-        onProgress: (health) =>
+        onProgress: (health) => {
+          const runtimeHealth = telemetry.sample(
+            health.coverage === 'gap' ? true : health.coverage === 'complete' ? false : null,
+          );
           console.log(
             encodeJson({
               event: 'progress',
               runId: id,
               health,
+              runtimeHealth,
               counts,
               alertDelivery,
               meter: reader.meter.summary(),
             }),
-          ),
+          );
+        },
       });
       result.follow = followResult;
-      result.failures.push(...followResult.failures);
       result.status =
         followResult.complete && counts.operationBatches > 0 ? 'complete' : 'incomplete';
-      exitCode = result.status === 'complete' ? 0 : 4;
+      if (shutdown.requested) result.status = 'stopped';
+      else if (
+        !followResult.complete &&
+        Date.now() >= stopAtMs &&
+        followResult.failures.length === 0
+      )
+        result.failures.push('duration-ended-with-backlog');
+      exitCode = ['complete', 'stopped'].includes(result.status) ? 0 : 4;
     }
   } catch (error) {
     primary = error;
     result.status = 'failed';
-    if (error instanceof SignalEvaluationFailure) {
+    if (error instanceof ShutdownRequested) {
+      result.status = 'stopped';
+    } else if (error instanceof RawSaveFailure) {
+      result.failures.push('raw-save');
+      result.localFailure = { category: 'raw-save', phase: error.phase };
+      console.error(encodeJson({ event: 'raw-save-failure', ...result.localFailure }));
+    } else if (error instanceof SignalEvaluationFailure) {
       result.failures.push('signal-evaluation');
       console.error(
         encodeJson({
@@ -482,21 +661,37 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           rawEvidenceRetained: true,
         }),
       );
-    } else result.failures.push(classifyRpcError(error).kind);
+    } else result.failures.push(error instanceof RpcFailure ? error.kind : 'local-error');
     exitCode =
-      error instanceof RpcFailure ? (['budget', 'deadline'].includes(error.kind) ? 4 : 3) : 1;
+      error instanceof ShutdownRequested
+        ? 0
+        : error instanceof RpcFailure
+          ? ['budget', 'deadline'].includes(error.kind)
+            ? 4
+            : 3
+          : 1;
   } finally {
     try {
       await reader.close?.();
     } catch (error) {
       const failure = classifyRpcError(error);
-      result.failures.push(failure.kind);
+      result.failures.push(error instanceof RpcFailure ? failure.kind : 'local-error');
       result.status = 'failed';
       if (primary instanceof RpcFailure && primary !== error) primary.evidenceFailure ??= failure;
       if (!primary) {
         primary = error;
         exitCode = error instanceof RpcFailure ? 3 : 1;
       }
+    }
+    let measurements: ReturnType<RuntimeTelemetry['finish']> | null = null;
+    try {
+      telemetry.transition(result.status === 'failed' ? 'failed' : result.status);
+      measurements = telemetry.finish();
+      saveJson(resolve(out, 'ops-report.json'), measurements.report, out);
+    } catch {
+      result.failures.push('runtime-report-write');
+      result.status = 'failed';
+      if (exitCode === 0) exitCode = 1;
     }
     const summary = {
       version: 1,
@@ -523,6 +718,24 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       batches: batchRecords,
       revisions,
       evidenceMode: options.evidenceMode,
+      stopReason:
+        shutdown.reason ??
+        (result.status !== 'failed' && Date.now() >= stopAtMs ? 'duration' : null),
+      requestedDurationMs: options.durationMs,
+      stopAtMs,
+      rpcDrainDeadlineMs,
+      telemetry: measurements,
+      replayInputs:
+        options.notify === 'local'
+          ? {
+              signalConfig: options.signalConfig,
+              metricMetadata: options.metricMetadata,
+              chainConfig: config,
+              assets,
+              order:
+                'batches and revisions are separately ordered; cross-stream revision order unavailable',
+            }
+          : null,
     };
     const persistFinalRun = () => {
       try {
@@ -571,7 +784,11 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         }),
       );
     } finally {
-      db.close();
+      try {
+        db.close();
+      } finally {
+        if (!options.shutdown) shutdown.dispose();
+      }
     }
   }
   return exitCode;

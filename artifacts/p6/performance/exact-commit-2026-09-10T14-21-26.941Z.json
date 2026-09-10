@@ -1,0 +1,261 @@
+{
+  "version": 1,
+  "profileCompletedAt": "2026-09-10T14:21:33.561Z",
+  "sourcePath": "E:\\lp-monitor\\.superpowers\\sdd\\p6\\perf-mid-soak.sqlite",
+  "sourceDatabaseHashBefore": "f4b6c657aa60248ae0ffdb2d3e6dd904c0c226c2c26c66ee08a3e0c749049e58",
+  "sourceDatabaseHashAfter": "f4b6c657aa60248ae0ffdb2d3e6dd904c0c226c2c26c66ee08a3e0c749049e58",
+  "basePath": "E:\\lp-monitor\\artifacts\\p6\\performance\\exact-commit-2026-09-10T14-21-26.941Z-base.sqlite",
+  "baseHash": "f4b6c657aa60248ae0ffdb2d3e6dd904c0c226c2c26c66ee08a3e0c749049e58",
+  "workPath": "E:\\lp-monitor\\artifacts\\p6\\performance\\exact-commit-2026-09-10T14-21-26.941Z-work.sqlite",
+  "batchPath": "E:\\lp-monitor\\artifacts\\p6\\runs\\2026-09-10T11-26-39-675Z-15113771\\range-255f882f0685ab686c1dcbbc7b8aee43462bdcb180bc48e2d62d2af0c6491312.json",
+  "batchFileHash": "75af2c6e0d7fb41d82a0c87629e9a02c11c8d7d8de6e49e902e047c52c47799e",
+  "sourceHashes": {
+    "src/storage/raw-store.ts": "e53c0370e7c57fca00beaf330036b20d6ca6aee59b7e55e4811aebff0a330120",
+    "src/storage/projection-store.ts": "9ffacd0fd60274dc417cc287b42c694876781ec8b6ad45672378501fb44d1cfd",
+    "src/state/project-range.ts": "f444aec445918d33fa42250e8e5b9977a0d2771ca996fd88d277237a63ea1657",
+    "src/storage/metric-store.ts": "1725751a64c2e8334b7a06fe895adcee7e717544e7402296a3a4964e42919219",
+    "src/metrics/coverage.ts": "739f1c35abb587a05a4eea9c0f9e722f5e716c694646528227d138fd8fd54f12",
+    "src/metrics/windows.ts": "d4df58fa6f7422165a4c1af92eba518edb3e66c5cc1876ef075510862c513480",
+    "src/metrics/baseline.ts": "7a6095520685dccf36cf0da88a503b784debb136f953ac876d7dcfa0ad53b433",
+    "src/signals/project.ts": "fa30c78778bdcd22eb46dd8228425129c182b54514a3826a85c7b74d7b23178d",
+    "src/signals/engine.ts": "2b8ed8aa06489be7e387a1791b2878008bc850239c3ad476fb3117fb59d34ad8"
+  },
+  "sourceHashesAfter": {
+    "src/storage/raw-store.ts": "e53c0370e7c57fca00beaf330036b20d6ca6aee59b7e55e4811aebff0a330120",
+    "src/storage/projection-store.ts": "9ffacd0fd60274dc417cc287b42c694876781ec8b6ad45672378501fb44d1cfd",
+    "src/state/project-range.ts": "f444aec445918d33fa42250e8e5b9977a0d2771ca996fd88d277237a63ea1657",
+    "src/storage/metric-store.ts": "1725751a64c2e8334b7a06fe895adcee7e717544e7402296a3a4964e42919219",
+    "src/metrics/coverage.ts": "739f1c35abb587a05a4eea9c0f9e722f5e716c694646528227d138fd8fd54f12",
+    "src/metrics/windows.ts": "d4df58fa6f7422165a4c1af92eba518edb3e66c5cc1876ef075510862c513480",
+    "src/metrics/baseline.ts": "7a6095520685dccf36cf0da88a503b784debb136f953ac876d7dcfa0ad53b433",
+    "src/signals/project.ts": "fa30c78778bdcd22eb46dd8228425129c182b54514a3826a85c7b74d7b23178d",
+    "src/signals/engine.ts": "2b8ed8aa06489be7e387a1791b2878008bc850239c3ad476fb3117fb59d34ad8"
+  },
+  "exactBatch": {
+    "id": "255f882f0685ab686c1dcbbc7b8aee43462bdcb180bc48e2d62d2af0c6491312",
+    "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+    "previousNumber": "59405836",
+    "previousHash": "0x560a8fa20a04899e25610150541262ae30ffedce5660e64d3d6e0e8dbf376c24",
+    "fromBlock": "59405817",
+    "toBlock": "59405898",
+    "logCount": 0,
+    "manifestHash": "cf39e484541a550d651fda5529be6fdb0670bfb04fae9dc37ff3e395c8e5b576"
+  },
+  "warmupMs": 4570.8511,
+  "commitWallMs": 1210.7840999999999,
+  "phaseSamples": {
+    "raw.activeLogs": {
+      "calls": 6,
+      "inclusiveMs": 48.336600000000544
+    },
+    "raw.logTimes": {
+      "calls": 6,
+      "inclusiveMs": 31.144200000000637
+    },
+    "raw.acceptRange": {
+      "calls": 1,
+      "inclusiveMs": 101.1858000000002
+    },
+    "raw.pools": {
+      "calls": 8,
+      "inclusiveMs": 62.57210000000032
+    },
+    "projection.snapshot": {
+      "calls": 2,
+      "inclusiveMs": 150.20790000000034
+    },
+    "projection.rebuild": {
+      "calls": 1,
+      "inclusiveMs": 349.4531999999999
+    },
+    "projection.read": {
+      "calls": 1,
+      "inclusiveMs": 77.3064000000004
+    }
+  },
+  "phaseNote": "Prototype timers are inclusive and nested; do not sum them. Commit includes real acceptance, P2 rebuild, fresh metrics, signal evaluation/persistence and outer transaction commit. CPU sampling and wrapper overhead included. Raw transport pre-save and metrics warmup precede timer; no notification sink invoked.",
+  "end": {
+    "number": "59405898",
+    "hash": "0x65e58b93790b6a926086fd72e720b6032390a7b02d24f3e0d693e58e51b64cdc"
+  },
+  "alertsReturned": 0,
+  "cpuPath": "E:\\lp-monitor\\artifacts\\p6\\performance\\exact-commit-2026-09-10T14-21-26.941Z.cpuprofile",
+  "topSelfFunctions": [
+    {
+      "functionLocation": "prepare :0",
+      "samples": 241,
+      "estimatedSelfMs": 371.20600000000024
+    },
+    {
+      "functionLocation": "keccakP file:///E:/lp-monitor/node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/sha3.js:49",
+      "samples": 60,
+      "estimatedSelfMs": 91.74100000000004
+    },
+    {
+      "functionLocation": "post node:inspector:115",
+      "samples": 1,
+      "estimatedSelfMs": 80.195
+    },
+    {
+      "functionLocation": " file:///E:/lp-monitor/src/metrics/coverage.ts:1",
+      "samples": 36,
+      "estimatedSelfMs": 57.31599999999998
+    },
+    {
+      "functionLocation": " file:///E:/lp-monitor/src/registry/pools.ts:1",
+      "samples": 31,
+      "estimatedSelfMs": 47.023999999999994
+    },
+    {
+      "functionLocation": "update :0",
+      "samples": 29,
+      "estimatedSelfMs": 44.92599999999998
+    },
+    {
+      "functionLocation": "encodeJson file:///E:/lp-monitor/src/domain/json.ts:1",
+      "samples": 28,
+      "estimatedSelfMs": 43.53799999999999
+    },
+    {
+      "functionLocation": "update node:internal/crypto/hash:134",
+      "samples": 28,
+      "estimatedSelfMs": 43.45800000000001
+    },
+    {
+      "functionLocation": "acceptedMetricRanges file:///E:/lp-monitor/src/metrics/coverage.ts:1",
+      "samples": 23,
+      "estimatedSelfMs": 35.63799999999999
+    },
+    {
+      "functionLocation": "(garbage collector) :0",
+      "samples": 22,
+      "estimatedSelfMs": 34.15599999999999
+    },
+    {
+      "functionLocation": "decodeSignalState file:///E:/lp-monitor/src/signals/codec.ts:1",
+      "samples": 14,
+      "estimatedSelfMs": 21.833000000000002
+    },
+    {
+      "functionLocation": "medianRatio file:///E:/lp-monitor/src/metrics/baseline.ts:1",
+      "samples": 10,
+      "estimatedSelfMs": 15.670000000000002
+    },
+    {
+      "functionLocation": " file:///E:/lp-monitor/src/signals/project.ts:1",
+      "samples": 9,
+      "estimatedSelfMs": 14.05
+    },
+    {
+      "functionLocation": " file:///E:/lp-monitor/src/storage/raw-store.ts:31",
+      "samples": 9,
+      "estimatedSelfMs": 13.961999999999998
+    },
+    {
+      "functionLocation": "normalizeSignature file:///E:/lp-monitor/node_modules/.pnpm/viem@2.56.3_typescript@7.0.2_zod@4.5.4/node_modules/viem/_esm/utils/hash/normalizeSignature.js:2",
+      "samples": 8,
+      "estimatedSelfMs": 12.557
+    },
+    {
+      "functionLocation": "preview file:///E:/lp-monitor/src/registry/pools.ts:1",
+      "samples": 8,
+      "estimatedSelfMs": 11.564000000000002
+    },
+    {
+      "functionLocation": " file:///E:/lp-monitor/src/protocols/event-log.ts:1",
+      "samples": 7,
+      "estimatedSelfMs": 10.949
+    },
+    {
+      "functionLocation": "signalBaseline file:///E:/lp-monitor/src/signals/baseline.ts:1",
+      "samples": 7,
+      "estimatedSelfMs": 10.940999999999999
+    },
+    {
+      "functionLocation": " file:///E:/lp-monitor/src/storage/metric-store.ts:1",
+      "samples": 6,
+      "estimatedSelfMs": 9.222
+    },
+    {
+      "functionLocation": " file:///E:/lp-monitor/src/signals/project.ts:2",
+      "samples": 7,
+      "estimatedSelfMs": 8.452
+    },
+    {
+      "functionLocation": "assertCanonicalEvent file:///E:/lp-monitor/src/protocols/event-log.ts:1",
+      "samples": 5,
+      "estimatedSelfMs": 8.086
+    },
+    {
+      "functionLocation": "decodePoolRegistration file:///E:/lp-monitor/src/storage/raw-store.ts:85",
+      "samples": 5,
+      "estimatedSelfMs": 7.84
+    },
+    {
+      "functionLocation": "readMetricCoverage file:///E:/lp-monitor/src/metrics/coverage.ts:1",
+      "samples": 5,
+      "estimatedSelfMs": 7.818
+    },
+    {
+      "functionLocation": " file:///E:/lp-monitor/src/metrics/price.ts:1",
+      "samples": 5,
+      "estimatedSelfMs": 7.784999999999999
+    },
+    {
+      "functionLocation": "completePartitions file:///E:/lp-monitor/src/metrics/coverage.ts:1",
+      "samples": 5,
+      "estimatedSelfMs": 7.762
+    },
+    {
+      "functionLocation": "persistAnchor file:///E:/lp-monitor/src/storage/raw-store.ts:74",
+      "samples": 5,
+      "estimatedSelfMs": 7.738
+    },
+    {
+      "functionLocation": "maybeCacheGeneratedSourceMap node:internal/source_map/source_map_cache:202",
+      "samples": 5,
+      "estimatedSelfMs": 7.735
+    },
+    {
+      "functionLocation": "projectRange file:///E:/lp-monitor/src/state/project-range.ts:1",
+      "samples": 5,
+      "estimatedSelfMs": 6.5200000000000005
+    },
+    {
+      "functionLocation": "Keccak file:///E:/lp-monitor/node_modules/.pnpm/@noble+hashes@1.8.0/node_modules/@noble/hashes/esm/sha3.js:97",
+      "samples": 4,
+      "estimatedSelfMs": 6.283
+    },
+    {
+      "functionLocation": " file:///E:/lp-monitor/src/storage/projection-store.ts:1",
+      "samples": 4,
+      "estimatedSelfMs": 6.272
+    },
+    {
+      "functionLocation": "prepareParam file:///E:/lp-monitor/node_modules/.pnpm/viem@2.56.3_typescript@7.0.2_zod@4.5.4/node_modules/viem/_esm/utils/abi/encodeAbiParameters.js:67",
+      "samples": 4,
+      "estimatedSelfMs": 6.256
+    },
+    {
+      "functionLocation": " file:///E:/lp-monitor/node_modules/.pnpm/viem@2.56.3_typescript@7.0.2_zod@4.5.4/node_modules/viem/_esm/utils/abi/decodeEventLog.js:14",
+      "samples": 4,
+      "estimatedSelfMs": 6.255
+    },
+    {
+      "functionLocation": "rawLogFromRow file:///E:/lp-monitor/src/storage/raw-store.ts:85",
+      "samples": 4,
+      "estimatedSelfMs": 6.232
+    },
+    {
+      "functionLocation": "readEvidence file:///E:/lp-monitor/src/signals/project.ts:2",
+      "samples": 4,
+      "estimatedSelfMs": 6.231000000000001
+    },
+    {
+      "functionLocation": " file:///E:/lp-monitor/src/metrics/windows.ts:1",
+      "samples": 4,
+      "estimatedSelfMs": 6.23
+    }
+  ],
+  "reproduction": "pnpm exec tsx .superpowers/sdd/p6/profile-exact-commit.ts; creates a new timestamped untouched base backup and independent working clone each run. Original snapshot readonly; source/dist untouched; exact recorded batch previous anchor checked before execution. This is a single offline diagnostic, not live acceptance."
+}

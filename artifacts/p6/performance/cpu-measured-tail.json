@@ -1,0 +1,157 @@
+{
+  "profileFile": ".superpowers/sdd/p6/cpu-profile-mid-soak-2/CPU.20260910.205343.40136.0.001.cpuprofile",
+  "tailWindowMs": 1200,
+  "note": "Tail window approximates the measured second call (reported 1080.6ms) and excludes the earlier cold-cache warmup; boundary is conservative, not an exact function marker.",
+  "topSelf": [
+    {
+      "function": "(anonymous)",
+      "url": "file:///E:/lp-monitor/src/storage/metric-store.ts",
+      "line": 1,
+      "selfSamples": 143
+    },
+    {
+      "function": "acceptedMetricRanges",
+      "url": "file:///E:/lp-monitor/src/metrics/coverage.ts",
+      "line": 1,
+      "selfSamples": 91
+    },
+    {
+      "function": "next",
+      "url": "file:///E:/lp-monitor/src/metrics/baseline.ts",
+      "line": 1,
+      "selfSamples": 63
+    },
+    {
+      "function": "(garbage collector)",
+      "url": "",
+      "line": 0,
+      "selfSamples": 41
+    },
+    {
+      "function": "(anonymous)",
+      "url": "file:///E:/lp-monitor/src/storage/metric-store.ts",
+      "line": 1,
+      "selfSamples": 40
+    },
+    {
+      "function": "buildNaturalBuckets",
+      "url": "file:///E:/lp-monitor/src/metrics/windows.ts",
+      "line": 1,
+      "selfSamples": 36
+    },
+    {
+      "function": "(anonymous)",
+      "url": "file:///E:/lp-monitor/src/metrics/coverage.ts",
+      "line": 1,
+      "selfSamples": 31
+    },
+    {
+      "function": "poolRegistrationId",
+      "url": "file:///E:/lp-monitor/src/registry/pools.ts",
+      "line": 1,
+      "selfSamples": 30
+    },
+    {
+      "function": "(anonymous)",
+      "url": "file:///E:/lp-monitor/src/storage/metric-store.ts",
+      "line": 1,
+      "selfSamples": 28
+    },
+    {
+      "function": "applyMinuteBaselines",
+      "url": "file:///E:/lp-monitor/src/metrics/windows.ts",
+      "line": 1,
+      "selfSamples": 18
+    },
+    {
+      "function": "(anonymous)",
+      "url": "file:///E:/lp-monitor/src/metrics/windows.ts",
+      "line": 1,
+      "selfSamples": 18
+    },
+    {
+      "function": "minuteMetric",
+      "url": "file:///E:/lp-monitor/src/metrics/windows.ts",
+      "line": 1,
+      "selfSamples": 17
+    },
+    {
+      "function": "sortedInsert",
+      "url": "file:///E:/lp-monitor/src/metrics/baseline.ts",
+      "line": 1,
+      "selfSamples": 9
+    },
+    {
+      "function": "aggregate",
+      "url": "file:///E:/lp-monitor/src/metrics/windows.ts",
+      "line": 1,
+      "selfSamples": 7
+    },
+    {
+      "function": "(anonymous)",
+      "url": "file:///E:/lp-monitor/src/storage/metric-store.ts",
+      "line": 1,
+      "selfSamples": 6
+    },
+    {
+      "function": "pools",
+      "url": "file:///E:/lp-monitor/src/storage/raw-store.ts",
+      "line": 31,
+      "selfSamples": 6
+    },
+    {
+      "function": "encodeJson",
+      "url": "file:///E:/lp-monitor/src/domain/json.ts",
+      "line": 1,
+      "selfSamples": 6
+    },
+    {
+      "function": "recentFive",
+      "url": "file:///E:/lp-monitor/src/metrics/windows.ts",
+      "line": 1,
+      "selfSamples": 6
+    },
+    {
+      "function": "prepare",
+      "url": "file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/wrappers.js",
+      "line": 4,
+      "selfSamples": 5
+    },
+    {
+      "function": "(anonymous)",
+      "url": "file:///E:/lp-monitor/src/metrics/coverage.ts",
+      "line": 1,
+      "selfSamples": 5
+    },
+    {
+      "function": "covers",
+      "url": "file:///E:/lp-monitor/src/metrics/coverage.ts",
+      "line": 1,
+      "selfSamples": 5
+    },
+    {
+      "function": "medianRatio",
+      "url": "file:///E:/lp-monitor/src/metrics/baseline.ts",
+      "line": 1,
+      "selfSamples": 5
+    },
+    {
+      "function": "close",
+      "url": "file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/wrappers.js",
+      "line": 13,
+      "selfSamples": 5
+    },
+    {
+      "function": "activeLogs",
+      "url": "file:///E:/lp-monitor/src/storage/raw-store.ts",
+      "line": 24,
+      "selfSamples": 4
+    },
+    {
+      "function": "decodePoolRegistration",
+      "url": "file:///E:/lp-monitor/src/storage/raw-store.ts",
+      "line": 85,
+      "selfSamples": 4
+    }
+  ]
+}

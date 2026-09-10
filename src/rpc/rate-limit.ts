@@ -28,14 +28,23 @@ export class RateLimiter {
       this.successes = 0;
     }
   }
-  acquire(beforeWait?: () => void, onAcquired?: () => void): Promise<void> {
+  acquire(
+    beforeWait?: () => void,
+    onAcquired?: () => void,
+    additional?: RateLimiter,
+  ): Promise<void> {
     const result = this.tail.then(async () => {
       beforeWait?.();
-      while (this.nextMs > Date.now())
-        await new Promise((resolve) => setTimeout(resolve, this.nextMs - Date.now()));
+      while (Math.max(this.nextMs, additional?.nextMs ?? 0) > Date.now())
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.max(this.nextMs, additional?.nextMs ?? 0) - Date.now()),
+        );
       // Commit the call only at the actual slot, before the next queued acquisition.
       onAcquired?.();
       this.nextMs = Date.now() + Math.max(this.penaltyMs, Math.ceil(1000 / this.perSecond));
+      if (additional)
+        additional.nextMs =
+          Date.now() + Math.max(additional.penaltyMs, Math.ceil(1000 / additional.perSecond));
     });
     this.tail = result.catch(() => {});
     return result;

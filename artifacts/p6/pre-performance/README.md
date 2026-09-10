@@ -1,0 +1,1 @@
+These are the 713-test verification records before the baseline/annotation performance changes. Code snapshot names in the original record refer to the parent artifacts/p6 directory. The running 2026-09-10T11-26-39-675Z-15113771 executable used the pre-performance build.

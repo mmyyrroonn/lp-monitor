@@ -1,0 +1,8 @@
+{
+  "startedAtMs": 1789034843372,
+  "finishedAtMs": 1789035237206,
+  "exitCode": 0,
+  "fromBlock": "59319202",
+  "toBlock": "59319301",
+  "note": "Initial registry scan retained; operation seed is only the latest 100 observed blocks. Older baseline windows remain warming."
+}

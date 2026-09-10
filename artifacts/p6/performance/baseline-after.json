@@ -1,0 +1,101 @@
+{
+  "backupCompletedAt": "2026-09-10T12:32:50.884Z",
+  "profileCompletedAt": "2026-09-10T12:48:31.931Z",
+  "databasePath": ".superpowers/sdd/p6/perf-mid-soak.sqlite",
+  "cursor": {
+    "scope_id": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+    "registry_scope_id": "scope-v1-31c2bb795d5b913ca6ebf4ec7cef72201fbe2115f4c00a93abcdc0b62eea3794",
+    "config_version": "2026-09-10.p6-local",
+    "block_number": 59405836
+  },
+  "counts": {
+    "activeLogs": 1279,
+    "logTimes": 1279,
+    "acceptedRangeRows": 2888,
+    "acceptedBatches": 722,
+    "fetchShards": 5054,
+    "projectedEvents": 1279,
+    "pools": 3802,
+    "anchors": 2477,
+    "minuteBoundaries": 145
+  },
+  "evidenceBytes": {
+    "acceptedBatchPayloadJson": 99626771,
+    "activeRawPayloadJson": 1146283,
+    "projectionCursorPayloadJson": 2064921,
+    "signalEvidenceJson": 1200642
+  },
+  "samples": {
+    "activeLogs": [
+      {
+        "wallMs": 8.037399999999991,
+        "heapDeltaBytes": 3322696
+      },
+      {
+        "wallMs": 7.630899999999997,
+        "heapDeltaBytes": 3305824
+      },
+      {
+        "wallMs": 7.642499999999984,
+        "heapDeltaBytes": 3299240
+      }
+    ],
+    "logTimes": [
+      {
+        "wallMs": 4.317199999999957,
+        "heapDeltaBytes": 4133464
+      },
+      {
+        "wallMs": 3.4239000000000033,
+        "heapDeltaBytes": 4097720
+      },
+      {
+        "wallMs": 3.108500000000049,
+        "heapDeltaBytes": 4091360
+      }
+    ],
+    "projectionRead": [
+      {
+        "wallMs": 62.65070000000003,
+        "heapDeltaBytes": -748752
+      },
+      {
+        "wallMs": 62.20069999999998,
+        "heapDeltaBytes": -4481272
+      },
+      {
+        "wallMs": 56.13930000000005,
+        "heapDeltaBytes": 61157944
+      }
+    ],
+    "acceptedMetricRanges": [
+      {
+        "wallMs": 227.66769999999997,
+        "heapDeltaBytes": 24260984
+      },
+      {
+        "wallMs": 225.3690999999999,
+        "heapDeltaBytes": 36941784
+      },
+      {
+        "wallMs": 229.5002000000004,
+        "heapDeltaBytes": -36615920
+      }
+    ],
+    "buildMetrics": [
+      {
+        "wallMs": 1027.1653999999999,
+        "heapDeltaBytes": 129735728
+      },
+      {
+        "wallMs": 1044.7821999999996,
+        "heapDeltaBytes": 122942456
+      },
+      {
+        "wallMs": 1337.1893,
+        "heapDeltaBytes": 124291608
+      }
+    ]
+  },
+  "note": "Consistent SQLite backup created during the live soak; all profiling reads target only that copy. One warmup plus three timed calls per path in one read transaction."
+}

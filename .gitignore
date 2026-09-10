@@ -39,3 +39,15 @@ artifacts/**/requests.jsonl.*
 /artifacts/p5/raw/
 /artifacts/p5/replay-native-check/
 /artifacts/p5/study-*/
+
+# P6 local raw runs and console streams; retain compact verified reports separately.
+/artifacts/p6/runs/
+/artifacts/p6/*.stdout.log
+/artifacts/p6/*.stderr.log
+/artifacts/p6/comparison-*/range-*.json
+
+# P6 diagnostic database copies and raw reproduction inputs remain local.
+/artifacts/p6/**/*.sqlite
+/artifacts/p6/**/*.sqlite-wal
+/artifacts/p6/**/*.sqlite-shm
+/artifacts/p6/save-raw-reproduction/range.json

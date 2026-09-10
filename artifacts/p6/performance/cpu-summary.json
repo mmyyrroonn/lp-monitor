@@ -1,0 +1,378 @@
+{
+  "profiles": [
+    {
+      "profileFile": ".superpowers/sdd/p6/cpu-profile-mid-soak-2/CPU.20260910.205343.40136.0.001.cpuprofile",
+      "durationMs": 6377.281,
+      "totalSamples": 4220,
+      "topSelf": [
+        {
+          "function": "completePartitions",
+          "url": "file:///E:/lp-monitor/src/metrics/coverage.ts",
+          "line": 1,
+          "selfSamples": 1880
+        },
+        {
+          "function": "acceptedMetricRanges",
+          "url": "file:///E:/lp-monitor/src/metrics/coverage.ts",
+          "line": 1,
+          "selfSamples": 287
+        },
+        {
+          "function": "(garbage collector)",
+          "url": "",
+          "line": 0,
+          "selfSamples": 250
+        },
+        {
+          "function": "(anonymous)",
+          "url": "file:///E:/lp-monitor/src/storage/metric-store.ts",
+          "line": 1,
+          "selfSamples": 199
+        },
+        {
+          "function": "next",
+          "url": "file:///E:/lp-monitor/src/metrics/baseline.ts",
+          "line": 1,
+          "selfSamples": 143
+        },
+        {
+          "function": "(anonymous)",
+          "url": "file:///E:/lp-monitor/src/metrics/coverage.ts",
+          "line": 1,
+          "selfSamples": 65
+        },
+        {
+          "function": "buildNaturalBuckets",
+          "url": "file:///E:/lp-monitor/src/metrics/windows.ts",
+          "line": 1,
+          "selfSamples": 65
+        },
+        {
+          "function": "(anonymous)",
+          "url": "file:///E:/lp-monitor/src/storage/metric-store.ts",
+          "line": 1,
+          "selfSamples": 63
+        },
+        {
+          "function": "applyMinuteBaselines",
+          "url": "file:///E:/lp-monitor/src/metrics/windows.ts",
+          "line": 1,
+          "selfSamples": 54
+        },
+        {
+          "function": "prepare",
+          "url": "file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/wrappers.js",
+          "line": 4,
+          "selfSamples": 47
+        },
+        {
+          "function": "decodeBatch",
+          "url": "file:///E:/lp-monitor/src/metrics/coverage.ts",
+          "line": 1,
+          "selfSamples": 47
+        },
+        {
+          "function": "(idle)",
+          "url": "",
+          "line": 0,
+          "selfSamples": 47
+        },
+        {
+          "function": "poolRegistrationId",
+          "url": "file:///E:/lp-monitor/src/registry/pools.ts",
+          "line": 1,
+          "selfSamples": 46
+        },
+        {
+          "function": "(anonymous)",
+          "url": "file:///E:/lp-monitor/src/storage/metric-store.ts",
+          "line": 1,
+          "selfSamples": 46
+        },
+        {
+          "function": "covers",
+          "url": "file:///E:/lp-monitor/src/metrics/coverage.ts",
+          "line": 1,
+          "selfSamples": 39
+        },
+        {
+          "function": "(anonymous)",
+          "url": "file:///E:/lp-monitor/src/metrics/windows.ts",
+          "line": 1,
+          "selfSamples": 39
+        },
+        {
+          "function": "minuteMetric",
+          "url": "file:///E:/lp-monitor/src/metrics/windows.ts",
+          "line": 1,
+          "selfSamples": 36
+        },
+        {
+          "function": "(anonymous)",
+          "url": "file:///E:/lp-monitor/src/metrics/coverage.ts",
+          "line": 1,
+          "selfSamples": 35
+        },
+        {
+          "function": "(anonymous)",
+          "url": "file:///E:/lp-monitor/src/metrics/coverage.ts",
+          "line": 1,
+          "selfSamples": 35
+        },
+        {
+          "function": "(program)",
+          "url": "",
+          "line": 0,
+          "selfSamples": 28
+        },
+        {
+          "function": "medianRatio",
+          "url": "file:///E:/lp-monitor/src/metrics/baseline.ts",
+          "line": 1,
+          "selfSamples": 21
+        },
+        {
+          "function": "sortedInsert",
+          "url": "file:///E:/lp-monitor/src/metrics/baseline.ts",
+          "line": 1,
+          "selfSamples": 17
+        },
+        {
+          "function": "recentFive",
+          "url": "file:///E:/lp-monitor/src/metrics/windows.ts",
+          "line": 1,
+          "selfSamples": 17
+        },
+        {
+          "function": "readFileUtf8",
+          "url": "",
+          "line": 0,
+          "selfSamples": 15
+        },
+        {
+          "function": "aggregate",
+          "url": "file:///E:/lp-monitor/src/metrics/windows.ts",
+          "line": 1,
+          "selfSamples": 15
+        },
+        {
+          "function": "pools",
+          "url": "file:///E:/lp-monitor/src/storage/raw-store.ts",
+          "line": 31,
+          "selfSamples": 14
+        },
+        {
+          "function": "encodeJson",
+          "url": "file:///E:/lp-monitor/src/domain/json.ts",
+          "line": 1,
+          "selfSamples": 13
+        },
+        {
+          "function": "activeLogs",
+          "url": "file:///E:/lp-monitor/src/storage/raw-store.ts",
+          "line": 24,
+          "selfSamples": 10
+        },
+        {
+          "function": "(anonymous)",
+          "url": "file:///E:/lp-monitor/src/registry/pools.ts",
+          "line": 1,
+          "selfSamples": 10
+        },
+        {
+          "function": "(anonymous)",
+          "url": "file:///E:/lp-monitor/src/metrics/coverage.ts",
+          "line": 1,
+          "selfSamples": 10
+        }
+      ]
+    },
+    {
+      "profileFile": ".superpowers/sdd/p6/cpu-profile-mid-soak-2/CPU.20260910.205344.40136.1.002.cpuprofile",
+      "durationMs": 6325.174,
+      "totalSamples": 4140,
+      "topSelf": [
+        {
+          "function": "(idle)",
+          "url": "",
+          "line": 0,
+          "selfSamples": 3908
+        },
+        {
+          "function": "internalModuleStat",
+          "url": "",
+          "line": 0,
+          "selfSamples": 24
+        },
+        {
+          "function": "getPackageScopeConfig",
+          "url": "",
+          "line": 0,
+          "selfSamples": 13
+        },
+        {
+          "function": "read",
+          "url": "",
+          "line": 0,
+          "selfSamples": 11
+        },
+        {
+          "function": "(program)",
+          "url": "",
+          "line": 0,
+          "selfSamples": 9
+        },
+        {
+          "function": "getPackageScopeConfig",
+          "url": "",
+          "line": 0,
+          "selfSamples": 8
+        },
+        {
+          "function": "lstat",
+          "url": "",
+          "line": 0,
+          "selfSamples": 7
+        },
+        {
+          "function": "open",
+          "url": "",
+          "line": 0,
+          "selfSamples": 6
+        },
+        {
+          "function": "F",
+          "url": "file:///E:/lp-monitor/node_modules/.pnpm/tsx@4.23.13/node_modules/tsx/dist/lexer-DQCqS3nf.mjs",
+          "line": 1,
+          "selfSamples": 5
+        },
+        {
+          "function": "N",
+          "url": "file:///E:/lp-monitor/node_modules/.pnpm/tsx@4.23.13/node_modules/tsx/dist/lexer-DQCqS3nf.mjs",
+          "line": 3,
+          "selfSamples": 4
+        },
+        {
+          "function": "(garbage collector)",
+          "url": "",
+          "line": 0,
+          "selfSamples": 4
+        },
+        {
+          "function": "getPackageScopeConfig",
+          "url": "",
+          "line": 0,
+          "selfSamples": 3
+        },
+        {
+          "function": "close",
+          "url": "",
+          "line": 0,
+          "selfSamples": 3
+        },
+        {
+          "function": "readFileUtf8",
+          "url": "",
+          "line": 0,
+          "selfSamples": 3
+        },
+        {
+          "function": "internalModuleStat",
+          "url": "",
+          "line": 0,
+          "selfSamples": 2
+        },
+        {
+          "function": "readPackageJSON",
+          "url": "",
+          "line": 0,
+          "selfSamples": 2
+        },
+        {
+          "function": "update",
+          "url": "",
+          "line": 0,
+          "selfSamples": 2
+        },
+        {
+          "function": "fstat",
+          "url": "",
+          "line": 0,
+          "selfSamples": 2
+        },
+        {
+          "function": "wasm-function[20]",
+          "url": "wasm://wasm/f757504a",
+          "line": 1,
+          "selfSamples": 2
+        },
+        {
+          "function": "postMessage",
+          "url": "",
+          "line": 0,
+          "selfSamples": 2
+        },
+        {
+          "function": "(anonymous)",
+          "url": "",
+          "line": 0,
+          "selfSamples": 1
+        },
+        {
+          "function": "(anonymous)",
+          "url": "file:///E:/lp-monitor/node_modules/.pnpm/tsx@4.23.13/node_modules/tsx/dist/register-DHgpdRjs.mjs",
+          "line": 6,
+          "selfSamples": 1
+        },
+        {
+          "function": "readFileUtf8",
+          "url": "",
+          "line": 0,
+          "selfSamples": 1
+        },
+        {
+          "function": "(anonymous)",
+          "url": "file:///E:/lp-monitor/node_modules/.pnpm/tsx@4.23.13/node_modules/tsx/dist/register-DHgpdRjs.mjs",
+          "line": 7,
+          "selfSamples": 1
+        },
+        {
+          "function": "Ct",
+          "url": "file:///E:/lp-monitor/node_modules/.pnpm/tsx@4.23.13/node_modules/tsx/dist/index-DCefr8NP.mjs",
+          "line": 14,
+          "selfSamples": 1
+        },
+        {
+          "function": "(anonymous)",
+          "url": "file:///E:/lp-monitor/node_modules/.pnpm/tsx@4.23.13/node_modules/tsx/dist/register-SoqaU4rg.mjs",
+          "line": 2,
+          "selfSamples": 1
+        },
+        {
+          "function": "(anonymous)",
+          "url": "file:///E:/lp-monitor/node_modules/.pnpm/tsx@4.23.13/node_modules/tsx/dist/register-SoqaU4rg.mjs",
+          "line": 2,
+          "selfSamples": 1
+        },
+        {
+          "function": "pathToFileURL",
+          "url": "",
+          "line": 0,
+          "selfSamples": 1
+        },
+        {
+          "function": "parse",
+          "url": "",
+          "line": 0,
+          "selfSamples": 1
+        },
+        {
+          "function": "parse",
+          "url": "",
+          "line": 0,
+          "selfSamples": 1
+        }
+      ]
+    }
+  ]
+}

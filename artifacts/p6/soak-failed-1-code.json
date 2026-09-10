@@ -1,0 +1,401 @@
+{
+  "stage": "soak",
+  "capturedAtMs": 1789037380143,
+  "nodeVersion": "v24.5.0",
+  "fingerprint": "9c0c634d12c9866c8d75a7900f7e9dff30db63bfd13c38c9d654b5fa7e274cfc",
+  "files": [
+    {
+      "path": "config/metric-metadata.json",
+      "sha256": "dbed96801eec265c1eb981764aa972a095d526b69adb51e8ae1cafb1c33dae8a"
+    },
+    {
+      "path": "config/runtime.local.json",
+      "sha256": "0e97d92fcbe9145541f091f813f7189102ca99c177c191fe4a47384300484902"
+    },
+    {
+      "path": "config/signals.initial.json",
+      "sha256": "1a423974aabbbe3a7068a0a4c21c4076b4ec3f2cdc432acda09d07e2de3c3f26"
+    },
+    {
+      "path": "config/watchlist.amc.json",
+      "sha256": "c7f67d48c2e36b09d07fbc569e99f876f2987a2585acfbffd4573c2d2461bf31"
+    },
+    {
+      "path": "dist/cli.js",
+      "sha256": "1ac2a818156132e64e43b6302ce1e0c7f5ac3f2a87cad7849a9b6baa2788cd0c"
+    },
+    {
+      "path": "dist/config/chain.js",
+      "sha256": "cf4e025c64ae85765452593e6152cd3b48801bd46c8da9246783fe6784c95af1"
+    },
+    {
+      "path": "dist/config/env.js",
+      "sha256": "164cf7d1784ec1458683db21e57df4d99a0896b397cefdaedce2aca5b38b5816"
+    },
+    {
+      "path": "dist/config/json-file.js",
+      "sha256": "b43e34a11f68b01fb687bf46ec5fc54ccf5beceea6941684b028270db5616942"
+    },
+    {
+      "path": "dist/domain/chain.js",
+      "sha256": "94032593c8d4acfc6b6cd3a0da874683c6fb16122faef5247150840e2b0fdd02"
+    },
+    {
+      "path": "dist/domain/codec.js",
+      "sha256": "64cb4958416eabd743c1ce9bda6202bf92de456075db6a7e7aa1af69065f1ef3"
+    },
+    {
+      "path": "dist/domain/events.js",
+      "sha256": "7eb2e28c7e53ad00afaa71a1bc71f00940358d50f8b5cc3b0780ff71c3fe7d31"
+    },
+    {
+      "path": "dist/domain/json.js",
+      "sha256": "3777b1bf9090d7409ab72f279a3df611e0b3055825a55cffbe1e8633b19d2a5c"
+    },
+    {
+      "path": "dist/domain/types.js",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881"
+    },
+    {
+      "path": "dist/ingest/checkpoint.js",
+      "sha256": "0562710c88049cbe690a66b0bff5fab0d649f56515118a0afea25ec1202c6eab"
+    },
+    {
+      "path": "dist/ingest/completeness.js",
+      "sha256": "7e97206d3d13f4ad07bccea0aefd8effab1f7368662a7448c15dbe6d437c7add"
+    },
+    {
+      "path": "dist/ingest/fetch-range.js",
+      "sha256": "a1775c06478b33f0e4b51a457b595b0758c1601112646faa552fd9efa180d424"
+    },
+    {
+      "path": "dist/ingest/filter-plan.js",
+      "sha256": "683a8759cd7d5b719c61602689ccf2e032c5eecc2c18e4dfb084cfa69ec637b5"
+    },
+    {
+      "path": "dist/ingest/follow.js",
+      "sha256": "a932ee7f2f671f926c800b1042141e29eb915dd295f85f59ab7fad58882a13ab"
+    },
+    {
+      "path": "dist/ingest/log-time.js",
+      "sha256": "b0fcee358a5235d858f677387663ab02ec1fdb707816ed48bab82f349beb4178"
+    },
+    {
+      "path": "dist/ingest/record-range.js",
+      "sha256": "405af638db49fb6a06dac127d6c51f8e29c7f1b0161fe84cdd57dd78b6069337"
+    },
+    {
+      "path": "dist/ingest/reorg.js",
+      "sha256": "c2b5cd40c781eb2207a03adf39e8f8b710192dac22689909fb312d394f4b68c3"
+    },
+    {
+      "path": "dist/ingest/time-index.js",
+      "sha256": "6b96d4cac847b6d3910e5239e1f634cd2e714e78d8edd0f815c4f47b893d0884"
+    },
+    {
+      "path": "dist/metrics/baseline.js",
+      "sha256": "e42b17e349412bda9c7d1009ea7d09c2c3d7d1ecb834c02fb28f347624e7fcc1"
+    },
+    {
+      "path": "dist/metrics/coverage.js",
+      "sha256": "38531ad5c24ab007a7d96338c27869abd8ddae4ad40a419d5bd9a781cc0f8c7c"
+    },
+    {
+      "path": "dist/metrics/fees.js",
+      "sha256": "d16dbae4581894d8136a2bcdb7da556aa67d70c77b831f33f6afb7d563cd5d15"
+    },
+    {
+      "path": "dist/metrics/format.js",
+      "sha256": "f21ae17863bc87f2a8a9bc667b1a0767cc7c8b533ac9b087948ff04f01d927f0"
+    },
+    {
+      "path": "dist/metrics/liquidity.js",
+      "sha256": "7907bae8df62f1f0322a3a2e628ca19f050db941e3665bfb16bf1e036083d4ca"
+    },
+    {
+      "path": "dist/metrics/metadata.js",
+      "sha256": "ac3fa54ea62e6b768a8b59659b6acf5733a8bef88a09a9386488619913ea9acb"
+    },
+    {
+      "path": "dist/metrics/notional.js",
+      "sha256": "98babb9721a83bd3dfcd1886d74b5a91402cf1296d75b1cde65e5e64984497d1"
+    },
+    {
+      "path": "dist/metrics/price.js",
+      "sha256": "d691362c47146f860ce10e73bc23527fb2f1ddc6354a1d302afe30cb6cadb3fd"
+    },
+    {
+      "path": "dist/metrics/ranking.js",
+      "sha256": "3fad94c308dc0824448809f58cecb9c30d99ff2c51ce12f1f56a71a541857064"
+    },
+    {
+      "path": "dist/metrics/rwa-aggregate.js",
+      "sha256": "803f2e2cc0c9bdfdc14c6d87a9e9947edd8170807a94644c02b1355161646a0e"
+    },
+    {
+      "path": "dist/metrics/windows.js",
+      "sha256": "3273ca6edb384c59c01ab4d23d846b352468ba576702716053ab7f4ba425810f"
+    },
+    {
+      "path": "dist/notify/console.js",
+      "sha256": "313cb0c1ff8188b3a7d4a8b2f785710d51b6b3bbb84659ab192878f344378fc4"
+    },
+    {
+      "path": "dist/notify/format.js",
+      "sha256": "83de175af083845c060e9e292f00a6bc497019f1ada5be1f86297c36bbb46dfa"
+    },
+    {
+      "path": "dist/notify/jsonl.js",
+      "sha256": "9cf948a82b0c7f82dac82774e8c243ecc5c14f9fce213fadfb34af755c880b78"
+    },
+    {
+      "path": "dist/notify/outbox.js",
+      "sha256": "4be2fc2bcfc2bdf7ebe33302322544d7b34959a7512632176360463785a88ec7"
+    },
+    {
+      "path": "dist/ops/capabilities.js",
+      "sha256": "67dcdf631b20c81b571b9d0138d359dc2bd13769d03dc75473d2e5d3f62791be"
+    },
+    {
+      "path": "dist/ops/files.js",
+      "sha256": "4618b4445ee43d87fb1f7a5811ea8527292a03522fb6cb313c9092c87aef0b99"
+    },
+    {
+      "path": "dist/ops/fixture-capture.js",
+      "sha256": "41a2d8ceaed7b5eee126cffdaadd43e8cb38ce2c6d9cb87f7fc7f55b9397da15"
+    },
+    {
+      "path": "dist/ops/health.js",
+      "sha256": "a9ff2caadd0ef730be94d61081fdb669ed537461b452af8c012f0ad35dc57a9c"
+    },
+    {
+      "path": "dist/ops/metrics-cli.js",
+      "sha256": "63703ede13af4bac3a326e8d0ef902bb2f324bd5d4acb0ea6ccceaeea53f7db5"
+    },
+    {
+      "path": "dist/ops/projection-cli.js",
+      "sha256": "5785e23ad9886aba2660362f4a76591a7b5e0ecf9df2ed4ce6817750bef1ba32"
+    },
+    {
+      "path": "dist/ops/recorder-cli.js",
+      "sha256": "b1a2f63e0a22719a86fa127e979d1835f0531e18a47b2f70c3a53d3bc5a41931"
+    },
+    {
+      "path": "dist/ops/recorder.js",
+      "sha256": "6a5b8f42a459f47ea65088f58a91f330a9613fb4774981bb669979f5a0cfad0e"
+    },
+    {
+      "path": "dist/ops/report.js",
+      "sha256": "5001af7a966f73a28d912ea28786d1d05e36576add0118ca8a6494dd024f86f6"
+    },
+    {
+      "path": "dist/ops/request-meter.js",
+      "sha256": "3761fc0039c6c7a0fa42adf645fc5c2e3d9a129f2d09de42f60b86e60566faa5"
+    },
+    {
+      "path": "dist/ops/runtime-telemetry.js",
+      "sha256": "0d89cf730415ce596e643b13946f1fa4d9b3a584bd3ac5792c261b506c5a57e7"
+    },
+    {
+      "path": "dist/ops/shutdown.js",
+      "sha256": "3cb5c87aea2a62c7f9ddd7caa68567dabd41c54b290373ec5e117f304769e992"
+    },
+    {
+      "path": "dist/ops/status-cli.js",
+      "sha256": "d37585abb1077f44b12f96a505d6044ef252593a2cafbdb0fe9a638a82c08c58"
+    },
+    {
+      "path": "dist/ops/status.js",
+      "sha256": "cd7b7cbff191f9c57942c5c33c51980b025566a26fafb3dff85687d8eb5f4459"
+    },
+    {
+      "path": "dist/protocols/event-log.js",
+      "sha256": "a75416f30a5fa1fd263e7c7e671497ddf72c440a00f7ddca0a3ece08b7a59b05"
+    },
+    {
+      "path": "dist/protocols/uniswap-v3/abi.js",
+      "sha256": "4a1abb50478af542a24fbb9705aeb58aaf921737216f186f30770f427d9506b7"
+    },
+    {
+      "path": "dist/protocols/uniswap-v3/decode.js",
+      "sha256": "8faf2cb15cea4fc02295b219702d24930b6602a7f38fcfc525d48e30f89d9d32"
+    },
+    {
+      "path": "dist/protocols/uniswap-v3/discover.js",
+      "sha256": "184b15fd32cd2de7ec8b4e990147a21ef9671c51ded98b4857af575758683583"
+    },
+    {
+      "path": "dist/protocols/uniswap-v4/abi.js",
+      "sha256": "2df32368c9238be1e3e231d0ac549fbb1bf6b9b988255b9b1572a89d3b5dd3ab"
+    },
+    {
+      "path": "dist/protocols/uniswap-v4/decode.js",
+      "sha256": "2cd4e0a4f36e7fc286a1a90325858accc2ff281c638f7ac8500c4bf4d535c09c"
+    },
+    {
+      "path": "dist/protocols/uniswap-v4/discover.js",
+      "sha256": "09f18eae24892533ecf596f94e25c4b36263a91b4b57eea0cae3a683ae23af9a"
+    },
+    {
+      "path": "dist/protocols/uniswap-v4/pool-key.js",
+      "sha256": "8ea0b760c6be0cf6a6440a90a2a7b7b49142eaf03415f1569d772456735ce63b"
+    },
+    {
+      "path": "dist/registry/assets.js",
+      "sha256": "179a8b3923f0b6c6464a033b7e3ebf15c0cc2f0fbe35dd45a621215db02bd9d1"
+    },
+    {
+      "path": "dist/registry/identity.js",
+      "sha256": "b39ea021b13561d651a2b6274bc2bce0217de1558ba06a77fa01f9c6f4167cad"
+    },
+    {
+      "path": "dist/registry/pools.js",
+      "sha256": "4e75a0b3ec248788795b6df55d5f0841b2261db2b8404cb79e0e070a534f94c0"
+    },
+    {
+      "path": "dist/replay/cli.js",
+      "sha256": "349bfd1d4723dd43a4f73d9429b9ea112e5aff77950fe2badf355257e5855a2b"
+    },
+    {
+      "path": "dist/replay/clock.js",
+      "sha256": "56463b7df838e90c7d40bdf3f2ff6e25dd9b3c5f48fbf0b1613b005d42cf090a"
+    },
+    {
+      "path": "dist/replay/cohort.js",
+      "sha256": "ec48a51f93d6a2a084a47983358861dbcd0c3980453198ef8fedb33cd011b921"
+    },
+    {
+      "path": "dist/replay/experiments.js",
+      "sha256": "228273d1537e66bd4594f6abbe8055f5c5efc7d1c46717d4cfae00d1ee40781c"
+    },
+    {
+      "path": "dist/replay/integrity.js",
+      "sha256": "115b25bb953f970716e251d72a531bbe9d2f195e121130ffcde7074650b96822"
+    },
+    {
+      "path": "dist/replay/outcomes.js",
+      "sha256": "3efdf281a5b4611ad7ae54834627070664dc27f1b962a7157020c509e5823d89"
+    },
+    {
+      "path": "dist/replay/quality-report.js",
+      "sha256": "8d43bde831110e959bc8b8721a53c7b514a23734573f5add869370e29a27fb7a"
+    },
+    {
+      "path": "dist/replay/reader.js",
+      "sha256": "5f93119cb425408ee578a76430c84cf48d60509152ebee5784cb32cb746a781c"
+    },
+    {
+      "path": "dist/replay/report.js",
+      "sha256": "64d06e329ab07625cb92888ef4a1729f08d4484a604a0f7cd5765a7bbd24be4a"
+    },
+    {
+      "path": "dist/replay/runner.js",
+      "sha256": "614901baa61984071c3d9b4541db977156190c4a223362bd97a116b15690f39d"
+    },
+    {
+      "path": "dist/replay/study-cli.js",
+      "sha256": "5e48bf3f6c1583f25440ca8ff57bd293b92a977dc001cc734f2120c140411124"
+    },
+    {
+      "path": "dist/replay/study.js",
+      "sha256": "ada470fe6523a9d8eeea1aff4b4a8db1284df4b9ebbb0f83fa66ec5b9d284582"
+    },
+    {
+      "path": "dist/rpc/capabilities.js",
+      "sha256": "eb71f78828577b134b6b3f2e7d868a30fe16d7dbd544f27d1b448273132bab9a"
+    },
+    {
+      "path": "dist/rpc/client.js",
+      "sha256": "55dcd5bd686fe72c82ab3417013e54e3e0407b5f12b0bf20a894a05b8634a060"
+    },
+    {
+      "path": "dist/rpc/errors.js",
+      "sha256": "e34a24cd1b8a448abd8684f1810e986c5b7a48d152fe19545009e4654756d15c"
+    },
+    {
+      "path": "dist/rpc/evidence-writer.js",
+      "sha256": "7577574386c1cc26efa088a86752b85996722fbec4e5981993057ea0d0222f05"
+    },
+    {
+      "path": "dist/rpc/identity.js",
+      "sha256": "62ebe3e6b1a39ec755ad5c4eac17d727e58bb3f7bf3b731f905debe93f54e60c"
+    },
+    {
+      "path": "dist/rpc/quantity.js",
+      "sha256": "d9d9dee38967b4bc958f5d61ad57ca48fe9a21a48de72af177d150245a351f91"
+    },
+    {
+      "path": "dist/rpc/rate-limit.js",
+      "sha256": "02d92803544ab66f19584a35985a57fe121ffa9219054020b91dd07f3e94581d"
+    },
+    {
+      "path": "dist/rpc/request-meter.js",
+      "sha256": "57683ea4db39b36d67523cdda2656a410983ce7c2288f1d378fde8d174351c9c"
+    },
+    {
+      "path": "dist/rpc/resolve-time.js",
+      "sha256": "874a8424731fa1a4e1a21c2822639b8f1e66e994c45297bf1cee821bcc26c576"
+    },
+    {
+      "path": "dist/signals/baseline.js",
+      "sha256": "319b8f2a97c278658c329adb44ab25545bd867b78805e42d1c832ec5e684f1f7"
+    },
+    {
+      "path": "dist/signals/codec.js",
+      "sha256": "798e1de78702a77a261be6b46be4b8df5d7f9ce50208404f4033783f581c40f0"
+    },
+    {
+      "path": "dist/signals/config.js",
+      "sha256": "32f9fe9fdeaffe29fa30adbb2e2010f8d81a7bde062462bc217e982b5f85800a"
+    },
+    {
+      "path": "dist/signals/engine.js",
+      "sha256": "fa8f11013156d71efe7ee46265f83d233a59739c84e3613f3cacfa40e0fb5166"
+    },
+    {
+      "path": "dist/signals/project.js",
+      "sha256": "2bd8d7f4df0f6406a2a293fc6230848b5856a52526caf69dc6a3718aa3653eaf"
+    },
+    {
+      "path": "dist/signals/types.js",
+      "sha256": "8e609bb71c20b858c77f0e9f90bb1319db8477b13f9f965f1a1e18524bf50881"
+    },
+    {
+      "path": "dist/state/observations.js",
+      "sha256": "e5a4b86d884be6cb90629705da8e2ce4a9de7eac0b3d0852d3304e216fb4ff45"
+    },
+    {
+      "path": "dist/state/project-range.js",
+      "sha256": "60ccb7de066201c46934e5e37cfe02672043ede285cd60a6711db4c74fd660fe"
+    },
+    {
+      "path": "dist/storage/database.js",
+      "sha256": "99f5ddd9cbbf18979fc9ab9609e1c8a2db8df5b3f6c21ca4fc8a773b56f72738"
+    },
+    {
+      "path": "dist/storage/manifest.js",
+      "sha256": "39ab8e18ee521e93255dc78d2aeff276ee79ae10e5fdf7c17778ab2e7abe1313"
+    },
+    {
+      "path": "dist/storage/metric-store.js",
+      "sha256": "69ef4c5984fb8341ea8b4510eda37e9580dee23d60a9597d9bf860bfd6e10bde"
+    },
+    {
+      "path": "dist/storage/projection-store.js",
+      "sha256": "6ed3e046959ab22d48b874b4e6430152a5800e685d1d89a87f74fa40cd5b31b7"
+    },
+    {
+      "path": "dist/storage/raw-store.js",
+      "sha256": "c699868d7fbe0959df2d83a42aef28eeec603628549bac81634840f249deb344"
+    },
+    {
+      "path": "package.json",
+      "sha256": "ac9f1ef2802523df91ca1f4213cc2c6085e6c6a6e5b783820110dda5cd1dab01"
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "sha256": "a2575d7ff64940d496c94ccf3e52f7c4b103715da0c71c9ae4bf364e62e832c9"
+    }
+  ],
+  "note": "Hash of the built JavaScript/configuration used by this stage; local branch changes are uncommitted. Stage fingerprints may differ after measured optimization."
+}

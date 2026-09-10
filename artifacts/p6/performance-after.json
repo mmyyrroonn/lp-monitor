@@ -1,0 +1,42 @@
+{
+  "sampledAt": "2026-09-10T10:37:27.055Z",
+  "databasePath": "data/p6.sqlite",
+  "cursor": {
+    "scope_id": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+    "registry_scope_id": "scope-v1-31c2bb795d5b913ca6ebf4ec7cef72201fbe2115f4c00a93abcdc0b62eea3794",
+    "config_version": "2026-09-10.p6-local",
+    "block_number": 59337097
+  },
+  "counts": {
+    "activeLogs": 168,
+    "acceptedRangeRows": 512,
+    "acceptedBatches": 128,
+    "fetchShards": 896,
+    "projectedEvents": 168,
+    "minuteBoundaries": 30
+  },
+  "samples": [
+    {
+      "acceptedRangesMs": 38.33269999999993,
+      "acceptedIntervals": 128,
+      "fullMetricsMs": 411.85699999999997,
+      "projectedEvents": 142,
+      "heapDeltaBytes": 35109320
+    },
+    {
+      "acceptedRangesMs": 39.16309999999976,
+      "acceptedIntervals": 128,
+      "fullMetricsMs": 416.43740000000025,
+      "projectedEvents": 142,
+      "heapDeltaBytes": -124265880
+    },
+    {
+      "acceptedRangesMs": 40.01919999999973,
+      "acceptedIntervals": 128,
+      "fullMetricsMs": 416.89400000000023,
+      "projectedEvents": 142,
+      "heapDeltaBytes": 20987864
+    }
+  ],
+  "note": "One warmup plus three synchronous read-only samples inside one SQLite read transaction. Profiler wall time can slightly contend with the live process; its CPU is not included in the live child PID sampler."
+}

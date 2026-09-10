@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "checkedAtMs": 1789039673861,
+  "status": "passed",
+  "tests": {
+    "command": "pnpm test --reporter=json --outputFile=artifacts/p6/tests.json",
+    "exitCode": 0,
+    "passed": 713,
+    "failed": 0,
+    "pending": 0,
+    "files": 72,
+    "evidence": "tests.json",
+    "sha256": "fb46778e0fcbf6495e3dad296760e258fa7bc903214086fd35e510e2e0243fbf"
+  },
+  "checks": [
+    {
+      "command": "pnpm typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm lint",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm build",
+      "exitCode": 0
+    }
+  ],
+  "coreReview": "No remaining Critical/Important findings; final raw timestamp drift and raw-save category fixes independently reviewed.",
+  "realFaultRegression": "save-raw-reproduction/fix-verification.json",
+  "codeSnapshots": [
+    "smoke-code.json",
+    "soak-failed-1-code.json",
+    "soak-code.json"
+  ],
+  "limitations": [
+    "Offline faults are separate from real-chain faults/reorg evidence.",
+    "Upstream Uniswap missing sourcemap source warnings remain visible."
+  ]
+}

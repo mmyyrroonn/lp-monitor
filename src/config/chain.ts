@@ -60,6 +60,7 @@ const schema = z
     maxRetries: z.number().int().min(0).max(2),
     recorderMaxRpcCalls: z.number().int().positive().safe().default(10000),
     maxConcurrentRpc: z.number().int().positive().max(16).default(2),
+    maxBackfillRpcRps: z.number().positive().finite().default(1),
     warmupMinutes: z.number().int().positive().safe().default(60),
     checkpointRetentionMinutes: z.number().int().positive().safe().default(180),
     discoveryMaxRangeBlocks: z.number().int().positive().safe().default(1000000),

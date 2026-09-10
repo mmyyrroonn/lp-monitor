@@ -1,0 +1,52 @@
+{
+  "sampledAtMs": 1789050669162,
+  "sourceAlias": "robinhood-public",
+  "chainId": 4663,
+  "head": {
+    "blockNumber": "59476259",
+    "blockHash": "0xe136b4edaa6b586aa97f58682485813319d79f9f84fa529ff2465e7f8360d573",
+    "timestampSec": 1789050666
+  },
+  "lastHeadAtMs": 1789050667828,
+  "scanned": {
+    "blockNumber": "59476038",
+    "blockHash": "0x7ef49bfd4175adba58c52ed5bc89b1ca091beab1c29a6271920119593ab68e7c",
+    "timestampSec": 1789050643
+  },
+  "rawSaved": {
+    "blockNumber": "59476038",
+    "blockHash": "0x7ef49bfd4175adba58c52ed5bc89b1ca091beab1c29a6271920119593ab68e7c",
+    "timestampSec": 1789050643
+  },
+  "projected": {
+    "blockNumber": "59476038",
+    "blockHash": "0x7ef49bfd4175adba58c52ed5bc89b1ca091beab1c29a6271920119593ab68e7c",
+    "timestampSec": 1789050643
+  },
+  "projectedSourceVerified": true,
+  "projectedCursorVerified": true,
+  "gap": null,
+  "runtimeState": "healthy",
+  "queueDepth": 0,
+  "inflight": 0,
+  "rpc": {
+    "eth_getBlockByNumber": 1571,
+    "eth_chainId": 1,
+    "eth_getCode": 8,
+    "eth_call": 8,
+    "eth_getLogs": 1924
+  },
+  "writeLatencyMs": 2414,
+  "processingLatencyMs": 2431,
+  "dbBytes": 591343616,
+  "walBytes": 23310992,
+  "outboxPending": 0,
+  "headGapBlocks": "221",
+  "headStatus": "observed",
+  "headObservationAgeMs": 1334,
+  "headGapSeconds": 23,
+  "databasePath": "E:\\lp-monitor\\data\\p6.sqlite",
+  "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+  "projectionSourceHash": "81b95846361a20a14a27bd9462220bdd86491088e5bb052b9c3eaeb536c447ae",
+  "activeWaitMs": 526050
+}

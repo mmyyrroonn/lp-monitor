@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "label": "terminal",
+  "profileStartedAt": "2026-09-10T13:33:58.624Z",
+  "profileCompletedAt": "2026-09-10T13:34:05.990Z",
+  "databasePath": "E:\\lp-monitor\\data\\p6-soak-failed-2.sqlite",
+  "snapshotContext": "Existing preserved terminal snapshot of completed-duration soak attempt 2, whose acceptance failed processing latency. Different larger input; not a same-input comparison.",
+  "snapshotFileMetadata": {
+    "sizeBytes": 456380416,
+    "creationTimeUtc": "2026-09-10T13:27:15.505Z",
+    "lastWriteTimeUtc": "2026-09-10T13:27:16.058Z",
+    "note": "Filesystem metadata observed now; no backup timestamp inherited from another snapshot."
+  },
+  "databaseHashBefore": "5b1fe65c9ac95340dc4129f69a0842393b6218b100ad7e148d0608b92592db7a",
+  "databaseHashAfter": "5b1fe65c9ac95340dc4129f69a0842393b6218b100ad7e148d0608b92592db7a",
+  "databaseFileUnchanged": true,
+  "sourceHashes": {
+    "src/metrics/coverage.ts": "739f1c35abb587a05a4eea9c0f9e722f5e716c694646528227d138fd8fd54f12",
+    "src/metrics/baseline.ts": "7a6095520685dccf36cf0da88a503b784debb136f953ac876d7dcfa0ad53b433",
+    "src/metrics/windows.ts": "d4df58fa6f7422165a4c1af92eba518edb3e66c5cc1876ef075510862c513480",
+    "src/storage/metric-store.ts": "1725751a64c2e8334b7a06fe895adcee7e717544e7402296a3a4964e42919219"
+  },
+  "sourceHashesAfter": {
+    "src/metrics/coverage.ts": "739f1c35abb587a05a4eea9c0f9e722f5e716c694646528227d138fd8fd54f12",
+    "src/metrics/baseline.ts": "7a6095520685dccf36cf0da88a503b784debb136f953ac876d7dcfa0ad53b433",
+    "src/metrics/windows.ts": "d4df58fa6f7422165a4c1af92eba518edb3e66c5cc1876ef075510862c513480",
+    "src/storage/metric-store.ts": "1725751a64c2e8334b7a06fe895adcee7e717544e7402296a3a4964e42919219"
+  },
+  "sourceFilesUnchanged": true,
+  "execution": "Source-only tsx, readonly database, one SQLite read transaction, one buildMetrics warmup plus three timed calls; parent may run full tests concurrently. Not a live latency acceptance sample.",
+  "cursor": {
+    "scope_id": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+    "registry_scope_id": "scope-v1-31c2bb795d5b913ca6ebf4ec7cef72201fbe2115f4c00a93abcdc0b62eea3794",
+    "config_version": "2026-09-10.p6-local",
+    "block_number": 59437892
+  },
+  "counts": {
+    "activeLogs": 2659,
+    "acceptedRangeRows": 4000,
+    "acceptedBatches": 1000,
+    "registrationRowsAcrossScopes": 3802,
+    "minuteBoundaries": 199,
+    "emittedPoolWindows": 1901,
+    "uniqueOutputPoolIds": 1901,
+    "emittedAnnotations": 1901
+  },
+  "warmupWallMs": 5177.107200000001,
+  "samples": [
+    {
+      "wallMs": 722.429900000001,
+      "heapDeltaBytes": 75341560,
+      "outputSourceHash": "181f416c060da6ba27988f552be4837d385e256adc8f06116ae679e92d557bbd",
+      "outputPoolWindows": 1901,
+      "uniqueOutputPoolIds": 1901
+    },
+    {
+      "wallMs": 708.4616000000005,
+      "heapDeltaBytes": 35661688,
+      "outputSourceHash": "181f416c060da6ba27988f552be4837d385e256adc8f06116ae679e92d557bbd",
+      "outputPoolWindows": 1901,
+      "uniqueOutputPoolIds": 1901
+    },
+    {
+      "wallMs": 747.085000000001,
+      "heapDeltaBytes": -123752152,
+      "outputSourceHash": "181f416c060da6ba27988f552be4837d385e256adc8f06116ae679e92d557bbd",
+      "outputPoolWindows": 1901,
+      "uniqueOutputPoolIds": 1901
+    }
+  ],
+  "medianWallMs": 722.429900000001
+}

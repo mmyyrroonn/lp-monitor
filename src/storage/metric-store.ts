@@ -200,18 +200,30 @@ export function buildMetricsReport(db: Database.Database, input: MetricInput) {
         },
       };
     });
+    const observationByPool = new Map<string, (typeof projection.observations)[number]>();
+    for (const observation of projection.observations) {
+      const poolId = poolRegistrationId(observation);
+      if (!observationByPool.has(poolId)) observationByPool.set(poolId, observation);
+    }
+    const recentLiquidityByPool = new Map<string, LiquidityChange[]>();
+    for (const event of projection.events) {
+      if (
+        event.kind !== 'liquidity' ||
+        event.time.minuteStartSec === null ||
+        event.time.minuteStartSec < current - 300 ||
+        event.time.minuteStartSec > current
+      )
+        continue;
+      const poolId = poolRegistrationId(event);
+      const actions = recentLiquidityByPool.get(poolId) ?? [];
+      actions.push(event);
+      recentLiquidityByPool.set(poolId, actions);
+    }
+    const startBoundary = coverage.find((c) => c.minuteStartSec === current - 300)?.fromBlock;
     const annotations = windows.map((w) => {
       const registration = byId.get(w.poolId)!;
-      const observation = projection.observations.find((o) => poolRegistrationId(o) === w.poolId)!;
-      const actions = projection.events.filter(
-        (e): e is LiquidityChange =>
-          e.kind === 'liquidity' &&
-          poolRegistrationId(e) === w.poolId &&
-          e.time.minuteStartSec !== null &&
-          e.time.minuteStartSec >= current - 300 &&
-          e.time.minuteStartSec <= current,
-      );
-      const startBoundary = coverage.find((c) => c.minuteStartSec === current - 300)?.fromBlock;
+      const observation = observationByPool.get(w.poolId)!;
+      const actions = recentLiquidityByPool.get(w.poolId) ?? [];
       const isNewPool =
         registration.source === 'seed-config' ||
         startBoundary === null ||

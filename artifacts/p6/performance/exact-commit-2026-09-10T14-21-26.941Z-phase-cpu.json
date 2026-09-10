@@ -1,0 +1,21 @@
+{
+  "note": "CPU sampled phase attribution, sums approximate time including profiler overhead; inclusiveFunctions overlap and must not be summed.",
+  "exclusivePhasesMs": {
+    "outsideCommit": 115.867,
+    "rawAcceptance": 95.91300000000003,
+    "P2Rebuild": 344.6629999999999,
+    "signalProjectionExcludingMetrics": 166.28900000000004,
+    "metricsReport": 506.0080000000001,
+    "outerCommitOther": 63.03099999999999
+  },
+  "inclusiveFunctionsMs": {
+    "snapshot": 152.37900000000005,
+    "projectRange": 217.55799999999994,
+    "acceptedMetricRanges": 262.1720000000001,
+    "buildMinuteMetrics": 20.343,
+    "readEvidence": 57.59399999999998,
+    "presentationIndex": 1.539,
+    "evaluateSignal": 52.02399999999999,
+    "signalBaseline": 29.155999999999995
+  }
+}

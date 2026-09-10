@@ -11,7 +11,10 @@ import { saveJson, repositoryRelativePath } from './ops/files.js';
 import { CHAIN_ID } from './domain/chain.js';
 import { encodeJson } from './domain/json.js';
 
-const help = `Robinhood read-only P0/P1/P2/P3/P4 CLI
+const help = `Robinhood read-only P0/P1/P2/P3/P4/P5/P6 CLI
+  pnpm lp status --db data/recorder.sqlite --scope SCOPE_ID
+  pnpm lp backup --db data/recorder.sqlite --out data/backup.sqlite
+  P6: follow writes <db>.health.json and per-run ops-report.json; SIGINT stops cooperatively.
   pnpm lp replay --manifest PATH --rules PATH --mode minute-close|recorded-observed --out PATH
   pnpm lp study --cases config/history.cases.json --grid config/signals.grid.json --out artifacts/p5
   P5: offline, uses existing raw only; insufficient history exits 4.
@@ -41,6 +44,14 @@ export async function runCli(
   args = process.argv.slice(2),
   options: { environment?: NodeJS.ProcessEnv; readerFactory?: typeof createChainReader } = {},
 ): Promise<number> {
+  if (
+    ['status', 'backup'].includes(args[0] ?? '') &&
+    !args.includes('--help') &&
+    !args.includes('-h')
+  ) {
+    const { runStatusCli } = await import('./ops/status-cli.js');
+    return runStatusCli(args, options.environment ?? process.env);
+  }
   if (
     ['ingest', 'follow'].includes(args[0] ?? '') &&
     !args.includes('--help') &&

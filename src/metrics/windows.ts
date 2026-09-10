@@ -1,6 +1,6 @@
 import type { BlockAnchor, PoolEvent, PoolRef } from '../domain/types.js';
 import { poolRegistrationId } from '../registry/pools.js';
-import { volumeBaseline } from './baseline.js';
+import { RollingVolumeBaseline, volumeBaseline } from './baseline.js';
 
 export type RawNotional = { readonly token: string; readonly raw: bigint };
 export type MetricEvent = {
@@ -94,6 +94,8 @@ export type BuildMinuteMetricOptions = {
   readonly fiveMinuteBaselineLimit?: number;
 };
 
+type WindowCore = Omit<PoolMetricWindows, 'pool' | 'poolId' | 'unknownTimeBlockCounts'>;
+
 type PoolGroup = {
   pool: PoolRef;
   events: MetricEvent[];
@@ -138,10 +140,41 @@ export function buildMinuteMetrics(
   }
 
   const currentMinute = Math.floor(watermark.timestampSec / 60) * 60;
+  // Inputs are fixed only within this call. Unknown-time events do not select known coverage.
+  const dormantCoverage = selectCoverage([], coverage);
+  const earliestDormantBlock = dormantCoverage.reduce<bigint | null>(
+    (earliest, item) =>
+      item.fromBlock === null
+        ? earliest
+        : earliest === null || item.fromBlock < earliest
+          ? item.fromBlock
+          : earliest,
+    null,
+  );
+  const dormantWindows = new Map<string, WindowCore>();
   return [...groups.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([poolId, group]) => {
-      const coverageForPool = selectCoverage(group.events, coverage);
+      const withIdentity = (core: WindowCore): PoolMetricWindows => ({
+        pool: group.pool,
+        poolId,
+        ...core,
+        unknownTimeBlockCounts: [...group.unknown.entries()]
+          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+          .map(([blockNumber, unresolved]) => unknownBlockMetric(blockNumber, unresolved)),
+      });
+      // Birth is irrelevant only when no covered fromBlock precedes it. Keep token casing exact.
+      const birth =
+        group.discoveredAtBlock === null ||
+        earliestDormantBlock === null ||
+        group.discoveredAtBlock <= earliestDormantBlock
+          ? null
+          : group.discoveredAtBlock.toString();
+      const memoKey = group.events.length === 0 ? JSON.stringify([group.rawToken, birth]) : null;
+      const cached = memoKey === null ? undefined : dormantWindows.get(memoKey);
+      if (cached) return withIdentity(cached);
+      const coverageForPool =
+        group.events.length === 0 ? dormantCoverage : selectCoverage(group.events, coverage);
       const starts = new Set(coverageForPool.map((item) => item.minuteStartSec));
       for (const item of group.events) starts.add(item.event.time.minuteStartSec!);
       starts.add(currentMinute);
@@ -185,19 +218,17 @@ export function buildMinuteMetrics(
       );
       const naturalClosed5m =
         natural5mBuckets.filter((item) => item.endSec <= currentMinute).at(-1) ?? null;
-      return {
-        pool: group.pool,
-        poolId,
+      const core: WindowCore = {
         minutes,
         natural5mBuckets,
         partialCurrent: minutes.find((item) => item.minuteStartSec === currentMinute) ?? null,
         recentClosed1m,
         recentClosed5x1m,
         naturalClosed5m,
-        unknownTimeBlockCounts: [...group.unknown.entries()]
-          .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-          .map(([blockNumber, unresolved]) => unknownBlockMetric(blockNumber, unresolved)),
       };
+      // Baseline construction has finished; only readonly output is shared between pools.
+      if (memoKey !== null) dormantWindows.set(memoKey, core);
+      return withIdentity(core);
     });
 }
 
@@ -348,17 +379,22 @@ function sameScale(a: MinuteMetric, b: MinuteMetric): boolean {
   );
 }
 function applyMinuteBaselines(minutes: MinuteMetric[], minimum: number, limit: number): void {
+  const rolling = new RollingVolumeBaseline(minimum, limit);
   for (let index = 0; index < minutes.length; index++) {
     const current = minutes[index]!;
-    if (current.status !== 'closed') continue;
-    const prior = minutes
-      .slice(0, index)
-      .filter((item) => item.status === 'closed' && sameScale(current, item))
-      .slice(-limit)
-      .map((item) =>
-        current.usdMicros !== null ? item.usdMicros : (item.rawNotional?.raw ?? null),
-      );
-    const baseline = volumeBaseline(comparableVolume(current), prior, minimum);
+    const rawUnit = current.rawNotional?.token.toLowerCase() ?? null;
+    const baseline = rolling.next({
+      eligible: current.status === 'closed',
+      unit: current.usdMicros !== null ? 'usdMicros' : rawUnit === null ? null : 'raw:' + rawUnit,
+      current: comparableVolume(current),
+      history: [
+        ...(current.usdMicros !== null ? [{ unit: 'usdMicros', value: current.usdMicros }] : []),
+        ...(current.rawNotional !== null
+          ? [{ unit: 'raw:' + rawUnit, value: current.rawNotional.raw }]
+          : []),
+      ],
+    });
+    if (baseline === null) continue;
     minutes[index] = {
       ...current,
       baselineSampleCount: baseline.sampleCount,

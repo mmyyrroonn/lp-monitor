@@ -1,2 +1,5 @@
 # Preserve byte-exact captured and upstream evidence.
 artifacts/** -text
+
+# Windows sampler captures retain their original CRLF bytes.
+artifacts/p6/*-resources.jsonl whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

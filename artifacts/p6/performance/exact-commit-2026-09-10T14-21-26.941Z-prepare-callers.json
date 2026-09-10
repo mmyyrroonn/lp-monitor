@@ -1,0 +1,133 @@
+{
+  "note": "CPU sampled prepare self time grouped by caller stack; diagnostic estimates, not additive to inclusive prototype timers.",
+  "prepareCallers": [
+    {
+      "stack": "acceptedMetricRanges file:///E:/lp-monitor/src/metrics/coverage.ts:1 <- readMetricCoverage file:///E:/lp-monitor/src/metrics/coverage.ts:1 <-  file:///E:/lp-monitor/src/storage/metric-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- buildMetricsReport file:///E:/lp-monitor/src/storage/metric-store.ts:1 <-  file:///E:/lp-monitor/src/signals/project.ts:2",
+      "estimatedMs": 122.75800000000002
+    },
+    {
+      "stack": "sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- commitAcceptedSignalBatch file:///E:/lp-monitor/src/signals/project.ts:5 <-  file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:0 <- (root) :0",
+      "estimatedMs": 63.03099999999999
+    },
+    {
+      "stack": " file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- rebuild file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <-  file:///E:/lp-monitor/src/signals/project.ts:5 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52",
+      "estimatedMs": 18.567000000000004
+    },
+    {
+      "stack": "prepare file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/wrappers.js:4 <- acceptedMetricRanges file:///E:/lp-monitor/src/metrics/coverage.ts:1 <- readMetricCoverage file:///E:/lp-monitor/src/metrics/coverage.ts:1 <-  file:///E:/lp-monitor/src/storage/metric-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- buildMetricsReport file:///E:/lp-monitor/src/storage/metric-store.ts:1",
+      "estimatedMs": 17.167
+    },
+    {
+      "stack": "persistAnchor file:///E:/lp-monitor/src/storage/raw-store.ts:74 <- persistDerived file:///E:/lp-monitor/src/storage/raw-store.ts:54 <-  file:///E:/lp-monitor/src/storage/raw-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- acceptRange file:///E:/lp-monitor/src/storage/raw-store.ts:1 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1",
+      "estimatedMs": 17.057000000000002
+    },
+    {
+      "stack": "activeLogs file:///E:/lp-monitor/src/storage/raw-store.ts:24 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- activeMap file:///E:/lp-monitor/src/storage/raw-store.ts:85 <-  file:///E:/lp-monitor/src/storage/raw-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- acceptRange file:///E:/lp-monitor/src/storage/raw-store.ts:1",
+      "estimatedMs": 13.076
+    },
+    {
+      "stack": " file:///E:/lp-monitor/src/signals/project.ts:2 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- projectSignals file:///E:/lp-monitor/src/signals/project.ts:2 <-  file:///E:/lp-monitor/src/signals/project.ts:5 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- commitAcceptedSignalBatch file:///E:/lp-monitor/src/signals/project.ts:5",
+      "estimatedMs": 12.390999999999998
+    },
+    {
+      "stack": "rawId file:///E:/lp-monitor/src/storage/raw-store.ts:85 <- persistDerived file:///E:/lp-monitor/src/storage/raw-store.ts:54 <-  file:///E:/lp-monitor/src/storage/raw-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- acceptRange file:///E:/lp-monitor/src/storage/raw-store.ts:1 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1",
+      "estimatedMs": 12.341999999999999
+    },
+    {
+      "stack": "pools file:///E:/lp-monitor/src/storage/raw-store.ts:31 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- readEvidence file:///E:/lp-monitor/src/signals/project.ts:2 <-  file:///E:/lp-monitor/src/signals/project.ts:2 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- projectSignals file:///E:/lp-monitor/src/signals/project.ts:2",
+      "estimatedMs": 10.904000000000002
+    },
+    {
+      "stack": "activeLogs file:///E:/lp-monitor/src/storage/raw-store.ts:24 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- snapshot file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <-  file:///E:/lp-monitor/src/storage/projection-store.ts:5 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52",
+      "estimatedMs": 9.357
+    },
+    {
+      "stack": "pools file:///E:/lp-monitor/src/storage/raw-store.ts:31 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- snapshot file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <-  file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52",
+      "estimatedMs": 9.302
+    },
+    {
+      "stack": "activeLogs file:///E:/lp-monitor/src/storage/raw-store.ts:24 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- snapshot file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <-  file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52",
+      "estimatedMs": 7.722
+    },
+    {
+      "stack": "pools file:///E:/lp-monitor/src/storage/raw-store.ts:31 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- snapshot file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <-  file:///E:/lp-monitor/src/storage/projection-store.ts:5 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52",
+      "estimatedMs": 7.699999999999999
+    },
+    {
+      "stack": "pools file:///E:/lp-monitor/src/storage/raw-store.ts:31 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <-  file:///E:/lp-monitor/src/storage/metric-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- buildMetricsReport file:///E:/lp-monitor/src/storage/metric-store.ts:1 <-  file:///E:/lp-monitor/src/signals/project.ts:2",
+      "estimatedMs": 6.211
+    },
+    {
+      "stack": "activeLogs file:///E:/lp-monitor/src/storage/raw-store.ts:24 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- readMetricCoverage file:///E:/lp-monitor/src/metrics/coverage.ts:1 <-  file:///E:/lp-monitor/src/storage/metric-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- buildMetricsReport file:///E:/lp-monitor/src/storage/metric-store.ts:1",
+      "estimatedMs": 6.202999999999999
+    },
+    {
+      "stack": "activeLogs file:///E:/lp-monitor/src/storage/raw-store.ts:24 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- readEvidence file:///E:/lp-monitor/src/signals/project.ts:2 <-  file:///E:/lp-monitor/src/signals/project.ts:2 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- projectSignals file:///E:/lp-monitor/src/signals/project.ts:2",
+      "estimatedMs": 4.696000000000001
+    },
+    {
+      "stack": "logTimes file:///E:/lp-monitor/src/storage/raw-store.ts:29 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- activeTimeMap file:///E:/lp-monitor/src/storage/raw-store.ts:85 <-  file:///E:/lp-monitor/src/storage/raw-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- acceptRange file:///E:/lp-monitor/src/storage/raw-store.ts:1",
+      "estimatedMs": 4.6930000000000005
+    },
+    {
+      "stack": "prepare file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/wrappers.js:4 <- persistAnchor file:///E:/lp-monitor/src/storage/raw-store.ts:74 <- persistDerived file:///E:/lp-monitor/src/storage/raw-store.ts:54 <-  file:///E:/lp-monitor/src/storage/raw-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- acceptRange file:///E:/lp-monitor/src/storage/raw-store.ts:1",
+      "estimatedMs": 4.645
+    },
+    {
+      "stack": "persistDerived file:///E:/lp-monitor/src/storage/raw-store.ts:54 <-  file:///E:/lp-monitor/src/storage/raw-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- acceptRange file:///E:/lp-monitor/src/storage/raw-store.ts:1 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <-  file:///E:/lp-monitor/src/signals/project.ts:5",
+      "estimatedMs": 3.156
+    },
+    {
+      "stack": "logTimes file:///E:/lp-monitor/src/storage/raw-store.ts:29 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- readMetricCoverage file:///E:/lp-monitor/src/metrics/coverage.ts:1 <-  file:///E:/lp-monitor/src/storage/metric-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- buildMetricsReport file:///E:/lp-monitor/src/storage/metric-store.ts:1",
+      "estimatedMs": 3.156
+    },
+    {
+      "stack": "logTimes file:///E:/lp-monitor/src/storage/raw-store.ts:29 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- readEvidence file:///E:/lp-monitor/src/signals/project.ts:2 <-  file:///E:/lp-monitor/src/signals/project.ts:2 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- projectSignals file:///E:/lp-monitor/src/signals/project.ts:2",
+      "estimatedMs": 3.096
+    },
+    {
+      "stack": "reconcilePools file:///E:/lp-monitor/src/storage/raw-store.ts:47 <-  file:///E:/lp-monitor/src/storage/raw-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- acceptRange file:///E:/lp-monitor/src/storage/raw-store.ts:1 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <-  file:///E:/lp-monitor/src/signals/project.ts:5",
+      "estimatedMs": 3.093
+    },
+    {
+      "stack": "logTimes file:///E:/lp-monitor/src/storage/raw-store.ts:29 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- snapshot file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <-  file:///E:/lp-monitor/src/storage/projection-store.ts:5 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52",
+      "estimatedMs": 3.049
+    },
+    {
+      "stack": "prepare file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/wrappers.js:4 <- rawId file:///E:/lp-monitor/src/storage/raw-store.ts:85 <- persistDerived file:///E:/lp-monitor/src/storage/raw-store.ts:54 <-  file:///E:/lp-monitor/src/storage/raw-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- acceptRange file:///E:/lp-monitor/src/storage/raw-store.ts:1",
+      "estimatedMs": 1.554
+    },
+    {
+      "stack": "anchors file:///E:/lp-monitor/src/storage/raw-store.ts:28 <-  file:///E:/lp-monitor/src/storage/metric-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- buildMetricsReport file:///E:/lp-monitor/src/storage/metric-store.ts:1 <-  file:///E:/lp-monitor/src/signals/project.ts:2 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52",
+      "estimatedMs": 1.552
+    },
+    {
+      "stack": "prepare file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/wrappers.js:4 <- anchors file:///E:/lp-monitor/src/storage/raw-store.ts:28 <-  file:///E:/lp-monitor/src/storage/metric-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- buildMetricsReport file:///E:/lp-monitor/src/storage/metric-store.ts:1 <-  file:///E:/lp-monitor/src/signals/project.ts:2",
+      "estimatedMs": 1.549
+    },
+    {
+      "stack": "snapshot file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <-  file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- rebuild file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1",
+      "estimatedMs": 1.543
+    },
+    {
+      "stack": "snapshot file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <-  file:///E:/lp-monitor/src/storage/projection-store.ts:5 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- read file:///E:/lp-monitor/src/storage/projection-store.ts:5 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1",
+      "estimatedMs": 1.543
+    },
+    {
+      "stack": "prepare file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/wrappers.js:4 <- activeLogs file:///E:/lp-monitor/src/storage/raw-store.ts:24 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- readEvidence file:///E:/lp-monitor/src/signals/project.ts:2 <-  file:///E:/lp-monitor/src/signals/project.ts:2 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52",
+      "estimatedMs": 1.541
+    },
+    {
+      "stack": "logTimes file:///E:/lp-monitor/src/storage/raw-store.ts:29 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- snapshot file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <-  file:///E:/lp-monitor/src/storage/projection-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52",
+      "estimatedMs": 1.539
+    },
+    {
+      "stack": "boundaries file:///E:/lp-monitor/src/storage/raw-store.ts:29 <- readMetricCoverage file:///E:/lp-monitor/src/metrics/coverage.ts:1 <-  file:///E:/lp-monitor/src/storage/metric-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52 <- buildMetricsReport file:///E:/lp-monitor/src/storage/metric-store.ts:1 <-  file:///E:/lp-monitor/src/signals/project.ts:2",
+      "estimatedMs": 1.502
+    },
+    {
+      "stack": "prepare file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/wrappers.js:4 <- activeLogs file:///E:/lp-monitor/src/storage/raw-store.ts:24 <- proto.<computed> file:///E:/lp-monitor/.superpowers/sdd/p6/profile-exact-commit.ts:1 <- activeMap file:///E:/lp-monitor/src/storage/raw-store.ts:85 <-  file:///E:/lp-monitor/src/storage/raw-store.ts:1 <- sqliteTransaction file:///E:/lp-monitor/node_modules/.pnpm/better-sqlite3@13.0.3/node_modules/better-sqlite3/lib/methods/transaction.js:52",
+      "estimatedMs": 0.21
+    }
+  ]
+}

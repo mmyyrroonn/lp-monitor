@@ -1,0 +1,9 @@
+{
+  "status": "passed",
+  "logs": 6,
+  "originalRowsByteStable": true,
+  "duplicateSaveIdempotent": true,
+  "observedBatchLogs": 6,
+  "originalError": "Raw log payload is immutable",
+  "note": "Offline regression against re-fetched real RPC batch and a copy of the failed database. Original runtime database untouched."
+}

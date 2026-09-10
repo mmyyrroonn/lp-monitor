@@ -255,7 +255,7 @@ describe('SqliteRangeStore', () => {
   });
 
   test('is idempotent and rejects a changed payload for an existing raw identity', () => {
-    const { store: rangeStore } = store();
+    const { database, store: rangeStore } = store();
     const a = log(1, 105n);
     const accepted = batch({ id: 'first', logs: [a] });
     rangeStore.acceptRange(accepted);
@@ -266,10 +266,64 @@ describe('SqliteRangeStore', () => {
     expect(repeated.added).toEqual([]);
     expect(repeated.removed).toEqual([]);
 
-    const changed = { ...a, data: hex(999) };
-    expect(() => rangeStore.saveRaw(batch({ id: 'changed', logs: [changed] }))).toThrow(
-      /immutable/i,
-    );
+    const canonicalChanges: [string, RawLog][] = [
+      ['data', { ...a, data: hex(999) }],
+      ['topics', { ...a, topics: [hex(999)] }],
+      ['address', { ...a, address: address(999) }],
+      ['transaction-index', { ...a, transactionIndex: 999 }],
+      ['block-number', { ...a, blockNumber: 106n }],
+    ];
+    for (const [id, changed] of canonicalChanges)
+      expect(() => rangeStore.saveRaw(batch({ id: `changed-${id}`, logs: [changed] }))).toThrow(
+        /immutable/i,
+      );
+
+    // Block and transaction hashes participate in rawLogKey, so changing either is
+    // a distinct identity rather than a mutation of this row.
+    rangeStore.saveRaw(batch({ id: 'changed-identity', logs: [{ ...a, blockHash: hex(999) }] }));
+    expect(database.prepare('select count(*) as count from raw_logs').get()).toEqual({ count: 2 });
+  });
+
+  test('keeps first raw annotation while preserving timestamp variants in batch evidence', () => {
+    const { database, store: rangeStore } = store();
+    const canonical = log(1, 105n);
+    const first = { ...canonical, rawBlockTimestamp: '0x6aa28ff3' as Hex };
+    const variants = [
+      { id: 'zero', rawBlockTimestamp: '0x0' as Hex },
+      { id: 'missing', rawBlockTimestamp: null },
+      { id: 'different', rawBlockTimestamp: '0x6aa28ff4' as Hex },
+    ];
+
+    rangeStore.saveRaw(batch({ id: 'first-stamped', logs: [first] }));
+    for (const variant of variants)
+      rangeStore.saveRaw(
+        batch({
+          id: variant.id,
+          logs: [{ ...canonical, rawBlockTimestamp: variant.rawBlockTimestamp }],
+        }),
+      );
+
+    expect(database.prepare('select count(*) as count from raw_logs').get()).toEqual({ count: 1 });
+    const raw = database
+      .prepare('select raw_block_timestamp, payload_json from raw_logs where raw_key = ?')
+      .get(rawLogKey(first)) as { raw_block_timestamp: string; payload_json: string };
+    expect(raw.raw_block_timestamp).toBe('0x6aa28ff3');
+    expect(JSON.parse(raw.payload_json).rawBlockTimestamp).toBe('0x6aa28ff3');
+
+    const batches = database
+      .prepare('select id, payload_json from ingest_batches order by rowid')
+      .all() as { id: string; payload_json: string }[];
+    expect(
+      batches.map(({ id, payload_json }) => [
+        id,
+        JSON.parse(payload_json).logs[0].rawBlockTimestamp,
+      ]),
+    ).toEqual([
+      ['first-stamped', '0x6aa28ff3'],
+      ['zero', '0x0'],
+      ['missing', null],
+      ['different', '0x6aa28ff4'],
+    ]);
   });
 
   test('isolates cursors and active sets by scope', () => {

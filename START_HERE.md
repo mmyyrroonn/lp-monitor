@@ -1,6 +1,6 @@
 # Robinhood RWA 短时 LP 机会监控：实施入口
 
-更新：2026-09-10。**P0–P4 已验收；P5本轮修复检查通过，649项测试通过；完整历史评估incomplete，原生P1导出与长窗口性能未完成。** P4提供候选、热度确认、翻倍升级、降温、再热、修订撤回和本机通知。[P4验收](docs/reviews/2026-09-09-p4-acceptance.md)、[独立审查](docs/reviews/2026-09-09-p4-review.md)、[实施状态](docs/implementation-status.md)、[运行说明](README.md)。
+更新：2026-09-10。**P0–P4 已验收；P5完整历史评估 incomplete；P6 最终冻结前 74 文件 / 740 项测试及 typecheck、lint、build 通过；30 分钟冒烟通过，前两次长观察均保留为失败，21:35:48 启动的最终构建实测已按用户要求在约 56 分钟时停止，完整 2 小时验收未完成。** P5 原生 P1 导出与长窗口性能未完成。 P4提供候选、热度确认、翻倍升级、降温、再热、修订撤回和本机通知。[P4验收](docs/reviews/2026-09-09-p4-acceptance.md)、[独立审查](docs/reviews/2026-09-09-p4-review.md)、[实施状态](docs/implementation-status.md)、[运行说明](README.md)。
 
 目标：解析Robinhood Chain的Uniswap V3/V4链上事件，观察有限RWA集合，发现关联新Meme、老Meme再次放量，以及具体RWA/USDG池的短时成交热度。首版以热度排名与提醒为核心，不做精确LP模拟。
 
@@ -11,15 +11,15 @@
 3. 查看[实施状态](docs/implementation-status.md)，只执行用户指定的阶段。
 4. 按阶段计划实现、验证、保存证据并更新交接记录。
 
-| 阶段 | 状态/交付 | 计划 |
-|---|---|---|
-| P0 | passed；工程、依赖/ABI、RPC报告、真实日志 | [P0](docs/superpowers/plans/2026-09-08-p0-foundation.md) |
-| P1 | passed；动态池发现、范围日志、分钟索引、恢复 | [P1](docs/superpowers/plans/2026-09-08-p1-recorder.md) |
-| P2 | passed；解码、最近观测、离线投影重建 | [P2](docs/superpowers/plans/2026-09-08-p2-protocol-state.md) |
-| P3 | passed；分钟成交、计价降级、基线与排名 | [P3](docs/superpowers/plans/2026-09-08-p3-metrics.md) |
-| P4 | passed；状态机、outbox、修订撤回、本机通知 | [P4](docs/superpowers/plans/2026-09-08-p4-alerts.md) |
-| P5 | 修复检查通过；历史incomplete；原生导出与长窗口性能待完成；完整评估不阻塞P6 | [P5](docs/superpowers/plans/2026-09-08-p5-history.md) |
-| P6 | pending；有时限实时观察、故障演练、运行手册 | [P6](docs/superpowers/plans/2026-09-08-p6-live-validation.md) |
+| 阶段 | 状态/交付                                                                                                    | 计划                                                          |
+| ---- | ------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------- |
+| P0   | passed；工程、依赖/ABI、RPC报告、真实日志                                                                    | [P0](docs/superpowers/plans/2026-09-08-p0-foundation.md)      |
+| P1   | passed；动态池发现、范围日志、分钟索引、恢复                                                                 | [P1](docs/superpowers/plans/2026-09-08-p1-recorder.md)        |
+| P2   | passed；解码、最近观测、离线投影重建                                                                         | [P2](docs/superpowers/plans/2026-09-08-p2-protocol-state.md)  |
+| P3   | passed；分钟成交、计价降级、基线与排名                                                                       | [P3](docs/superpowers/plans/2026-09-08-p3-metrics.md)         |
+| P4   | passed；状态机、outbox、修订撤回、本机通知                                                                   | [P4](docs/superpowers/plans/2026-09-08-p4-alerts.md)          |
+| P5   | 修复检查通过；历史incomplete；原生导出与长窗口性能待完成；完整评估不阻塞P6                                   | [P5](docs/superpowers/plans/2026-09-08-p5-history.md)         |
+| P6   | in_progress；740 测试通过，30 分钟冒烟 passed；第二次长观察仅因 p95 2,841 ms 失败，最终构建实测已按用户要求停止，长时延迟门槛待解决 | [P6](docs/superpowers/plans/2026-09-08-p6-live-validation.md) |
 
 P5交付与限制见 [验收说明](docs/reviews/2026-09-10-p5-acceptance.md) 和 [研究结果](artifacts/p5/report.md)。
 
@@ -40,9 +40,9 @@ P4历史输入有603笔Swap、34笔未计价、29个闭合分钟、1827个登记
 
 ## 下一窗口交接
 
-2026-09-09用户调整优先级：历史数据获取有现成能力就保留，缺少的暂时不补；不为完成P5新增历史采集或专门补齐研究样本。优先实时采集、热度统计与本机提醒稳定性，P5完整历史评估不再作为P6前置条件。2026-09-10用户要求实现P5，已实现可移植输入的replay/study；独立Review修复状态见验收说明，历史效果incomplete，P6仍为pending。
+2026-09-09用户调整优先级：历史数据获取有现成能力就保留，缺少的暂时不补；不为完成P5新增历史采集或专门补齐研究样本。优先实时采集、热度统计与本机提醒稳定性，P5完整历史评估不再作为P6前置条件。2026-09-10用户要求实现P5，已实现可移植输入的replay/study；独立Review修复状态见验收说明，历史效果 incomplete。2026-09-10用户要求实现P6，现已进入实录验收。
 
-下一窗口由用户明确安排后可进入P6 Task6.1。阈值可由用户额外分析提供，核对对象、单位、窗口、条件和来源后作为候选配置；未经独立评估仍标效果未验证。已有历史与后续实时录制数据保留待用，缺样本如实披露。实时启动、池发现、恢复及数据完整性所需的既有扫描继续保留。
+当前 P6 Task6.1–6.3 已按用户要求暂停实测与进一步优化，运行命令与边界见[本机运行手册](docs/runbook.md)。第二次长观察完整运行后仅因 687 样本本机处理 p95 2,841 ms 超过门槛而失败；最终构建验收 runId `2026-09-10T13-35-48-773Z-6ec4891a` 于 21:35:48 启动，约 56 分钟后按用户要求停止，记录见 artifacts/p6/soak-user-stopped-report.json。在完整实测和报告核验前，不将 P6 标为 passed。处理详情见[独立复审处理记录](docs/reviews/2026-09-10-p6-review-response.md)。阈值可由用户额外分析提供，核对对象、单位、窗口、条件和来源后作为候选配置；未经独立评估仍标效果未验证。已有历史与后续实时录制数据保留待用，缺样本如实披露。实时启动、池发现、恢复及数据完整性所需的既有扫描继续保留。
 
 继承新鲜P2 sourceHash与P3覆盖/时间/报价合同，从buildMetricsReport读取数据。不能把metric_windows裸缓存当当前数据。
 

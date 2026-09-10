@@ -18,6 +18,7 @@ export interface ReaderOptions extends EvidenceOptions {
   maxCalls?: number | null;
   deadlineMs?: number;
   maxConcurrentRpc?: number;
+  maxBackfillRpcRps?: number;
   perSecond?: number;
   timeoutMs?: number;
   maxRetries?: number;
@@ -46,6 +47,9 @@ export function createChainReader(
 ): EvidenceReader & { flush(): Promise<void>; close(): Promise<void> } {
   const meter = new RequestMeter(options.maxCalls === undefined ? 150 : options.maxCalls);
   const limiter = new RateLimiter(options.perSecond ?? 5, options.maxConcurrentRpc ?? 2);
+  const backfillLimiter = new RateLimiter(options.maxBackfillRpcRps ?? 1, 1);
+  let queued = 0;
+  let active = 0;
   const writer = new EvidenceWriter(options);
   let closed = false;
   if (options.deadlineMs !== undefined && !Number.isFinite(options.deadlineMs))
@@ -84,21 +88,40 @@ export function createChainReader(
       throw new RpcFailure('read-only-method-denied');
     for (let attempt = 0; ; attempt++) {
       assertRequestAllowed();
+      queued++;
+      meter.recordQueueWait(0, queued);
+      const queuedAt = Date.now();
       const release = await limiter.enter();
+      let dispatched = false;
       try {
         assertRequestAllowed();
+        let transport!: Promise<unknown>;
         await limiter.acquire(
           () => assertRequestAllowed(),
           () => {
             assertRequestAllowed();
             meter.begin(method, attempt > 0);
+            queued--;
+            dispatched = true;
+            meter.recordQueueWait(Date.now() - queuedAt, queued);
+            active++;
+            meter.recordConcurrency(active);
+            transport = meter.trackAttempt(method, attempt > 0, async () => {
+              try {
+                return await client.request({ method, params } as never, { retryCount: 0 });
+              } finally {
+                active--;
+                meter.recordConcurrency(active);
+              }
+            });
           },
+          meter.isBackfill ? backfillLimiter : undefined,
         );
         const at = new Date().toISOString();
         const started = Date.now();
         let result: unknown;
         try {
-          result = await client.request({ method, params } as never, { retryCount: 0 });
+          result = await transport;
           if (result === undefined) throw new RpcFailure('malformed-response');
         } catch (error) {
           const failure = classifyRpcError(error);
@@ -136,6 +159,10 @@ export function createChainReader(
         });
         return result;
       } finally {
+        if (!dispatched) {
+          queued--;
+          meter.recordQueueWait(Date.now() - queuedAt, queued);
+        }
         release();
       }
     }

@@ -1,0 +1,8 @@
+{
+  "equal": true,
+  "sourceHashEqual": true,
+  "annotations": 1901,
+  "registrationRowsAcrossScopes": 3802,
+  "uniquePoolWindows": 1901,
+  "measurementLimitation": "Root full-suite checks may have run concurrently; timings are not isolated."
+}

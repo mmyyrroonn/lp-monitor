@@ -11,6 +11,13 @@ export interface FollowStore {
   resetForWarmup(scopeId: string): RangeChangeSet | void;
   pruneCheckpoints(scopeId: string, minTimestampSec: number): void;
 }
+export interface FollowResult {
+  acceptedRanges: number;
+  reorgs: number;
+  warmupResets: number;
+  failures: string[];
+  complete: boolean;
+}
 export interface FollowOptions {
   scopeId: string;
   startBlock: bigint;
@@ -24,11 +31,17 @@ export interface FollowOptions {
   deploymentFloor?: bigint;
   nowMs?: () => number;
   sleep?: (ms: number) => Promise<void>;
+  shouldStop?: () => boolean;
+  onStateChange?: (state: 'healthy' | 'degraded') => void;
+  onWait?: (elapsedMs: number) => void;
+  onFailure?: () => void;
+  onResult?: (result: FollowResult) => void;
   recordRange: (
     fromBlock: bigint,
     end: BlockAnchor,
     previous: BlockAnchor | null,
     head: BlockAnchor,
+    acquisitionStartedAtMs: number,
   ) => Promise<RangeChangeSet | null>;
   onChanges?: (changes: RangeChangeSet, cause: 'range' | 'reorg' | 'warmup') => void;
   onProgress?: (health: ReturnType<typeof ingestHealth>) => void;
@@ -43,6 +56,14 @@ export async function follow(
 ) {
   const now = options.nowMs ?? Date.now;
   const sleep = options.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  const stopping = () => now() >= stopAtMs || options.shouldStop?.() === true;
+  let state: 'healthy' | 'degraded' | null = null;
+  const publishState = (next: 'healthy' | 'degraded') => {
+    if (state !== next) {
+      state = next;
+      options.onStateChange?.(next);
+    }
+  };
   const poll = options.pollIntervalMs ?? 2000;
   const maxRange = options.maxRangeBlocks ?? 1000;
   const overlap = options.overlapBlocks ?? 20;
@@ -64,7 +85,7 @@ export async function follow(
   if (scopes.has(options.scopeId)) throw new Error('Scope cursor already has an active recorder');
   scopes.add(options.scopeId);
   activeScopes.set(store, scopes);
-  const result = {
+  const result: FollowResult = {
     acceptedRanges: 0,
     reorgs: 0,
     warmupResets: 0,
@@ -75,8 +96,13 @@ export async function follow(
   let explicitNext = options.oneShot && options.toBlock !== undefined ? start : undefined;
   try {
     do {
+      if (stopping()) {
+        result.complete = false;
+        break;
+      }
       let gap = false;
       try {
+        let acquisitionStartedAtMs = now();
         let head = await reader.getAnchor('latest');
         let targetHeight =
           options.toBlock === undefined || options.toBlock > head.number
@@ -84,7 +110,7 @@ export async function follow(
             : options.toBlock;
         let target = targetHeight === head.number ? head : await reader.getAnchor(targetHeight);
         for (;;) {
-          if (now() >= stopAtMs) break;
+          if (stopping()) break;
           let previous = store.acceptedTip(options.scopeId);
           if (previous) {
             const current = await reader.getAnchor(previous.number);
@@ -115,7 +141,7 @@ export async function follow(
               }
               if (explicitNext !== undefined) explicitNext = start;
               await options.onRecovery?.(match);
-              if (now() >= stopAtMs) break;
+              if (stopping()) break;
               head = await reader.getAnchor('latest');
               targetHeight =
                 options.toBlock === undefined || options.toBlock > head.number
@@ -131,8 +157,14 @@ export async function follow(
           if (from > target.number) break;
           const limit = from + BigInt(maxRange) - 1n;
           const end = limit < target.number ? await reader.getAnchor(limit) : target;
-          if (now() >= stopAtMs) break;
-          const changes = await options.recordRange(from, end, previous, head);
+          if (stopping()) break;
+          const changes = await options.recordRange(
+            from,
+            end,
+            previous,
+            head,
+            acquisitionStartedAtMs,
+          );
           if (!changes) {
             gap = true;
             result.failures.push('incomplete-range');
@@ -151,6 +183,7 @@ export async function follow(
           options.onChanges?.(changes, 'range');
           store.pruneCheckpoints(options.scopeId, Math.max(0, head.timestampSec - retention * 60));
           if (end.number >= target.number) break;
+          acquisitionStartedAtMs = now();
         }
         if (
           (store.acceptedTip(options.scopeId)?.number ?? -1n) < target.number &&
@@ -158,13 +191,19 @@ export async function follow(
         )
           gap = true;
         if (explicitNext !== undefined && explicitNext <= target.number) gap = true;
-        options.onProgress?.(ingestHealth(head, store.acceptedTip(options.scopeId), gap));
+
         if (
           options.toBlock !== undefined &&
           (store.acceptedTip(options.scopeId)?.number ?? -1n) < options.toBlock
         )
           gap = true;
+        if (!options.shouldStop?.() || !gap) publishState(gap ? 'degraded' : 'healthy');
+        options.onProgress?.(ingestHealth(head, store.acceptedTip(options.scopeId), gap));
       } catch (error) {
+        if (!options.shouldStop?.()) {
+          publishState('degraded');
+          options.onFailure?.();
+        }
         if (
           !(error instanceof RpcFailure) ||
           error.kind === 'budget' ||
@@ -176,11 +215,18 @@ export async function follow(
         gap = true;
       }
       result.complete = !gap;
-      if (options.oneShot || now() >= stopAtMs) break;
+      if (!options.shouldStop?.() || !gap) publishState(gap ? 'degraded' : 'healthy');
+      if (options.oneShot || stopping()) break;
+      const waitingAt = now();
       await sleep(Math.min(poll, Math.max(0, stopAtMs - now())));
-    } while (now() < stopAtMs);
+      options.onWait?.(Math.max(0, now() - waitingAt));
+    } while (!stopping());
     return result;
+  } catch (error) {
+    result.complete = false;
+    throw error;
   } finally {
     scopes.delete(options.scopeId);
+    options.onResult?.({ ...result, failures: [...result.failures] });
   }
 }

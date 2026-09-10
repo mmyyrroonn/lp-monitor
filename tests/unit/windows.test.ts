@@ -1,4 +1,8 @@
-import { volumeBaseline } from '../../src/metrics/baseline.js';
+import {
+  RollingVolumeBaseline,
+  rollingVolumeBaselines,
+  volumeBaseline,
+} from '../../src/metrics/baseline.js';
 import { describe, expect, test } from 'vitest';
 import type { Address, Hex } from 'viem';
 import type { BlockAnchor, PoolEvent, PoolRef } from '../../src/domain/types.js';
@@ -471,4 +475,44 @@ test('volume ties use transaction count then stable pool ID', () => {
     watermark(300),
   );
   expect(rankPools(windows, 'volume5mClosed').map((w) => w.pool)).toEqual([a, b, c]);
+});
+
+test('rolling baselines match straightforward eligible-prefix history across mixed scales', () => {
+  const points = Array.from({ length: 5_000 }, (_, index) => ({
+    eligible: index % 11 !== 0,
+    unit: index % 7 === 0 ? null : index % 3 === 0 ? 'raw:token-a' : 'usdMicros',
+    current: index % 7 === 0 ? null : index % 13 === 0 ? 0n : BigInt((index * 17) % 10_007),
+    history:
+      index % 10 === 0
+        ? [
+            { unit: 'usdMicros', value: BigInt(index) },
+            { unit: 'raw:token-a', value: BigInt(index * 10) },
+          ]
+        : [{ unit: index % 3 === 0 ? 'raw:token-a' : 'usdMicros', value: BigInt(index) }],
+  }));
+  const minimum = 12;
+  const limit = 60;
+  const expected = points.map((point, index) => {
+    if (!point.eligible) return null;
+    const prior = points
+      .slice(0, index)
+      .filter(
+        (item) =>
+          item.eligible &&
+          point.unit !== null &&
+          item.history.some((entry) => entry.unit === point.unit),
+      )
+      .slice(-limit)
+      .map((item) => item.history.find((entry) => entry.unit === point.unit)!.value);
+    return volumeBaseline(point.current, prior, minimum);
+  });
+  expect(rollingVolumeBaselines(points, minimum, limit)).toEqual(expected);
+});
+
+test('rolling baseline rejects negative retained history before evaluating the next point', () => {
+  const rolling = new RollingVolumeBaseline(1, 60);
+  rolling.next({ eligible: true, unit: 'usdMicros', current: -1n });
+  expect(() => rolling.next({ eligible: true, unit: 'usdMicros', current: 1n })).toThrow(
+    /negative volume/i,
+  );
 });

@@ -1,0 +1,44 @@
+{
+  "version": 2,
+  "checkedAtMs": 1789047233008,
+  "status": "passed",
+  "tests": {
+    "command": "pnpm test --reporter=json --outputFile=artifacts/p6/tests.json",
+    "exitCode": 0,
+    "passed": 740,
+    "failed": 0,
+    "pending": 0,
+    "files": 74,
+    "evidence": "tests.json",
+    "sha256": "477f4e0be6e3fd8f574a17596a01fa881bef10cdb2cd0dcdf8e3054547992523"
+  },
+  "checks": [
+    {
+      "command": "pnpm typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm lint",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm build",
+      "exitCode": 0
+    }
+  ],
+  "coreReview": "Scoped followup reviews closed with no remaining Important/Blocking findings after verifying and resolving the concrete independent-review findings; conservative budgets and incomplete backlog acceptance remain unchanged.",
+  "realFaultRegression": "save-raw-reproduction/fix-verification.json",
+  "performanceEvidence": "performance/",
+  "codeSnapshots": [
+    "smoke-code.json",
+    "soak-failed-1-code.json",
+    "soak-failed-2-code.json",
+    "soak-code.json"
+  ],
+  "limitations": [
+    "Offline fault tests are separate from real-chain faults/reorg evidence.",
+    "Historical smoke build inventory was captured during its run, not before it.",
+    "The final optimized build still requires its own full two-hour run.",
+    "Upstream Uniswap missing sourcemap source warnings remain visible."
+  ]
+}

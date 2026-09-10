@@ -1,0 +1,125 @@
+{
+  "atMs": 1789038970999,
+  "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+  "batch": {
+    "id": "fa300b95799245c6f0fe8e6581961d4e44cda700012ecc200f1b5a13aa7cb916",
+    "logs": 6,
+    "completeness": "complete"
+  },
+  "conflicts": [
+    {
+      "key": "4663:0x2439e13fe2833031de1b65bb1726fcb776b97beb0c5accb6db3405cbb4b5a2fa:0x3c190faa728afd5fb56a36e5ebac52f2d17c12adfff846f1beb693864d4d69c8:143",
+      "changed": [
+        "rawBlockTimestamp"
+      ],
+      "values": {
+        "rawBlockTimestamp": {
+          "before": "0x6aa28ff3",
+          "after": "0x0"
+        }
+      }
+    },
+    {
+      "key": "4663:0x2439e13fe2833031de1b65bb1726fcb776b97beb0c5accb6db3405cbb4b5a2fa:0x3c190faa728afd5fb56a36e5ebac52f2d17c12adfff846f1beb693864d4d69c8:148",
+      "changed": [
+        "rawBlockTimestamp"
+      ],
+      "values": {
+        "rawBlockTimestamp": {
+          "before": "0x6aa28ff3",
+          "after": "0x0"
+        }
+      }
+    },
+    {
+      "key": "4663:0x334e11245b144ccb12c6adc28afb6b56b12077355f507291fb84c7d7ebb3afe5:0x4c48cfe79875333ab0329bee395efb415f8daf19eed7263cef3cc1c520a06b28:41",
+      "changed": [
+        "rawBlockTimestamp"
+      ],
+      "values": {
+        "rawBlockTimestamp": {
+          "before": "0x6aa28ff3",
+          "after": "0x0"
+        }
+      }
+    },
+    {
+      "key": "4663:0x334e11245b144ccb12c6adc28afb6b56b12077355f507291fb84c7d7ebb3afe5:0x4c48cfe79875333ab0329bee395efb415f8daf19eed7263cef3cc1c520a06b28:46",
+      "changed": [
+        "rawBlockTimestamp"
+      ],
+      "values": {
+        "rawBlockTimestamp": {
+          "before": "0x6aa28ff3",
+          "after": "0x0"
+        }
+      }
+    }
+  ],
+  "saveResult": {
+    "status": "error",
+    "name": "Error",
+    "message": "Raw log payload is immutable",
+    "stack": "Error: Raw log payload is immutable\n    at SqliteRangeStore.persistRawLog (file:///E:/lp-monitor/dist/storage/raw-store.js:289:23)\n    at SqliteRangeStore.persistTransport (file:///E:/lp-monitor/dist/storage/raw-store.js:279:18)\n    at sqliteTransaction.<anonymous> (file:///E:/lp-monitor/dist/storage/raw-store.js:11:46)\n    at sqliteTransaction (E:\\lp-monitor\\node_modules\\.pnpm\\better-sqlite3@13.0.3\\node_modules\\better-sqlite3\\lib\\methods\\transaction.js:65:24)\n    at SqliteRangeStore.saveRaw (file:///E:/lp-monitor/dist/storage/raw-store.js:11:71)\n    at file:///E:/lp-monitor/.superpowers/sdd/p6/reproduce-save-raw.mjs:45:15"
+  },
+  "note": "Re-fetched bounded interval; saveRaw executed only against dedicated copied database, never original runtime DB.",
+  "meter": {
+    "calls": 9,
+    "retries": 0,
+    "responseBytes": 9998,
+    "methods": {
+      "eth_getBlockByNumber": 2,
+      "eth_getLogs": 7
+    },
+    "methodMetrics": {
+      "eth_getBlockByNumber": {
+        "calls": 2,
+        "retries": 0,
+        "responseBytes": 4058,
+        "rpcMs": 733
+      },
+      "eth_getLogs": {
+        "calls": 7,
+        "retries": 0,
+        "responseBytes": 5940,
+        "rpcMs": 1871
+      }
+    },
+    "purposes": {
+      "endpoint-anchor": {
+        "calls": 2,
+        "retries": 0,
+        "responseBytes": 4058,
+        "rpcMs": 733
+      },
+      "logs": {
+        "calls": 7,
+        "retries": 0,
+        "responseBytes": 5940,
+        "rpcMs": 1871
+      }
+    },
+    "elements": {
+      "total": 9,
+      "byPurpose": {
+        "endpoint-anchor": 2,
+        "logs": 7
+      }
+    },
+    "queueDepth": 0,
+    "peakQueueDepth": 1,
+    "activeRpc": 0,
+    "peakConcurrentRpc": 1,
+    "timings": {
+      "queueWaitMs": 5641,
+      "rpcMs": 2604,
+      "processingMs": 0
+    },
+    "elapsedMs": 8323,
+    "maxCalls": 40,
+    "peakOneSecond": 1,
+    "backfillPeakOneSecond": 1,
+    "averageRpcPerSecond": 1.0813408626697105,
+    "billingUnits": null
+  }
+}

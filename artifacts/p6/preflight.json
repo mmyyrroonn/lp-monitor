@@ -1,0 +1,308 @@
+{
+  "schemaVersion": "p0.1",
+  "sourceAlias": "robinhood-public",
+  "chainId": 4663,
+  "at": "2026-09-10T09:52:48.648Z",
+  "requiredPassed": true,
+  "capabilities": {
+    "chainId": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-10T09:52:44.571Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": 4663
+    },
+    "recentAnchor": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-10T09:52:44.859Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": {
+        "number": "59310593",
+        "hash": "0xc8e34f7d3cd586f4620f0289c80c400e420927cbdd28e67d5f8ea1911acc3c68",
+        "timestampSec": 1789033963
+      }
+    },
+    "rangeLogs10": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-10T09:52:45.160Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": {
+        "requestedBlocks": 10,
+        "testedBlocks": 10,
+        "fromBlock": "59310584",
+        "toBlock": "59310593",
+        "count": 36,
+        "decodedResponseBytes": 36491,
+        "direct": {
+          "status": "supported",
+          "kind": null
+        },
+        "adaptive": {
+          "complete": true,
+          "ranges": 1
+        }
+      }
+    },
+    "rangeLogs20": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-10T09:52:45.455Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": {
+        "requestedBlocks": 20,
+        "testedBlocks": 20,
+        "fromBlock": "59310574",
+        "toBlock": "59310593",
+        "count": 94,
+        "decodedResponseBytes": 93737,
+        "direct": {
+          "status": "supported",
+          "kind": null
+        },
+        "adaptive": {
+          "complete": true,
+          "ranges": 1
+        }
+      }
+    },
+    "rangeLogs100": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-10T09:52:45.762Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": {
+        "requestedBlocks": 100,
+        "testedBlocks": 100,
+        "fromBlock": "59310494",
+        "toBlock": "59310593",
+        "count": 310,
+        "decodedResponseBytes": 310135,
+        "direct": {
+          "status": "supported",
+          "kind": null
+        },
+        "adaptive": {
+          "complete": true,
+          "ranges": 1
+        }
+      }
+    },
+    "rangeUnionConsistency": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-10T09:52:46.921Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": {
+        "equal": true,
+        "full": 94,
+        "union": 94,
+        "adaptive": true,
+        "coverage": "tested range only; provider upper limit unknown"
+      }
+    },
+    "currentCode": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-10T09:52:47.219Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": {
+        "bytes": 24009,
+        "codeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626"
+      }
+    },
+    "currentCall": {
+      "status": "supported",
+      "required": true,
+      "at": "2026-09-10T09:52:47.484Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": {
+        "responseHash": "0xbb8a6a4669ba250d26cd7a459eca9d215f8307e33aebe50379bc5a3617ec3444",
+        "decimals": 18
+      }
+    },
+    "historicalAnchor": {
+      "status": "supported",
+      "required": false,
+      "at": "2026-09-10T09:52:47.779Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": {
+        "number": "58310593",
+        "hash": "0x454893ba7eeb8e6e81a9e451c87e0e3d2ce19a4bbd40543f1038f15f5d13d7a9",
+        "timestampSec": 1788933075
+      }
+    },
+    "historicalLogs": {
+      "status": "supported",
+      "required": false,
+      "at": "2026-09-10T09:52:48.079Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": {
+        "fromBlock": "58310593",
+        "toBlock": "58310612",
+        "count": 62,
+        "scope": "one sampled range; not full P5 coverage"
+      }
+    },
+    "timestampAnchor-59310574": {
+      "status": "supported",
+      "required": false,
+      "at": "2026-09-10T09:52:48.361Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": {
+        "blockNumber": "59310574",
+        "raw": "0x0",
+        "quality": "zero",
+        "anchor": {
+          "number": "59310574",
+          "hash": "0xa8c14cf749ece10f8b35068c38bee3ba138c5739743a07a3bb79f54519984fa1",
+          "timestampSec": 1789033961
+        }
+      }
+    },
+    "timestampAnchor-59310593": {
+      "status": "supported",
+      "required": false,
+      "at": "2026-09-10T09:52:48.648Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": {
+        "blockNumber": "59310593",
+        "raw": "0x6aa27deb",
+        "quality": "valid",
+        "anchor": {
+          "number": "59310593",
+          "hash": "0xc8e34f7d3cd586f4620f0289c80c400e420927cbdd28e67d5f8ea1911acc3c68",
+          "timestampSec": 1789033963
+        }
+      }
+    },
+    "historicalState": {
+      "status": "unknown",
+      "required": false,
+      "at": "2026-09-10T09:52:48.648Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": "not probed: optional for P0"
+    },
+    "websocket": {
+      "status": "unknown",
+      "required": false,
+      "at": "2026-09-10T09:52:48.648Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": "not probed: optional for P0"
+    },
+    "trace": {
+      "status": "unknown",
+      "required": false,
+      "at": "2026-09-10T09:52:48.648Z",
+      "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl",
+      "detail": "not probed: optional for P0"
+    }
+  },
+  "maxLogsPerResponse": null,
+  "logResponseGuard": 5000,
+  "logTimestamp": {
+    "sampled": 2,
+    "quality": {
+      "zero": 1,
+      "valid": 1
+    },
+    "sdkPreservesField": true,
+    "fallback": "P1 minute-boundary index; no per-block headers"
+  },
+  "meter": {
+    "calls": 34,
+    "retries": 0,
+    "responseBytes": 859744,
+    "methods": {
+      "eth_chainId": 2,
+      "eth_getBlockByNumber": 7,
+      "eth_getLogs": 7,
+      "eth_getCode": 9,
+      "eth_call": 9
+    },
+    "methodMetrics": {
+      "eth_chainId": {
+        "calls": 2,
+        "retries": 0,
+        "responseBytes": 87,
+        "rpcMs": 750
+      },
+      "eth_getBlockByNumber": {
+        "calls": 7,
+        "retries": 0,
+        "responseBytes": 15518,
+        "rpcMs": 1946
+      },
+      "eth_getLogs": {
+        "calls": 7,
+        "retries": 0,
+        "responseBytes": 645386,
+        "rpcMs": 2071
+      },
+      "eth_getCode": {
+        "calls": 9,
+        "retries": 0,
+        "responseBytes": 197817,
+        "rpcMs": 2351
+      },
+      "eth_call": {
+        "calls": 9,
+        "retries": 0,
+        "responseBytes": 936,
+        "rpcMs": 2367
+      }
+    },
+    "purposes": {
+      "metadata": {
+        "calls": 20,
+        "retries": 0,
+        "responseBytes": 198840,
+        "rpcMs": 5468
+      },
+      "endpoint-anchor": {
+        "calls": 7,
+        "retries": 0,
+        "responseBytes": 15518,
+        "rpcMs": 1946
+      },
+      "logs": {
+        "calls": 7,
+        "retries": 0,
+        "responseBytes": 645386,
+        "rpcMs": 2071
+      }
+    },
+    "elements": {
+      "total": 34,
+      "byPurpose": {
+        "metadata": 20,
+        "endpoint-anchor": 7,
+        "logs": 7
+      }
+    },
+    "queueDepth": 0,
+    "peakQueueDepth": 1,
+    "activeRpc": 0,
+    "peakConcurrentRpc": 1,
+    "timings": {
+      "queueWaitMs": 0,
+      "rpcMs": 9485,
+      "processingMs": 0
+    },
+    "elapsedMs": 9546,
+    "maxCalls": 150,
+    "peakOneSecond": 5,
+    "averageRpcPerSecond": 3.561701236119841,
+    "billingUnits": null
+  },
+  "configHash": "78e5aa072757f2ecbaf3d507831ea752b5a830f5ec6267331c00a6c0e213b388",
+  "abiHashes": {
+    "v3Pool": "2a3f0cf642d330dd2f6f0161f8d6de5815cb629771d07eebb93d11c317f25178",
+    "v4Manager": "86d9ece37ee75f72eb211f37a1ae9b7d8af60e66971f22c4c9ce499302a715c2"
+  },
+  "pathBase": "artifact-directory",
+  "identityPassed": true,
+  "evidenceMode": "full",
+  "evidenceFile": "probe-2026-09-10T09-52-44-052Z/requests.jsonl"
+}

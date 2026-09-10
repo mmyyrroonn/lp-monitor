@@ -1,6 +1,6 @@
 # 实施状态与窗口交接
 
-更新：2026-09-10。当前状态：**P0–P4 passed；P5 in_progress（Review修复检查通过；原生导出、长窗口性能与完整历史未完成）；P6 pending**。最终全套649测试通过，独立复核已关闭本轮发现。下方旧记录保留为设计阶段历史证据；本轮完整验收与限制见文末。
+更新：2026-09-10。当前状态：**P0–P4 passed；P5 in_progress（Review修复检查通过；原生导出、长窗口性能与完整历史未完成）；P6 in_progress**。P6 最终冻结前 74 文件 / 740 测试及 typecheck、lint、build 均退出 0；30 分钟冒烟 passed，前两次长观察均保留为失败，21:35:48 启动的最终构建实测已按用户要求在约 56 分钟时停止，未完成完整两小时验收。下方旧记录保留为设计阶段历史证据；本轮完整验收与限制见文末。
 
 当前优先级（2026-09-09用户调整）：历史获取低优先级，已有能力/数据保留，缺失获取功能和专门研究回填暂缓。P5完整历史评估不阻塞P6；由用户安排后优先实时运行验证。阈值可来自用户额外分析，效果仍待验证。下方历史交接中的“先P5再P6”以本条及文末新记录为准。
 
@@ -18,15 +18,15 @@
 
 本轮验证完成：15份Markdown的链接、围栏、计划头部、行尾空白、过时接口名与设计13节结构检查为0错误；时间证据55条及2个块头对照一致。Sol只读审查提出的scope水位、归桶端点、闭合条件、时间修订和恢复参数已纳入。src和根package.json仍不存在；本轮没有运行应用测试或启动监控。
 
-| 阶段 | 状态 | 已验证证据 | 下一步 |
-|---|---|---|---|
-| P0 工程与能力 | passed | P0 最终修正后 188 测试通过；历史 RPC 证据保留 | 沿用既有合同 |
-| P1 记录与恢复 | passed | 273 测试；5 个实时分钟边界；重启/旧段重扫退出 0；[验收](../artifacts/p1/acceptance.json) | 已完成；沿用 P1 合同 |
-| P2 协议与观测 | passed | 344 测试；650 条真实历史事件 ethers 对照；[验收](../artifacts/p2/acceptance.json) | 用户安排后进入 P3 Task 3.1 |
-| P3 分钟热度 | passed | 453 测试；603 笔历史 Swap、29 闭合分钟；[验收](../artifacts/p3/acceptance.json) | 用户安排 P4 Task 4.1 |
-| P4 告警 | passed | 539测试；本机通知、修订撤回；[验收](reviews/2026-09-09-p4-acceptance.md) | 用户安排后优先P6；P5按需暂缓 |
-| P5 历史验证 | in_progress；部分能力待完成，历史incomplete | Review修复与实际检查见文末；36组结果保留 | 原生导出/长窗口性能待完成；不新增采集，不阻塞P6 |
-| P6 实时验收 | pending | 未启动服务 | 基于P0–P4由用户安排；不以P5完整评估为前置 |
+| 阶段          | 状态                                        | 已验证证据                                                                               | 下一步                                          |
+| ------------- | ------------------------------------------- | ---------------------------------------------------------------------------------------- | ----------------------------------------------- |
+| P0 工程与能力 | passed                                      | P0 最终修正后 188 测试通过；历史 RPC 证据保留                                            | 沿用既有合同                                    |
+| P1 记录与恢复 | passed                                      | 273 测试；5 个实时分钟边界；重启/旧段重扫退出 0；[验收](../artifacts/p1/acceptance.json) | 已完成；沿用 P1 合同                            |
+| P2 协议与观测 | passed                                      | 344 测试；650 条真实历史事件 ethers 对照；[验收](../artifacts/p2/acceptance.json)        | 用户安排后进入 P3 Task 3.1                      |
+| P3 分钟热度   | passed                                      | 453 测试；603 笔历史 Swap、29 闭合分钟；[验收](../artifacts/p3/acceptance.json)          | 用户安排 P4 Task 4.1                            |
+| P4 告警       | passed                                      | 539测试；本机通知、修订撤回；[验收](reviews/2026-09-09-p4-acceptance.md)                 | 用户安排后优先P6；P5按需暂缓                    |
+| P5 历史验证   | in_progress；部分能力待完成，历史incomplete | Review修复与实际检查见文末；36组结果保留                                                 | 原生导出/长窗口性能待完成；不新增采集，不阻塞P6 |
+| P6 实时验收   | in_progress                                 | 740 测试；30 分钟实录通过；第二次长观察 687 样本 p95 2.841s                              | 实测已按用户要求停止，长时延迟门槛与成本汇总待完成 |
 
 ## 状态规则
 
@@ -34,7 +34,7 @@
 
 每个阶段结束在此追加一条记录：
 
-~~~text
+```text
 阶段与时间：
 最终范围与修改文件：
 执行的命令和结果：
@@ -42,7 +42,7 @@
 仍不具备的能力及对功能的影响：
 配置/ABI/依赖版本变更：
 下一窗口的计划文件与起始任务：
-~~~
+```
 
 当前目录没有 .git；本次没有提交。后续若建立版本控制，应先确认目录状态并保留已有研究与技能文件，不为完成某个提交步骤而重置或清理工作区。
 
@@ -52,15 +52,15 @@
 
 ### 命令与结果
 
-| 命令 | 结果 | 证据 |
-|---|---|---|
-| `pnpm typecheck` | 退出 0 | [verification.json](../artifacts/p0/verification.json) |
-| `pnpm test --reporter=json --outputFile=artifacts/p0/tests.json` | 退出 0；13 suites、60 passed、0 failed、0 skipped | [tests.json](../artifacts/p0/tests.json) |
-| `pnpm build` | 退出 0；构建后 `node dist/src/cli.js --help` 也退出 0 | 同上 verification；README 命令 |
-| `pnpm lp probe --config config/robinhood.json --out artifacts/p0/capabilities.json` | 退出 0；必需能力及当前身份通过 | [capabilities.json](../artifacts/p0/capabilities.json)、[身份](../artifacts/p0/identity-evidence.json) |
-| `pnpm lp capture --config config/robinhood.json --last-blocks 300 --out artifacts/p0/raw` | 退出 0；类别及全部配置 V4 种子通过 | [最终 manifest](../artifacts/p0/raw/2026-09-08T06-10-51-129Z/manifest.json) |
-| `node node_modules/vitest/vitest.mjs run tests/integration/p0-fixtures.test.ts --reporter=json --outputFile=artifacts/p0/fixture-tests.json` | 退出 0；最终新增 fixture 的哈希及 ethers 独立解码通过 | [fixture-tests.json](../artifacts/p0/fixture-tests.json) |
-| `node scripts/p0-acceptance.mjs artifacts/p0/raw/2026-09-08T06-10-51-129Z/manifest.json` | 退出 0；全部门槛 true | [acceptance.json](../artifacts/p0/acceptance.json) |
+| 命令                                                                                                                                         | 结果                                                  | 证据                                                                                                   |
+| -------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------ |
+| `pnpm typecheck`                                                                                                                             | 退出 0                                                | [verification.json](../artifacts/p0/verification.json)                                                 |
+| `pnpm test --reporter=json --outputFile=artifacts/p0/tests.json`                                                                             | 退出 0；13 suites、60 passed、0 failed、0 skipped     | [tests.json](../artifacts/p0/tests.json)                                                               |
+| `pnpm build`                                                                                                                                 | 退出 0；构建后 `node dist/src/cli.js --help` 也退出 0 | 同上 verification；README 命令                                                                         |
+| `pnpm lp probe --config config/robinhood.json --out artifacts/p0/capabilities.json`                                                          | 退出 0；必需能力及当前身份通过                        | [capabilities.json](../artifacts/p0/capabilities.json)、[身份](../artifacts/p0/identity-evidence.json) |
+| `pnpm lp capture --config config/robinhood.json --last-blocks 300 --out artifacts/p0/raw`                                                    | 退出 0；类别及全部配置 V4 种子通过                    | [最终 manifest](../artifacts/p0/raw/2026-09-08T06-10-51-129Z/manifest.json)                            |
+| `node node_modules/vitest/vitest.mjs run tests/integration/p0-fixtures.test.ts --reporter=json --outputFile=artifacts/p0/fixture-tests.json` | 退出 0；最终新增 fixture 的哈希及 ethers 独立解码通过 | [fixture-tests.json](../artifacts/p0/fixture-tests.json)                                               |
+| `node scripts/p0-acceptance.mjs artifacts/p0/raw/2026-09-08T06-10-51-129Z/manifest.json`                                                     | 退出 0；全部门槛 true                                 | [acceptance.json](../artifacts/p0/acceptance.json)                                                     |
 
 每个 probe/capture 的请求证据在相应时间戳目录内；报告只使用 `robinhood-public` alias。本机没有 RH_* 配置，因此本轮显式设置官方公共端点，不代表任何用户付费端点已验收。没有自动默认主网配置。
 
@@ -199,3 +199,24 @@ P4完成后停止。P5/P6保持pending；下一窗口由用户明确安排后再
 P5 仍有未完成能力：原生 P1 未保存 replay.input，且没有从库和运行摘要生成快照的导出入口；1M/500k 事后标签尚未实现；minute-close 尚未增量化。本机 480 分钟单池单日志/分钟样本耗时 80347 ms，未验证多天完整队列性能；[性能基准](../artifacts/p5/benchmark.json)。对应计划复选框已退回，不再以代码检查通过代替整阶段通过。
 
 默认实时信号配置、链配置、ABI、依赖与 lockfile 未改。无新 RPC、交易、通知、部署或 P6；保留此前六份文档修改，验收时位于 codex/p5-history，尚未提交；后续提交合并状态以 Git 记录为准。下一阶段仍由用户安排；P5 完整历史评估不是 P6 前置。
+
+## P6 中期实施记录 — 2026-09-10
+
+当前为工程检查与冒烟通过、最终构建实测按用户要求停止；不是 P6 最终通过记录。运行配置、RPC 预算/计量、状态/延迟报告、协作式停止恢复、SQLite 备份、本机通知、离线故障与验收绑定已实现。主要代码在 `src/rpc/{client,rate-limit,request-meter}.ts`、`src/ingest/follow.ts`、`src/ops/{recorder,runtime-telemetry,report,status,shutdown}.ts`、`src/metrics/coverage.ts` 和 `src/storage/raw-store.ts`；配置与操作入口见[运行手册](runbook.md)。
+
+当前验证：最终冻结前全套 74 文件 / 740 测试、typecheck、lint、build 均退出 0；离线结果保存于 `artifacts/p6/offline-verification.json`。独立复审及逐项处理见[原始复审](reviews/2026-09-10-p6-independent-review.md)和[处理记录](reviews/2026-09-10-p6-review-response.md)。离线覆盖包含真实 transport 预算、30 秒断线/429/损坏响应、范围完整性、重组、raw 后停止恢复、通知失败恢复及验收报告与数据库绑定。证据见 [offline-verification.json](../artifacts/p6/offline-verification.json) 和 [tests.json](../artifacts/p6/tests.json)；fixture 通过不等于对应实链事件已发生。
+
+30 分钟冒烟运行 1,832,495 ms，通过；177 个完整证据到 outbox 样本的 p95 为 1,592 ms。两个未接受尝试由当前已验证 accepted coverage 对整个失败区间的无缺口覆盖解释，失败记录与计数未删除。见 [smoke-report.json](../artifacts/p6/smoke-report.json)、[构建指纹](../artifacts/p6/smoke-code.json)和[资源采样](../artifacts/p6/smoke-resources.jsonl)。固定链头 10/20/100 块比较已完成，但均为空日志，只证明该次范围/成本结果，不能外推活跃负载吞吐。
+
+首次 2 小时尝试运行 1,144,254 ms 后退出 1，未通过。对复制数据库和 6 条真实返回日志的回归复现了同一 raw identity 的 `rawBlockTimestamp` 非零值变为 `0x0` 导致原始 payload 冲突。修复仅从规范重复比较中排除这个不可信 RPC 附注，保留首个 raw 行及每个批次的精确原始附注；规范字段变化仍失败。另将 discovery/operations 原始保存异常分类为脱敏的 `raw-save`，保持退出 1、无假 RPC 重试及清理边界。见[失败报告](../artifacts/p6/soak-failed-1-report.json)、[失败构建指纹](../artifacts/p6/soak-failed-1-code.json)、[失败资源记录](../artifacts/p6/soak-failed-1-resources.jsonl)与[真实日志复制库回归](../artifacts/p6/save-raw-reproduction/fix-verification.json)。
+
+第二次长观察完整运行 7,203,375 ms、正常退出，但唯一失败门槛是 687 个本机处理样本的 p95 2,841 ms；共 8,624 次调用、64 次 retry。证据归档为 `artifacts/p6/soak-failed-2-*` 与 `data/p6-soak-failed-2.sqlite`。最终源码 profile 的 warm 路径在中期副本为 455.72 ms、较大终端副本为 722.43 ms，cold 路径 3.716/5.177 秒仍保留；见 `artifacts/p6/performance/coverage-final-*.json`。
+
+最终构建 2 小时验收于 UTC 13:35:48.773 / Asia/Shanghai 21:35:48 启动，runId `2026-09-10T13-35-48-773Z-6ec4891a`，recorder PID 5500，main session 44586，sampler session 47225，原计划窗口到 23:35:48；实际约 56 分钟时按用户要求中断。main session 退出 1，sampler 退出 0，已确认 follow 进程不存在。没有生成 finalized manifest；末次 healthy 只是历史采样，不能作终端通过结论。保存 data/p6-soak-user-stopped.sqlite 与 artifacts/p6/soak-user-stopped-report.json。
+
+限制：未安装永久服务、未交易或操作钱包；缺失供应商 billing units/费率时货币成本保持 null。尚无合格原生 portable 输入与跨流修订顺序，不声称 recorded-observed 回放对照通过；阈值效果、独立全链覆盖与 LP 净收益仍未验证。保留首次失败和所有 raw/批次证据，重试不能替代或抹去失败记录。
+
+
+## P6 提交与本地合并检查 — 2026-09-10
+
+用户要求 commit、merge。当前 P6 实现重新完成离线检查：74 文件 / 740 测试通过、0 失败、0 pending；typecheck、lint、build 均退出 0。重新构建的全部 98 个清单文件与最近实测前冻结指纹相同。证据见 [commit-verification.json](../artifacts/p6/commit-verification.json)。这次仅做离线集成检查，实链观察保持停止；P6 长时验收状态仍为 in_progress，后期处理耗时问题未标为解决。大型数据库、原始运行输入与未实施优化草稿留在本机，保留政策见 [P6 证据说明](../artifacts/p6/README.md)。

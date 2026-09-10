@@ -12,7 +12,7 @@
 
 基于已验收P0–P4，用户明确安排后可进入本阶段；不要求先完成P5历史采集、完整样本或阈值评估。历史获取已有能力保留，缺少的先不增加。实时启动、动态发现、恢复与完整性所需的既有扫描继续保留。
 
-优先验证实时采集、热度统计与本机提醒稳定性。阈值可以采用用户额外分析提供的候选配置，注明口径和来源；运行验收通过不代表阈值效果通过。P5回放入口已于2026-09-10实现；实录缺少配置快照或修订顺序时仍不得声称对照已通过，保存完整输入供后续使用。本计划仍为pending，本次文档调整不启动运行。
+优先验证实时采集、热度统计与本机提醒稳定性。阈值可以采用用户额外分析提供的候选配置，注明口径和来源；运行验收通过不代表阈值效果通过。P5回放入口已于2026-09-10实现；实录缺少配置快照或修订顺序时仍不得声称对照已通过，保存完整输入供后续使用。当前 P6 为 in_progress：代码、离线故障及 30 分钟冒烟已通过；第二次长观察仅因本机处理 p95 2,841 ms 未达标，最终构建实测于 2026-09-10 21:35:48（Asia/Shanghai）启动，约 56 分钟后按用户要求停止，后续实测与进一步优化暂停。
 
 ## Global Constraints
 
@@ -26,7 +26,7 @@
 - 每窗口只实现指定阶段；更新状态和证据，未验收不得勾成完成。
 - 默认只提供 RPC、本机增量同步；无付费索引后台依赖，记录调用用量与预算。
 
-所有相对代码路径以 E:/lp-monitor 为根。架构依据：[设计](../specs/2026-09-08-robinhood-rwa-monitor-design.md)。下列代码块定义接口、关键算法和测试输入；实际实现需围绕这些合同补齐本阶段列出的行为，不是把文档片段原样拼成生产程序。命令均为未来阶段实现后的验收入口，本次写计划没有运行它们。
+所有相对代码路径以 E:/lp-monitor 为根。架构依据：[设计](../specs/2026-09-08-robinhood-rwa-monitor-design.md)。下列代码块定义接口、关键算法和测试输入；实际实现需围绕这些合同补齐本阶段列出的行为，不是把文档片段原样拼成生产程序。实现及已运行部分以下方复选框和 2026-09-10 中期记录为准；未完成的长观察及其验收项仍保持未勾选。
 
 ## Task 6.1：运行配置、健康与预算
 
@@ -34,20 +34,20 @@
 
 **Interfaces:** healthSnapshot(): HealthSnapshot，包含head/scanned/raw/projected水位、lastHeadAt、gap、queueDepth、RPC各方法次数、写入/处理延迟、dbBytes。状态与行情信息分列。
 
-- [ ] 测试SIGINT在raw已写/事务未提交时退出，再启动按cursor补处理，不重复业务决策；所有待写flush后关闭SQLite。
-- [ ] 配置先限定AMC三类观察池及动态关联发现。扩展NVDA/HIMS前核验registry/decimals并先补其池登记。
-- [ ] 初始maxRpcRps=5、maxConcurrentRpc=2、maxBackfillRpcRps=1；根据P0实测方法额度调整。额度不足即报告head lag，禁止静默越限或自动购买套餐。
-- [ ] 累计RPC元素数；分别统计logs、端点anchor、分钟边界和metadata calls。正常流程无逐块Header/receipt/state请求；实测2秒批次的调用预算与分钟边界额外成本。
-- [ ] 使用默认2秒轮询记录主动等待、RPC耗时、处理耗时及headLagBlocks/headLagSeconds趋势；短暂积压需能消化。把10/20/100块范围的有界比较纳入首次30分钟观察，不额外启动长期进程，不把1,000块小样本平均速率当作长期保证。
-- [ ] 默认HTTP轮询；StateView/历史state/trace/WS不作门槛。日志时间为0时启用分钟索引，并测每分钟新增anchor请求，不能退回全块头循环。
-- [ ] 运行 pnpm exec vitest run tests/integration/shutdown.test.ts tests/unit/budget.test.ts。
+- [x] 测试SIGINT在raw已写/事务未提交时退出，再启动按cursor补处理，不重复业务决策；所有待写flush后关闭SQLite。
+- [x] 配置先限定AMC三类观察池及动态关联发现。扩展NVDA/HIMS前核验registry/decimals并先补其池登记。
+- [x] 初始maxRpcRps=5、maxConcurrentRpc=2、maxBackfillRpcRps=1；根据P0实测方法额度调整。额度不足即报告head lag，禁止静默越限或自动购买套餐。
+- [x] 累计RPC元素数；分别统计logs、端点anchor、分钟边界和metadata calls。正常流程无逐块Header/receipt/state请求；实测2秒批次的调用预算与分钟边界额外成本。
+- [x] 使用默认2秒轮询记录主动等待、RPC耗时、处理耗时及headLagBlocks/headLagSeconds趋势；短暂积压需能消化。把10/20/100块范围的有界比较纳入首次30分钟观察，不额外启动长期进程，不把1,000块小样本平均速率当作长期保证。
+- [x] 默认HTTP轮询；StateView/历史state/trace/WS不作门槛。日志时间为0时启用分钟索引，并测每分钟新增anchor请求，不能退回全块头循环。
+- [x] 运行 pnpm exec vitest run tests/integration/shutdown.test.ts tests/unit/budget.test.ts。
 
 ## Task 6.2：有界实录与故障演练
 
 **Files:** 创建 tests/integration/live-faults.test.ts、artifacts/p6/soak-report.json、artifacts/p6/cost-report.json；修改docs/runbook.md。
 
-- [ ] 使用fixture transport模拟断线30秒、429、重复块、分叉、JSON响应损坏、DB写失败；所有数据完整性不变量仍成立，失败通知仅在状态变化时产生。
-- [ ] 先运行 pnpm lp follow --config config/runtime.local.json --duration 30m --notify local。没有热门行情也能通过运行验收，不为展示强制降低阈值制造热点。
+- [x] 使用fixture transport模拟断线30秒、429、重复块、分叉、JSON响应损坏、DB写失败；所有数据完整性不变量仍成立，失败通知仅在状态变化时产生。
+- [x] 先运行 pnpm lp follow --config config/runtime.local.json --duration 30m --notify local。没有热门行情也能通过运行验收，不为展示强制降低阈值制造热点。
 - [ ] 核验无密钥日志、本机告警字段、RPC用量、磁盘增长与同级重复率；核心完整性无误后再运行 --duration 2h。
 - [ ] 目标：无未解释的范围缺口/重复决策；在所测负载下，从完整范围及必要分钟时间可用到outbox落盘的本地p95处理延迟<=2秒。另报链头到获取、RPC回填与最终显示总延迟；这个2秒不是保证链上成交后2秒一定可见。
 - [ ] 若无法追上链速，报告每秒新块数、RPC瓶颈、事件数与CPU/磁盘占用；优先调批次/过滤/cache。只有测出瓶颈再考虑Subsquid等框架或更高RPC额度。
@@ -57,11 +57,20 @@
 
 **Files:** 修改docs/runbook.md、docs/implementation-status.md、START_HERE.md。
 
-- [ ] 运行手册给出已实现的probe、follow、status、停止、恢复、既有范围补采及升级前备份的准确命令；backfill/replay仅在实际具备对应入口时列为可运行命令，否则明确标未实现/暂缓，不为补全手册新增功能。数据备份用SQLite backup API，不只复制运行中的主文件漏掉WAL。
+- [x] 运行手册给出已实现的probe、follow、status、停止、恢复、既有范围补采及升级前备份的准确命令；backfill/replay仅在实际具备对应入口时列为可运行命令，否则明确标未实现/暂缓，不为补全手册新增功能。数据备份用SQLite backup API，不只复制运行中的主文件漏掉WAL。
 - [ ] 成本报告列首轮回填和稳态每小时的方法调用/字节/磁盘增长，按用户RPC供应商实际费率换算；费率未给只报用量。
-- [ ] 给出停止后补历史不会向用户重发所有旧机会的模式说明；实时数据质量恢复、告警撤回与新热点仍正常发送。
+- [x] 给出停止后补历史不会向用户重发所有旧机会的模式说明；实时数据质量恢复、告警撤回与新热点仍正常发送。
 - [ ] 写最终能力表：V3/V4发现/Swap/liquidity动作、历史logs/分钟时间、估值覆盖、通知、分钟历史评估与未具备部分。
 - [ ] 更新状态为实际验收结果，保留所有raw与报告。阶段结束停止有界进程，不自动安装开机启动或安排循环任务。
+
+## 2026-09-10 中期验收记录
+
+- 代码检查：最终冻结前 74 文件 / 740 测试及 typecheck、lint、build 均退出 0；[离线验收](../../../artifacts/p6/offline-verification.json)。原始独立复审保持不变，逐项处理见[复审处理记录](../../reviews/2026-09-10-p6-review-response.md)。
+- 冒烟：1,832,495 ms，177 样本，本机处理 p95 1,592 ms；[报告](../../../artifacts/p6/smoke-report.json)。10/20/100 块比较已保存，但均为零日志，不证明活跃负载吞吐。
+- 首次长观察：1,144,254 ms 后失败；附加 raw 时间戳漂移已由 6 条真实日志复制库回归复现并修复，原始失败证据保留。
+- 第二次长观察：完整运行 7,203,375 ms，687 样本本机处理 p95 2,841 ms，唯一失败门槛为 p95；8,624 次调用、64 次 retry，失败证据归档保留。
+- 最终构建 2 小时验收：runId `2026-09-10T13-35-48-773Z-6ec4891a` 于 UTC 13:35:48.773 / 本地 21:35:48 启动，原计划窗口到 23:35:48；约 56 分钟后按用户要求停止，未生成 finalized manifest。follow 与 sampler 均已结束，记录 artifacts/p6/soak-user-stopped-report.json、快照 data/p6-soak-user-stopped.sqlite。所有长观察和最终交接复选框保持未勾选。
+- 成本费率缺失保持 null；原生 portable replay 对照、阈值效果和 LP 收益仍不作通过结论。详细代码、证据与限制见[实施记录](../../implementation-status.md#p6-中期实施记录--2026-09-10)。
 
 ## 完成标准与后续扩展
 

@@ -1,0 +1,427 @@
+{
+  "version": 2,
+  "assessedAtMs": 1789037313844,
+  "status": "passed",
+  "issues": [],
+  "runId": "2026-09-10T10-17-21-077Z-46e19a36",
+  "sourceAlias": "robinhood-public",
+  "chainId": 4663,
+  "manifestPath": "E:\\lp-monitor\\artifacts\\p6\\runs\\2026-09-10T10-17-21-077Z-46e19a36\\manifest.json",
+  "databasePath": "E:\\lp-monitor\\data\\p6-smoke.sqlite",
+  "snapshotDatabasePath": "E:\\lp-monitor\\data\\p6-smoke.sqlite",
+  "manifestSha256": "e7af9c64cdb3dbb2b030755e9b737f5e5fa66c602ca79da5d52bfd1729104cac",
+  "requestedObservationMs": 1800000,
+  "elapsedMs": 1832495,
+  "identity": {
+    "status": "unverified",
+    "requiredPassed": true,
+    "currentIdentityStatus": "verified",
+    "anchor": {
+      "number": "59325348",
+      "hash": "0x431304d47f8a4e3f4513a3783f94708cf3ef58c5085d7b25f8f5d133c2407974",
+      "timestampSec": 1789035451
+    },
+    "chainId": {
+      "expected": 4663,
+      "observed": 4663,
+      "status": "verified"
+    },
+    "contracts": {
+      "v3Factory": {
+        "address": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0xec72b1abd1f2faee020cfea9c646bd8994f9fb389054f6e574f103a895091739"
+      },
+      "v4Manager": {
+        "address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0xbd3881180b547f5fe817545743cfb4343e96b1bc6640dcd70c106b0066e95626"
+      },
+      "stateView": {
+        "address": "0xf3334192d15450cdd385c8b70e03f9a6bd9e673b",
+        "required": false,
+        "status": "verified",
+        "codeHash": "0x7d9c591e0956fd89d98feb4ffcfe8bf1f7a62bd485edd979fa21d104b49878a6"
+      }
+    },
+    "tokens": {
+      "AMC": {
+        "address": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0x6c1fdd40002dcb440c7fff6a84171404d279ccb057803b65826f7546acd65630",
+        "decimals": 18
+      },
+      "USDG": {
+        "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0x864cc9ad53b338b82da1f7cab85ab0b3d5c8861acb422b6fec63cf36234f36a6",
+        "decimals": 6
+      }
+    },
+    "v3Pools": [
+      {
+        "address": "0xaa34fea710a1a737840329051d81d3b0b7c564d5",
+        "required": true,
+        "status": "verified",
+        "codeHash": "0x7285522ff427b6fc303fbae5a66111cf1d30e003c568dd13f5c6522e4b5ce04c",
+        "factory": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+        "token0": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+        "token1": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+        "fee": 3000
+      }
+    ],
+    "stateViewPoolManager": {
+      "required": false,
+      "status": "verified",
+      "observed": "0x8366a39cc670b4001a1121b8f6a443a643e40951"
+    },
+    "deployments": {
+      "v3Factory": {
+        "address": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
+        "status": "unverified",
+        "firstCodeBlock": null,
+        "candidateBlock": "9070",
+        "candidateChecked": true,
+        "reason": "RPC request-failed"
+      },
+      "v4Manager": {
+        "address": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "status": "unverified",
+        "firstCodeBlock": null,
+        "candidateBlock": "9070",
+        "candidateChecked": true,
+        "reason": "RPC request-failed"
+      }
+    },
+    "rpcCallsUsed": 21
+  },
+  "scopeId": "scope-v1-35390279971785ca8a886c9b089db51aa7082edf8a72fa8dbf068469338e6244",
+  "acceptedTip": {
+    "number": "59342890",
+    "hash": "0x3153817bf5fc1296b6005b79f1ae2e727f044cc4a4712bb1851b412665ddb278",
+    "timestampSec": 1789037220
+  },
+  "binding": {
+    "finalizedRun": true,
+    "checkedBatches": 180,
+    "invalidatedAcceptedBatches": [],
+    "operationCursor": {
+      "block_number": 59342890,
+      "block_hash": "0x3153817bf5fc1296b6005b79f1ae2e727f044cc4a4712bb1851b412665ddb278",
+      "timestamp_sec": 1789037220
+    },
+    "discoveryCursor": {
+      "block_number": 59325348,
+      "block_hash": "0x431304d47f8a4e3f4513a3783f94708cf3ef58c5085d7b25f8f5d133c2407974",
+      "timestamp_sec": 1789035451
+    },
+    "runPayloadSha256": "a6daa55dd2cdc53f0e992684cd9bddcd5d992dbfb08ffc7bd3bfa9f89897e41e"
+  },
+  "acceptedBatches": 178,
+  "unacceptedBatches": 2,
+  "recoveredUnacceptedBatches": [
+    {
+      "batchId": "02bf1e08bc67f869a4ab0871c65f3fd790ac53040e7ed5d9a518bec751cf524a",
+      "fromBlock": "59337977",
+      "toBlock": "59338071",
+      "reason": "entire failed operation interval is covered by current validated accepted ranges",
+      "coverageValidator": "acceptedMetricRanges",
+      "coveredRanges": [
+        {
+          "fromBlock": "59337977",
+          "toBlock": "59338071"
+        }
+      ],
+      "terminalTip": {
+        "number": "59342890",
+        "hash": "0x3153817bf5fc1296b6005b79f1ae2e727f044cc4a4712bb1851b412665ddb278",
+        "timestampSec": 1789037220
+      },
+      "failedEndAnchor": {
+        "blockNumber": "59338071",
+        "hash": "0x0290986bfd476379d678f127f6511d23215216188ec35a1108f70104c75ab68e",
+        "relation": "not-observed",
+        "currentStoredAnchors": [],
+        "authoritative": false
+      },
+      "reorgExplanation": null
+    },
+    {
+      "batchId": "4da15cf4855386eb4d3a7a5d1d32b2e97bf10d4b948bd3fcbe2cf34b962187b6",
+      "fromBlock": "59342487",
+      "toBlock": "59342577",
+      "reason": "entire failed operation interval is covered by current validated accepted ranges",
+      "coverageValidator": "acceptedMetricRanges",
+      "coveredRanges": [
+        {
+          "fromBlock": "59342487",
+          "toBlock": "59342577"
+        }
+      ],
+      "terminalTip": {
+        "number": "59342890",
+        "hash": "0x3153817bf5fc1296b6005b79f1ae2e727f044cc4a4712bb1851b412665ddb278",
+        "timestampSec": 1789037220
+      },
+      "failedEndAnchor": {
+        "blockNumber": "59342577",
+        "hash": "0x916ba484189df94296e6a4cbe714fb44e8148e2ad4fbd80ce08e250d0f0c53cd",
+        "relation": "not-observed",
+        "currentStoredAnchors": [],
+        "authoritative": false
+      },
+      "reorgExplanation": null
+    }
+  ],
+  "unresolvedUnacceptedBatches": [],
+  "activeRawLogs": 236,
+  "integrity": [
+    {
+      "integrity_check": "ok"
+    }
+  ],
+  "unresolvedActiveTimes": 0,
+  "rawDuplicateIdentities": 0,
+  "outboxDuplicateRevisions": 0,
+  "notifications": [],
+  "sentOutbox": [],
+  "failuresRecorded": [
+    "incomplete-range",
+    "incomplete-range"
+  ],
+  "follow": {
+    "acceptedRanges": 177,
+    "reorgs": 0,
+    "warmupResets": 0,
+    "failures": [
+      "incomplete-range",
+      "incomplete-range"
+    ],
+    "complete": true
+  },
+  "alertDelivery": {
+    "sent": 0,
+    "failed": 0,
+    "status": "ok"
+  },
+  "measured": {
+    "version": 1,
+    "sourceAlias": "robinhood-public",
+    "startedAtMs": 1789035441091,
+    "finishedAtMs": 1789037273579,
+    "latency": {
+      "localProcessingMs": {
+        "sampleSize": 177,
+        "p95": 1592
+      },
+      "rpcAcquisitionMs": {
+        "sampleSize": 177,
+        "p95": 20911
+      },
+      "totalDeliveryMs": {
+        "sampleSize": 0,
+        "p95": null
+      },
+      "acquisitionToNotifyAttemptMs": {
+        "sampleSize": 177,
+        "p95": 21468
+      },
+      "headLagBlocks": {
+        "sampleSize": 179,
+        "p95": 0
+      },
+      "headLagSeconds": {
+        "sampleSize": 179,
+        "p95": 0
+      }
+    },
+    "usage": {
+      "startup": {
+        "durationMs": 29509,
+        "calls": 21,
+        "responseBytes": 155242,
+        "billingUnits": null,
+        "methods": {
+          "eth_getBlockByNumber": 4,
+          "eth_chainId": 1,
+          "eth_getCode": 8,
+          "eth_call": 8
+        },
+        "callsPerHour": 2561.9302585651835,
+        "responseBytesPerHour": 18939008.43810363
+      },
+      "backfill": {
+        "durationMs": 200734,
+        "calls": 201,
+        "responseBytes": 376916,
+        "billingUnits": null,
+        "methods": {
+          "eth_getBlockByNumber": 148,
+          "eth_chainId": 0,
+          "eth_getCode": 0,
+          "eth_call": 0,
+          "eth_getLogs": 53
+        },
+        "callsPerHour": 3604.7704922932835,
+        "responseBytesPerHour": 6759679.974493609
+      },
+      "steady": {
+        "durationMs": 1602241,
+        "calls": 2081,
+        "responseBytes": 2170153,
+        "billingUnits": null,
+        "methods": {
+          "eth_getBlockByNumber": 866,
+          "eth_chainId": 0,
+          "eth_getCode": 0,
+          "eth_call": 0,
+          "eth_getLogs": 1215
+        },
+        "callsPerHour": 4675.701096152202,
+        "responseBytesPerHour": 4876014.781796247
+      }
+    },
+    "disk": {
+      "startup": {
+        "durationMs": 29509,
+        "growthBytes": 20632,
+        "growthBytesPerHour": 2517035.480700803
+      },
+      "backfill": {
+        "durationMs": 200734,
+        "growthBytes": 23296256,
+        "growthBytesPerHour": 417799284.6254247
+      },
+      "steady": {
+        "durationMs": 1602241,
+        "growthBytes": 70125968,
+        "growthBytesPerHour": 157562741.68492755
+      }
+    },
+    "monetaryCost": null
+  },
+  "meter": {
+    "calls": 2303,
+    "retries": 15,
+    "responseBytes": 2702311,
+    "methods": {
+      "eth_getBlockByNumber": 1018,
+      "eth_chainId": 1,
+      "eth_getCode": 8,
+      "eth_call": 8,
+      "eth_getLogs": 1268
+    },
+    "methodMetrics": {
+      "eth_getBlockByNumber": {
+        "calls": 1018,
+        "retries": 4,
+        "responseBytes": 2234921,
+        "rpcMs": 295747
+      },
+      "eth_chainId": {
+        "calls": 1,
+        "retries": 0,
+        "responseBytes": 43,
+        "rpcMs": 249
+      },
+      "eth_getCode": {
+        "calls": 8,
+        "retries": 0,
+        "responseBytes": 149755,
+        "rpcMs": 2074
+      },
+      "eth_call": {
+        "calls": 8,
+        "retries": 0,
+        "responseBytes": 831,
+        "rpcMs": 1996
+      },
+      "eth_getLogs": {
+        "calls": 1268,
+        "retries": 11,
+        "responseBytes": 316761,
+        "rpcMs": 374747
+      }
+    },
+    "purposes": {
+      "endpoint-anchor": {
+        "calls": 546,
+        "retries": 3,
+        "responseBytes": 1196508,
+        "rpcMs": 165815
+      },
+      "metadata": {
+        "calls": 17,
+        "retries": 0,
+        "responseBytes": 150629,
+        "rpcMs": 4319
+      },
+      "logs": {
+        "calls": 1268,
+        "retries": 11,
+        "responseBytes": 316761,
+        "rpcMs": 374747
+      },
+      "minute-boundary": {
+        "calls": 472,
+        "retries": 1,
+        "responseBytes": 1038413,
+        "rpcMs": 129932
+      }
+    },
+    "elements": {
+      "total": 2303,
+      "byPurpose": {
+        "endpoint-anchor": 546,
+        "metadata": 17,
+        "logs": 1268,
+        "minute-boundary": 472
+      }
+    },
+    "queueDepth": 0,
+    "peakQueueDepth": 1,
+    "activeRpc": 0,
+    "peakConcurrentRpc": 1,
+    "timings": {
+      "queueWaitMs": 610654,
+      "rpcMs": 674813,
+      "processingMs": 193809
+    },
+    "elapsedMs": 1832495,
+    "maxCalls": 45000,
+    "peakOneSecond": 5,
+    "backfillPeakOneSecond": 1,
+    "averageRpcPerSecond": 1.2567564986534752,
+    "billingUnits": null
+  },
+  "counts": {
+    "endpointAnchors": 542,
+    "minuteAnchors": 472,
+    "warmupAnchors": 0,
+    "discoveryBatches": 1,
+    "operationBatches": 177
+  },
+  "memory": {
+    "rss": 531468288,
+    "heapTotal": 251342848,
+    "heapUsed": 141672976,
+    "external": 3912736,
+    "arrayBuffers": 147013
+  },
+  "cpuUsageMicros": {
+    "user": 223187000,
+    "system": 12453000
+  },
+  "realReorgObserved": false,
+  "replayComparison": "incomplete: native portable input export/cross-stream revision order unavailable",
+  "limits": [
+    "RPC filter completeness is not independent full-chain verification.",
+    "Threshold efficacy and LP net returns remain unverified.",
+    "No genuine alert delivery sample is invented when the market produces no alert.",
+    "Unknown provider billing units/rates remain null; only measured use is reported."
+  ]
+}

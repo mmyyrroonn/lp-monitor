@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "status": "interrupted-by-user",
+  "runId": "2026-09-10T13-35-48-773Z-6ec4891a",
+  "startedAt": "2026-09-10T13:35:48.773Z",
+  "stopConfirmedBy": "main exec session exited 1 after Ctrl-C; no matching follow process; resource sampler exited 0",
+  "recordedAt": "2026-09-10T14:35:47.626Z",
+  "lastObservedAliveAt": "2026-09-10T14:31:23.7227148Z",
+  "observedDurationMs": 3334949,
+  "finalizedManifestPresent": false,
+  "acceptedAsTwoHourPass": false,
+  "finalP95Ms": null,
+  "lastHealthSample": {
+    "sampledAtMs": 1789050669162,
+    "runtimeState": "healthy",
+    "scanned": "59476038",
+    "head": "59476259",
+    "headGapBlocks": "221",
+    "processingLatencyMs": 2431,
+    "outboxPending": 0
+  },
+  "databaseSnapshot": "data/p6-soak-user-stopped.sqlite",
+  "rawEvidenceDirectory": "artifacts/p6/runs/2026-09-10T13-35-48-773Z-6ec4891a",
+  "draftOptimizationTest": ".superpowers/sdd/p6/canonical-decode-cache.test.ts.draft",
+  "limitations": [
+    "Stopped at user request before two hours; no finalized run manifest or complete acceptance report was produced.",
+    "Health is the last live sample, not a terminal healthy state or final acceptance proof.",
+    "Later processing samples exceeded 2000 ms. Earlier 40-minute observations do not establish a full-run p95 pass.",
+    "Original source and frozen dist retain their earlier 740-test verification; the incomplete ABI-cache test draft is outside test discovery. No further tests, builds or RPC were run after stopping the already in-flight test."
+  ]
+}

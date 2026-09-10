@@ -1,0 +1,53 @@
+{
+  "sourceAlias": "robinhood-public",
+  "head": {
+    "number": "59319301",
+    "hash": "0x0c159a787d3c22b5b107c2cb40d18a4ed7a1d3ca447002b6c72d2d3c1b50bf53",
+    "timestampSec": 1789034840
+  },
+  "meter": {
+    "calls": 1,
+    "retries": 0,
+    "responseBytes": 1822,
+    "methods": {
+      "eth_getBlockByNumber": 1
+    },
+    "methodMetrics": {
+      "eth_getBlockByNumber": {
+        "calls": 1,
+        "retries": 0,
+        "responseBytes": 1822,
+        "rpcMs": 463
+      }
+    },
+    "purposes": {
+      "endpoint-anchor": {
+        "calls": 1,
+        "retries": 0,
+        "responseBytes": 1822,
+        "rpcMs": 463
+      }
+    },
+    "elements": {
+      "total": 1,
+      "byPurpose": {
+        "endpoint-anchor": 1
+      }
+    },
+    "queueDepth": 0,
+    "peakQueueDepth": 1,
+    "activeRpc": 0,
+    "peakConcurrentRpc": 1,
+    "timings": {
+      "queueWaitMs": 0,
+      "rpcMs": 463,
+      "processingMs": 0
+    },
+    "elapsedMs": 465,
+    "maxCalls": 5,
+    "peakOneSecond": 1,
+    "averageRpcPerSecond": 2.150537634408602,
+    "billingUnits": null
+  },
+  "atMs": 1789034842365
+}
