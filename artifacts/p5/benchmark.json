@@ -1,0 +1,56 @@
+{
+  "measuredAt": "2026-09-10T08:26:26.271Z",
+  "command": "node artifacts/p5/benchmark.mjs ",
+  "node": "v24.5.0",
+  "platform": "win32",
+  "arch": "x64",
+  "cpu": "AMD Ryzen 9 9950X 16-Core Processor            ",
+  "sample": "synthetic single batch, one pool, one swap per minute, no warmup run",
+  "mode": "minute-close",
+  "includes": "read, integrity, projection, metrics, signals and result hashes; excludes fixture generation and output report writes",
+  "sizes": [
+    60,
+    120,
+    240,
+    480
+  ],
+  "samples": [
+    {
+      "minutes": 60,
+      "elapsedMs": 740,
+      "frames": 60,
+      "msPerFrame": 12.33,
+      "status": "complete",
+      "codeHash": "772f3144aa324257026b0506b36759e58d6922dec593532b8940a2d3939e9884",
+      "businessHash": "d5351597365f9cb21134cb2ecb2a76880baae7d16c505dec214a2620ccc4e9f6"
+    },
+    {
+      "minutes": 120,
+      "elapsedMs": 2939,
+      "frames": 120,
+      "msPerFrame": 24.49,
+      "status": "complete",
+      "codeHash": "772f3144aa324257026b0506b36759e58d6922dec593532b8940a2d3939e9884",
+      "businessHash": "4a4d94db9d22f8b9d430776a5244d42c640e15a02451b95af874240d52527706"
+    },
+    {
+      "minutes": 240,
+      "elapsedMs": 14890,
+      "frames": 240,
+      "msPerFrame": 62.04,
+      "status": "complete",
+      "codeHash": "772f3144aa324257026b0506b36759e58d6922dec593532b8940a2d3939e9884",
+      "businessHash": "47be372b1d7c6bfd77986e395a3493f387541c9244e8ee8bc0c610c45d2c10a7"
+    },
+    {
+      "minutes": 480,
+      "elapsedMs": 80347,
+      "frames": 480,
+      "msPerFrame": 167.39,
+      "status": "complete",
+      "codeHash": "772f3144aa324257026b0506b36759e58d6922dec593532b8940a2d3939e9884",
+      "businessHash": "2cff6b55be715240f0971a1c0dd477b94dceebbbf89855c79b3db4e506a2f6dd"
+    }
+  ],
+  "limitation": "Single-run timings on this machine; not a latency guarantee or evidence for multi-day cohort feasibility."
+}

@@ -12,6 +12,9 @@ import { CHAIN_ID } from './domain/chain.js';
 import { encodeJson } from './domain/json.js';
 
 const help = `Robinhood read-only P0/P1/P2/P3/P4 CLI
+  pnpm lp replay --manifest PATH --rules PATH --mode minute-close|recorded-observed --out PATH
+  pnpm lp study --cases config/history.cases.json --grid config/signals.grid.json --out artifacts/p5
+  P5: offline, uses existing raw only; insufficient history exits 4.
   pnpm lp metrics --db data/recorder.sqlite --rwa AMC --window 5m
   pnpm lp rank --db data/recorder.sqlite --sort volume5mClosed
   P3: offline; --out PATH saves JSON, --save persists derived cache.
@@ -61,6 +64,14 @@ export async function runCli(
   ) {
     const { runMetricsCli } = await import('./ops/metrics-cli.js');
     return runMetricsCli(args, options.environment ?? process.env);
+  }
+  if (args[0] === 'replay' && !args.includes('--help')) {
+    const { runReplayCli } = await import('./replay/cli.js');
+    return runReplayCli(args);
+  }
+  if (args[0] === 'study' && !args.includes('--help') && !args.includes('-h')) {
+    const { runStudyCli } = await import('./replay/study-cli.js');
+    return runStudyCli(args);
   }
   let parsed: ReturnType<typeof parseArgs>;
   try {

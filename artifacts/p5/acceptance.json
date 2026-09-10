@@ -1,0 +1,139 @@
+{
+  "version": "p5-acceptance-v1",
+  "status": "passed",
+  "scope": "offline engineering acceptance only",
+  "generatedAtUtc": "2026-09-10T08:26:26.044Z",
+  "artifactDirectory": "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9",
+  "commands": [
+    {
+      "command": [
+        "node",
+        "dist/cli.js",
+        "replay",
+        "--help"
+      ],
+      "exitCode": 0,
+      "evidencePath": "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/built-help.json",
+      "stdoutSha256": "a34680b30a826c1bae967a043ec69f09d02bff46b011366076966267e007a3fd",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": [
+        "node",
+        "dist/cli.js",
+        "replay",
+        "--manifest",
+        "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/manifest.json",
+        "--rules",
+        "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/rules.json",
+        "--mode",
+        "recorded-observed",
+        "--out",
+        "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/recorded"
+      ],
+      "exitCode": 0,
+      "evidencePath": "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/built-recorded.json",
+      "stdoutSha256": "3befc76de1561857f21e10be6c9a2f54167ab063bda6ba03b16bca5f14e250e8",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": [
+        "node",
+        "dist/cli.js",
+        "replay",
+        "--manifest",
+        "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/recorded/ee45f05d43d3-7dbc67f4-1cab-455b-b3af-7e22f5aefd75/manifest.json",
+        "--rules",
+        "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/rules.json",
+        "--mode",
+        "recorded-observed",
+        "--out",
+        "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/rerun"
+      ],
+      "exitCode": 0,
+      "evidencePath": "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/built-portable-rerun.json",
+      "stdoutSha256": "f86b323b4c5789680c7811d18fe0566b9adf8a7d04ae212dcac2916fa2440267",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": [
+        "node",
+        "dist/cli.js",
+        "replay",
+        "--manifest",
+        "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/manifest.json",
+        "--rules",
+        "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/rules.json",
+        "--mode",
+        "minute-close",
+        "--out",
+        "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/minute"
+      ],
+      "exitCode": 0,
+      "evidencePath": "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/built-minute-close.json",
+      "stdoutSha256": "7613e5482b0265d31f5bc00511b2c7eb5a533ad255a12e53eb0dd110cd1c8d4c",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "command": [
+        "node",
+        "dist/cli.js",
+        "replay",
+        "--manifest",
+        "artifacts/p1/live/runs/2026-09-08T10-39-47-703Z-89fdf338/manifest.json",
+        "--rules",
+        "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/rules.json",
+        "--mode",
+        "minute-close",
+        "--out",
+        "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/native"
+      ],
+      "exitCode": 4,
+      "evidencePath": "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/built-native-incomplete.json",
+      "stdoutSha256": "6c7a4388dfa41982f4ca45f9bd2a97c3df531cc13b5964399597faa4ed3d7b0e",
+      "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    }
+  ],
+  "synthetic": {
+    "source": "standalone deterministic generated fixture; not market evidence",
+    "manifestPath": "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/manifest.json",
+    "manifestSha256": "c60f7163eed6d1028194cf3c079ebae62e472a186d74ba09eec6109ea6a998c8",
+    "rawSha256": "0b0fcce1b6b58a691a19c986f9142dd3941ba94d89075b28cc3113bbddee8734",
+    "recordedFrames": 1,
+    "observedAtMs": 4860000,
+    "businessHash": "32bec707f8e78f4718315699156da8c001a997b43efc7450b0f12b13ed03ee6c",
+    "portableBusinessHash": "32bec707f8e78f4718315699156da8c001a997b43efc7450b0f12b13ed03ee6c",
+    "minuteFrames": 79,
+    "candidateAlerts": 1,
+    "codeHash": "772f3144aa324257026b0506b36759e58d6922dec593532b8940a2d3939e9884",
+    "abiHash": "26f4b357df2a38e843c7603df5990568cf8f0d50781e0e066bd5ba23e27065c8",
+    "implementationFiles": 65
+  },
+  "native": {
+    "manifestPath": "artifacts/p1/live/runs/2026-09-08T10-39-47-703Z-89fdf338/manifest.json",
+    "manifestSha256": "ff7c6c79c7227fa63e4da6d88024094b82271cc846457d714ee995876c528d83",
+    "status": "incomplete",
+    "issueCodes": [
+      "artifact-hash-unavailable",
+      "revision-history-unavailable",
+      "input-snapshot-missing",
+      "minute-boundary-missing",
+      "no-evaluable-frames"
+    ],
+    "reportPath": "artifacts/p5/raw/acceptance-1f505b46-b0b5-44ff-8bba-186d8f5933d9/native/ee45f05d43d3-a0cc4e60-5745-4cf4-a58d-e1fd59a18868/report.json"
+  },
+  "study": {
+    "status": "incomplete",
+    "rows": 36,
+    "source": "artifacts/p5/results.json",
+    "sha256": "77ed48957d0e59712374ad865fc5b865cb9ab6e703e52b0034cba00536bb213c",
+    "studyRunId": "study-cae69a3c-7878-4e1a-9c69-173071468fba"
+  },
+  "limitations": [
+    "No RPC, capture, mutable source database, notification sink, or live deployment is used.",
+    "Synthetic equivalence is engineering evidence, not historical live-arrival equivalence.",
+    "Native P1 lacks original historical snapshots and cannot establish historical strategy effectiveness.",
+    "Study history may remain incomplete despite engineering acceptance.",
+    "This script does not claim a unit-test count or LP returns."
+  ]
+}

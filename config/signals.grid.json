@@ -1,0 +1,28 @@
+{
+  "version": "p5-grid-v1",
+  "absolute1mUsd": [
+    10000,
+    20000,
+    50000
+  ],
+  "multiples": [
+    3,
+    5,
+    10
+  ],
+  "confirm5mUsd": [
+    50000,
+    100000
+  ],
+  "confirmationBars": [
+    1,
+    2
+  ],
+  "cooldownSeconds": 300,
+  "reactionDelaysMinutes": [
+    0,
+    1,
+    5
+  ],
+  "maxCombinations": 36
+}

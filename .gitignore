@@ -34,3 +34,8 @@ artifacts/**/requests.jsonl.*
 
 # Local agent task briefs and review scratch.
 .superpowers/
+
+# P5 immutable local replay/study payloads; retain latest compact reports and acceptance.
+/artifacts/p5/raw/
+/artifacts/p5/replay-native-check/
+/artifacts/p5/study-*/

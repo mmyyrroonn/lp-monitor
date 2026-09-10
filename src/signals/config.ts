@@ -19,7 +19,9 @@ export const signalConfigSchema = z
       .default({ enabled: true, threshold: 3600, version: '1' }),
     candidate: relative,
     confirmRelative: relative,
-    confirmConsecutive: rule,
+    confirmConsecutive: rule
+      .extend({ buckets: z.union([z.literal(1), z.literal(2)]).optional() })
+      .strict(),
     cooldown: z
       .object({ enabled: z.boolean(), threshold: z.number().int().nonnegative().safe(), version })
       .strict(),

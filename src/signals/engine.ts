@@ -68,11 +68,17 @@ function evaluateOne(
     next.lastAlertSec = null;
   }
   const partial = input.metrics.partialCurrent;
-  const currentMinute = Math.floor(input.watermarkSec / 60) * 60;
+  const currentMinute =
+    Math.floor(input.watermarkSec / 60) * 60 - (input.evaluationMode === 'minute-close' ? 60 : 0);
   const minute =
-    partial && partial.minuteStartSec === currentMinute && partial.status === 'partial'
-      ? partial
-      : null;
+    input.evaluationMode === 'minute-close'
+      ? input.metrics.recentClosed1m?.minuteStartSec === currentMinute &&
+        input.metrics.recentClosed1m.status === 'closed'
+        ? input.metrics.recentClosed1m
+        : null
+      : partial && partial.minuteStartSec === currentMinute && partial.status === 'partial'
+        ? partial
+        : null;
   const five = input.metrics.natural5mBuckets
     .filter(
       (b) =>
@@ -115,12 +121,13 @@ function evaluateOne(
   const consecutive =
     config.confirmConsecutive.enabled &&
     latest !== null &&
-    prevFive !== undefined &&
-    prevFive.endSec === latest.startSec &&
     latest.usdMicros !== null &&
-    prevFive.usdMicros !== null &&
     latest.usdMicros >= BigInt(config.confirmConsecutive.threshold) &&
-    prevFive.usdMicros >= BigInt(config.confirmConsecutive.threshold);
+    (config.confirmConsecutive.buckets === 1 ||
+      (prevFive !== undefined &&
+        prevFive.endSec === latest.startSec &&
+        prevFive.usdMicros !== null &&
+        prevFive.usdMicros >= BigInt(config.confirmConsecutive.threshold)));
   const matches: RuleMatch[] = [
     {
       ruleId: 'candidate',
@@ -155,8 +162,12 @@ function evaluateOne(
       reason: !config.confirmConsecutive.enabled
         ? 'disabled'
         : consecutive
-          ? 'two-consecutive-natural5m'
-          : 'no-two-adjacent-above-threshold',
+          ? config.confirmConsecutive.buckets === 1
+            ? 'one-complete-natural5m'
+            : 'two-consecutive-natural5m'
+          : config.confirmConsecutive.buckets === 1
+            ? 'no-complete-above-threshold'
+            : 'no-two-adjacent-above-threshold',
     },
   ];
   const noAlert = (): SignalDecision => ({ nextSnapshot: next, alertDraft: null, matches });

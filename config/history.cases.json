@@ -1,0 +1,168 @@
+{
+  "version": "p5-cases-v1",
+  "chainId": 4663,
+  "warmupMinutes": 60,
+  "resultMinutes": 180,
+  "manifests": [
+    "../artifacts/p1/live/runs/2026-09-08T10-10-37-716Z-a18cd161/manifest.json",
+    "../artifacts/p1/live/runs/2026-09-08T10-29-50-452Z-0327f833/manifest.json",
+    "../artifacts/p1/live/runs/2026-09-08T10-37-00-932Z-b5217f30/manifest.json",
+    "../artifacts/p1/live/runs/2026-09-08T10-39-47-703Z-89fdf338/manifest.json"
+  ],
+  "cohort": {
+    "id": "amc-birth-cohort",
+    "rwaAddress": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+    "startUtc": "2026-09-03T00:00:00Z",
+    "endUtc": "2026-09-07T00:00:00Z",
+    "registryVersion": "2026-09-08.p0-seeds",
+    "mode": "retrospective-cohort"
+  },
+  "cases": [
+    {
+      "id": "amc-meme-launch",
+      "tokenAddress": "0xe0514a254b465c8c804f77230fb1059f84b21e18",
+      "rwaAddress": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+      "startUtc": "2026-09-04T03:25:00Z",
+      "endUtc": "2026-09-04T09:25:00Z",
+      "creationTimestampSec": 1788492482,
+      "identitySource": {
+        "path": "research/short-window-study/gmgn/20260907T151554Z/AMC_MEME_info.json",
+        "sha256": "bbef01ed8ea90c5075bfeb768624459a49b5521ebb344196daa41934d054b90d",
+        "kind": "saved-third-party-identity",
+        "chainCreationVerified": false
+      },
+      "pool": {
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x0fbd4be474e818682b8586522600b6113204a75dedd60d89376e0fb7bcaa5adf"
+      },
+      "use": "named-regression"
+    },
+    {
+      "id": "meme-early-and-reheat",
+      "tokenAddress": "0x385f4f8ae47651ce5f58f5265395a669f8281e18",
+      "rwaAddress": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+      "startUtc": "2026-09-03T20:30:00Z",
+      "endUtc": "2026-09-04T12:00:00Z",
+      "creationTimestampSec": 1788467405,
+      "identitySource": {
+        "path": "research/short-window-study/gmgn/20260907T151416Z/MEME_info.json",
+        "sha256": "28ec5087b99417cd64f010e6c3f7ca03247c39bc86bffa61070921f8c636d83d",
+        "kind": "saved-third-party-identity",
+        "chainCreationVerified": false
+      },
+      "pool": {
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x27ccf0a6d1ee74840220715bcca7d3b01e0d33aa30d0259b47ae1585b3f4c071"
+      },
+      "use": "named-regression"
+    },
+    {
+      "id": "meme-large-reheat",
+      "tokenAddress": "0x385f4f8ae47651ce5f58f5265395a669f8281e18",
+      "rwaAddress": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+      "startUtc": "2026-09-06T17:00:00Z",
+      "endUtc": "2026-09-06T23:00:00Z",
+      "creationTimestampSec": 1788467405,
+      "identitySource": {
+        "path": "research/short-window-study/gmgn/20260907T151416Z/MEME_info.json",
+        "sha256": "28ec5087b99417cd64f010e6c3f7ca03247c39bc86bffa61070921f8c636d83d",
+        "kind": "saved-third-party-identity",
+        "chainCreationVerified": false
+      },
+      "pool": {
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x27ccf0a6d1ee74840220715bcca7d3b01e0d33aa30d0259b47ae1585b3f4c071"
+      },
+      "use": "named-regression"
+    },
+    {
+      "id": "06_cyberbeer",
+      "tokenAddress": "0x829b217ad539ccc53b18e53c63873333650e60f9",
+      "rwaAddress": "0xd0601ce157db5bdc3162bbac2a2c8af5320d9eec",
+      "startUtc": "2026-09-07T04:21:00Z",
+      "endUtc": "2026-09-07T10:21:00Z",
+      "creationTimestampSec": 1788754889,
+      "identitySource": {
+        "path": "research/short-window-study/gmgn/20260907T141339Z/06_cyberbeer_info.json",
+        "sha256": "8dcfaa069e99f804b0c188d0f0be81bb61f88f4023d62d008e992ba9fb213876",
+        "kind": "saved-third-party-identity",
+        "chainCreationVerified": false
+      },
+      "pool": {
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0xcde4b40c6e4b50a875a0dc4c87294d698bc080d668e280eb1e19a8468d931bac"
+      },
+      "use": "named-regression"
+    },
+    {
+      "id": "03_WET",
+      "tokenAddress": "0x0983bc94981416467db224320de2c00e7dc61e18",
+      "rwaAddress": "0xccee82fe024c36fa15e1005ede3e9e4787e23d09",
+      "startUtc": "2026-09-06T20:38:00Z",
+      "endUtc": "2026-09-07T02:38:00Z",
+      "creationTimestampSec": 1788727089,
+      "identitySource": {
+        "path": "research/short-window-study/gmgn/20260907T141339Z/03_WET_info.json",
+        "sha256": "b2cdcbf6feabc6aa4153f56250b3907b14cd877b87e8ac9478e6a37972e63bd7",
+        "kind": "saved-third-party-identity",
+        "chainCreationVerified": false
+      },
+      "pool": {
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0x0efd0e837a018b47e3bff65acd530610974ea9017b5bb1dfa9d6e75894de4a0b"
+      },
+      "use": "named-regression"
+    },
+    {
+      "id": "04_MUSCLE",
+      "tokenAddress": "0x8da60c5b8cbd6134b7933fb9804d72f11e161e18",
+      "rwaAddress": "0xccee82fe024c36fa15e1005ede3e9e4787e23d09",
+      "startUtc": "2026-09-06T20:35:00Z",
+      "endUtc": "2026-09-07T02:35:00Z",
+      "creationTimestampSec": 1788726936,
+      "identitySource": {
+        "path": "research/short-window-study/gmgn/20260907T141339Z/04_MUSCLE_info.json",
+        "sha256": "7ac7f45938c15cdae6269af8d38b0ab9e57876f8e81e736349f3cca5febfeeb2",
+        "kind": "saved-third-party-identity",
+        "chainCreationVerified": false
+      },
+      "pool": {
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0xb3cb8c9a5c250a472d06fac65ea8bc2621fe2085991896c76baa8f3424807c9e"
+      },
+      "use": "named-regression"
+    },
+    {
+      "id": "08_GEEG",
+      "tokenAddress": "0xcfdabd5618a4606cae27a8d27b051553d7191e18",
+      "rwaAddress": "0x58ffe4a942d3885baa22d7520691f611ef09e7aa",
+      "startUtc": "2026-09-04T02:29:00Z",
+      "endUtc": "2026-09-04T08:29:00Z",
+      "creationTimestampSec": 1788488953,
+      "identitySource": {
+        "path": "research/short-window-study/gmgn/20260907T141339Z/08_GEEG_info.json",
+        "sha256": "f62ae84aa35431d616a4823895ee9f2dec7718897da9958e23786ca2096fef68",
+        "kind": "saved-third-party-identity",
+        "chainCreationVerified": false
+      },
+      "pool": {
+        "protocol": "v4",
+        "manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
+        "poolId": "0xa0ff5023e310863f0ce32b4ff8725dc597423aecdabfed1bfee23ce56414297e"
+      },
+      "use": "named-regression"
+    }
+  ],
+  "notes": [
+    "Only existing raw manifests are used; no acquisition or backfill.",
+    "Saved identity and creation observations select named regression cases; they do not establish chain log coverage or a complete birth cohort.",
+    "GMGN token-level USD estimates and chain pool-specific activity use different scopes and valuation clocks; no forced numerical alignment."
+  ],
+  "quoteAddress": "0x5fc5360d0400a0fd4f2af552add042d716f1d168"
+}

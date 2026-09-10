@@ -11,6 +11,7 @@ export type SignalPresentation = {
   liquidityNote?: string;
 };
 export type SignalInput = {
+  evaluationMode?: 'minute-close';
   pool: PoolRef;
   batchId: string;
   endAnchor: BlockAnchor;

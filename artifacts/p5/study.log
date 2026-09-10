@@ -1,0 +1,11 @@
+Already up to date
+Done in 215ms using pnpm v11.19.0
+$ tsx src/cli.ts "study" "--cases" "config/history.cases.json" "--grid" "config/signals.grid.json" "--out" "artifacts/p5"
+{
+  "studyRunId": "study-cae69a3c-7878-4e1a-9c69-173071468fba",
+  "status": "incomplete",
+  "combinations": 36,
+  "outputDirectory": "E:\\lp-monitor\\artifacts\\p5\\study-cae69a3c-7878-4e1a-9c69-173071468fba",
+  "coverageVerified": false
+}
+[ELIFECYCLE] Command failed with exit code 4.

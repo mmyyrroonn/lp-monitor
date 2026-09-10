@@ -1,6 +1,6 @@
 # Robinhood RWA 短时 LP 机会监控：实施入口
 
-更新：2026-09-09。**P0–P4 已通过验收；539个测试通过。** P4提供候选、热度确认、翻倍升级、降温、再热、修订撤回和本机通知。[P4验收](docs/reviews/2026-09-09-p4-acceptance.md)、[独立审查](docs/reviews/2026-09-09-p4-review.md)、[实施状态](docs/implementation-status.md)、[运行说明](README.md)。
+更新：2026-09-10。**P0–P4 已验收；P5本轮修复检查通过，649项测试通过；完整历史评估incomplete，原生P1导出与长窗口性能未完成。** P4提供候选、热度确认、翻倍升级、降温、再热、修订撤回和本机通知。[P4验收](docs/reviews/2026-09-09-p4-acceptance.md)、[独立审查](docs/reviews/2026-09-09-p4-review.md)、[实施状态](docs/implementation-status.md)、[运行说明](README.md)。
 
 目标：解析Robinhood Chain的Uniswap V3/V4链上事件，观察有限RWA集合，发现关联新Meme、老Meme再次放量，以及具体RWA/USDG池的短时成交热度。首版以热度排名与提醒为核心，不做精确LP模拟。
 
@@ -18,8 +18,10 @@
 | P2 | passed；解码、最近观测、离线投影重建 | [P2](docs/superpowers/plans/2026-09-08-p2-protocol-state.md) |
 | P3 | passed；分钟成交、计价降级、基线与排名 | [P3](docs/superpowers/plans/2026-09-08-p3-metrics.md) |
 | P4 | passed；状态机、outbox、修订撤回、本机通知 | [P4](docs/superpowers/plans/2026-09-08-p4-alerts.md) |
-| P5 | pending；历史回放、完整样本、阈值评估 | [P5](docs/superpowers/plans/2026-09-08-p5-history.md) |
+| P5 | 修复检查通过；历史incomplete；原生导出与长窗口性能待完成；完整评估不阻塞P6 | [P5](docs/superpowers/plans/2026-09-08-p5-history.md) |
 | P6 | pending；有时限实时观察、故障演练、运行手册 | [P6](docs/superpowers/plans/2026-09-08-p6-live-validation.md) |
+
+P5交付与限制见 [验收说明](docs/reviews/2026-09-10-p5-acceptance.md) 和 [研究结果](artifacts/p5/report.md)。
 
 ## 本机入口
 
@@ -38,7 +40,11 @@ P4历史输入有603笔Swap、34笔未计价、29个闭合分钟、1827个登记
 
 ## 下一窗口交接
 
-由用户明确安排后进入P5 Task5.1，P4完成后停止。继承新鲜P2 sourceHash与P3覆盖/时间/报价合同，从buildMetricsReport读取数据。不能把metric_windows裸缓存当当前数据。
+2026-09-09用户调整优先级：历史数据获取有现成能力就保留，缺少的暂时不补；不为完成P5新增历史采集或专门补齐研究样本。优先实时采集、热度统计与本机提醒稳定性，P5完整历史评估不再作为P6前置条件。2026-09-10用户要求实现P5，已实现可移植输入的replay/study；独立Review修复状态见验收说明，历史效果incomplete，P6仍为pending。
+
+下一窗口由用户明确安排后可进入P6 Task6.1。阈值可由用户额外分析提供，核对对象、单位、窗口、条件和来源后作为候选配置；未经独立评估仍标效果未验证。已有历史与后续实时录制数据保留待用，缺样本如实披露。实时启动、池发现、恢复及数据完整性所需的既有扫描继续保留。
+
+继承新鲜P2 sourceHash与P3覆盖/时间/报价合同，从buildMetricsReport读取数据。不能把metric_windows裸缓存当当前数据。
 
 历史minute-close决策必须避免前视；实录按保存批次与observedAt复算，同一evaluateSignal核心可复用。保留两条确认规则独立命中结果、未计价/缺口/零基线、池出生前历史限制与右截尾。不得将离线回放接入实时通知sink。
 

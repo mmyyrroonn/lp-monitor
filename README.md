@@ -1,6 +1,8 @@
-# Robinhood RWA monitor — P0/P1/P2/P3/P4
+# Robinhood RWA monitor — P0/P1/P2/P3/P4/P5
 
 只读数据采集与有界运行工具。阶段入口为 [START_HERE.md](START_HERE.md)，验收状态见 [实施状态](docs/implementation-status.md)。P1 记录器的实现与验收进度见阶段状态；P3 提供离线分钟热度，P4 提供显式启用的本机提醒。
+
+2026-09-09优先级调整：历史获取已有能力/数据保留，缺少的暂时不补，不为P5专门新增采集或补齐研究样本。优先实时采集、热度和本机提醒稳定性，P5完整历史评估不阻塞P6；具体阶段仍由用户安排。阈值可由用户额外分析提供，效果未经独立评估仍标未验证。既有启动、池发现、恢复所需扫描继续保留；2026-09-10用户安排恢复P5，replay/study入口已实现；完整历史效果评估仍取决于覆盖证据。
 
 ## 环境与命令
 
@@ -30,7 +32,7 @@ pnpm lp capture --config config/robinhood.json --last-blocks 300 --out artifacts
 
 每次 capture 新建时间戳目录，保存查询过滤条件、原始日志、稀疏 anchors、分钟边界、请求证据、SHA256 与 manifest。默认有界补采配置种子的历史 Initialize；补采区间和实时主区间分别标记。V4 Manager 级协议样本可能含观察名单以外的池，不能把样本总量当作 AMC 成交量。
 
-退出码：0 成功；1 内部错误；2 配置错误；3 必需 RPC/身份失败；4 数据不完整。pnpm 遇到子程序非零码时自身可能返回 1，终端会显示子程序原始退出码；需要原始码时使用 `node --import tsx src/cli.ts ...` 或构建后的 `node dist/cli.js ...`。
+退出码：0 成功；1 内部错误；2 配置错误；3 必需 RPC/身份失败；4 数据不完整（replay/study 等离线命令）或 RPC 预算耗尽（在线命令）。replay/study 不发 RPC，因此其退出码 4 只表示数据不完整。pnpm 遇到子程序非零码时自身可能返回 1，终端会显示子程序原始退出码；需要原始码时使用 `node --import tsx src/cli.ts ...` 或构建后的 `node dist/cli.js ...`。
 
 ## 数据与预算
 
@@ -150,5 +152,30 @@ follow 默认只记录；--notify local 才在每个完整范围事务中更新P
 
 每条提醒有稳定id、递增revision和provisional标记。历史事件/时间/覆盖/登记修正会撤回受影响证据并重评当前状态；修复范围尚未恢复时也能保留撤回。文件写完而sent未落盘时允许重试，JSONL消费者应以id/revision识别重复。旧pending修订被新修订替代后跳过；普通backfill/synthetic不会投递到live sink。重启先重检历史锚点，再恢复旧live队列，旧历史不会自动提升为实时提醒。
 
-P4每批仍全scope重建及复核；轮询配置保持2秒，但处理/写盘开销、实际通知延迟与长期运行尚未实链验证。P5/P6仍待用户安排。离线验收保留源库，历史样本提醒数为0；合成示例包含状态序列，liquidity-watch仅用于格式展示。详见[P4验收](docs/reviews/2026-09-09-p4-acceptance.md)与[示例](artifacts/p4/rendered.txt)。
+P4每批仍全scope重建及复核；轮询配置保持2秒，但处理/写盘开销、实际通知延迟与长期运行尚未实链验证。P5代码实现与历史不足情况见下方；P6仍待用户安排。离线验收保留源库，历史样本提醒数为0；合成示例包含状态序列，liquidity-watch仅用于格式展示。详见[P4验收](docs/reviews/2026-09-09-p4-acceptance.md)与[示例](artifacts/p4/rendered.txt)。
 新池出生分钟只要已扫前缀完整，即可用已观测partial量判断绝对候选；出生前及不完整出生分钟仍不进入历史基线。该P4适配使metric version变为p3-v3，未修改链配置或ABI。
+
+## P5 离线回放与热度研究
+
+```powershell
+pnpm lp replay --manifest artifacts/p1/live/runs/2026-09-08T10-39-47-703Z-89fdf338/manifest.json --rules config/signals.initial.json --mode minute-close --out artifacts/p5/raw/replay
+pnpm lp study --cases config/history.cases.json --grid config/signals.grid.json --out artifacts/p5
+```
+
+上面的原生 P1 replay 命令目前用于诊断输入缺失：缺少 replay.input 时返回 incomplete、退出 4、产生 0 个评估帧，不能作为成功回放验收。仓库尚无从 P1 数据库和运行摘要导出该快照的入口；须先提供带历史快照的可移植 manifest，且不能用今天的数据伪造过去可用性。
+
+这两个入口完全离线，不读取 RPC 环境变量。数据不完整退出 4，并保留具体缺失原因；这与内部执行错误退出 1 分开。已有 P1 录制文件缺少原始配置快照或精确修订顺序时，不能宣称实录等价或历史评估完整。七个固定案例的地址与窗口取自已保存的身份/创建证据，不查询当前排行榜。
+
+回放使用 P1 完整性校验、P2 投影、P3 计价和 P4 信号核心。minute-close 只在分钟结束后评估，结果排除整个触发分钟；recorded-observed 保留原批次和 observedAt。确定性测试比较原批次的 live 业务结果和可移植输出再次回放的 businessHash；reader 目前整份读取 JSON，没有流式读取能力。当前 minute-close 支持连续完整批次；存在重叠修订但缺少可重建顺序时标 incomplete。
+
+完整可移植 manifest 在 P1 manifest 上增加 `replay: { version: 1, input: ... }`。input 包含 configVersion、usdg、assets（version/rwa）、metadata、availableAtSec 与 cohortMode（as-of 或 retrospective-cohort）；全部历史读取只能来自这些保存的输入。每个 batches 条目应提供相对 path 与 SHA256；缺少 SHA256 会标 artifact-hash-unavailable。原生 P1 摘要中的 manifestHash、logs 条数、fromBlock/toBlock、completeness 也与原始产物交叉校验。缺少 path 时沿用 P1 v1 的 range-<id>.json / discovery-<id>.json 命名约定。不能为通过检查而把今天的数据标为过去已知；现登记表用于历史选样时使用 retrospective-cohort。输出目录内的 manifest.json、原始文件、规则、分钟索引和实现快照均保留，可再次作为 replay 输入。
+
+`study` 默认只读四份已有录制，比较全部 36 组参数、0/1/5 分钟额外延迟；命名回归案例、完整出生队列与既有池再热分列。1m 候选的相对倍数沿用 P4，5m 使用 1/2 根绝对量确认，研究网格关闭并行相对 5m 确认以免绕过根数要求。实时 signals.initial.json 未改。confirmConsecutive.buckets 省略仍代表两根；显式填写 2 虽行为相同，但配置 hash 改变，会重置状态并改变 episodeId/alertId。探索/验证分开汇总，并报告同币跨期及 leave-one-token-out 敏感性；无足够证据不选冠军。
+
+delay=0 从发报所在分钟起算，可能包括发报前最多 59 秒；主分析使用 delay=1/5，delay=0 仅作敏感性对照。通知数按唯一告警身份统计，修订另行保留。区间外告警不进入探索/验证统计。
+
+minute-close 每分钟仍全量投影和计价，长窗口性能尚未验收。可用 `pnpm build` 后运行 `node artifacts/p5/benchmark.mjs` 复测；[基准结果](artifacts/p5/benchmark.json)和[P5 验收限制](docs/reviews/2026-09-10-p5-acceptance.md)记录实际规模，不能把支持 10080 分钟覆盖上限理解为可实用运行四天完整队列。
+
+本次默认 study 没有产生告警、结局窗口或首告警对比记录，这些非空路径目前仅由合成 fixture 覆盖。
+
+结果见 [P5 报告](artifacts/p5/report.md) 与 [JSON](artifacts/p5/results.json)。每次实验另存独立 study-* 目录，根目录两份文件只表示最近一次运行。大体积可重建输出保留在本机并忽略 Git；[验收说明](docs/reviews/2026-09-10-p5-acceptance.md)记录本轮修复检查、未完成能力和真实历史限制。P5 代码实现不代表阈值有效、LP 净收益可行或 P6 实时运行已完成。

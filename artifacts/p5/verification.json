@@ -1,0 +1,46 @@
+{
+  "version": "p5-verification-v2",
+  "date": "2026-09-10",
+  "branch": "codex/p5-history",
+  "base": "ebd998b125d76e9a0c63ffb7e0ced0f1503531dd",
+  "phaseStatus": "in_progress",
+  "codeStatus": "partial",
+  "codeChecksStatus": "passed",
+  "reviewFixStatus": "passed-with-documented-limitations",
+  "historyStatus": "incomplete",
+  "tests": {
+    "passed": 649,
+    "failed": 0,
+    "pending": 0,
+    "total": 649
+  },
+  "checks": {
+    "typecheck": 0,
+    "lint": 0,
+    "tests": 0,
+    "build": 0
+  },
+  "business": {
+    "studyExitCode": 4,
+    "expectedStudyExit": 4,
+    "acceptanceExitCode": 0
+  },
+  "benchmarkExitCode": 0,
+  "benchmark": "artifacts/p5/benchmark.json",
+  "codeHash": "772f3144aa324257026b0506b36759e58d6922dec593532b8940a2d3939e9884",
+  "diffCheckExit": 0,
+  "newFileWhitespaceFailures": [],
+  "unchangedRuntimeConfigAbiDependencyExit": 0,
+  "acceptance": "artifacts/p5/acceptance.json",
+  "study": "artifacts/p5/results.json",
+  "independentReview": "docs/reviews/2026-09-10-p5-review-fixes.md",
+  "remainingWork": [
+    "I2(b): native P1 replay.input exporter",
+    "I3: incremental minute-close replay and multi-day performance",
+    "M4: post-hoc 1M/500k episode labels",
+    "Complete real historical coverage and threshold evaluation"
+  ],
+  "committed": false,
+  "newRpcAcquisition": false,
+  "p6Started": false
+}
