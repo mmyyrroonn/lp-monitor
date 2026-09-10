@@ -14,6 +14,7 @@ import {
 import type { RecordedRangeBatch } from '../storage/manifest.js';
 import { rawLogKey } from '../storage/manifest.js';
 import { AlertOutbox, type CaptureMode } from '../notify/outbox.js';
+import { formatObservedLiquidity } from '../notify/format.js';
 import { encodeSignalState, decodeSignalState } from './codec.js';
 import { signalConfigVersion, type SignalConfig } from './config.js';
 import { evaluateSignal, initialSignalSnapshot } from './engine.js';
@@ -26,11 +27,13 @@ export interface SignalBatchContext {
 }
 type EvidenceItem = {
   block: bigint;
+  poolIds?: string[];
   digest: string;
   complete?: boolean;
   ordinaryCurrentPartial?: boolean;
 };
 type Evidence = {
+  branchRecovery?: boolean;
   events: Record<string, EvidenceItem>;
   closedCoverage: Record<string, EvidenceItem>;
   pools: Record<string, EvidenceItem>;
@@ -43,6 +46,21 @@ type Cursor = {
   block_hash: string;
   evidence_json: string;
 };
+const outboxes = new WeakMap<Database.Database, AlertOutbox>();
+const statements = new WeakMap<Database.Database, Map<string, Database.Statement>>();
+function statement(db: Database.Database, sql: string): Database.Statement {
+  let cache = statements.get(db);
+  if (!cache) {
+    cache = new Map();
+    statements.set(db, cache);
+  }
+  let prepared = cache.get(sql);
+  if (!prepared) {
+    prepared = db.prepare(sql);
+    cache.set(sql, prepared);
+  }
+  return prepared;
+}
 const digest = (v: unknown) => createHash('sha256').update(encodeJson(v)).digest('hex');
 
 /** Called within the same outer transaction as range acceptance and P2 rebuild.
@@ -57,15 +75,17 @@ export function commitSignalDecision(
   if (!db.inTransaction) throw new Error('Signal decisions require an enclosing transaction');
   const draft = decision.alertDraft;
   if (!draft) return null;
-  const prior = db
-    .prepare('select revision,payload_json from alerts where scope_id=? and id=?')
-    .get(scopeId, draft.id) as { revision: number; payload_json: string } | undefined;
+  const prior = statement(
+    db,
+    'select revision,payload_json from alerts where scope_id=? and id=?',
+  ).get(scopeId, draft.id) as { revision: number; payload_json: string } | undefined;
   const proposed: AlertRecord = { ...draft, ...(provenance ? { provenance } : {}) };
   if (prior) {
     const old = decodeSignalState<AlertRecord>(prior.payload_json);
     const { revision: _oldRevision, ...oldComparable } = old;
     const { revision: _proposedRevision, ...proposedComparable } = proposed;
-    if (isDeepStrictEqual(oldComparable, proposedComparable)) return null;
+    if (isDeepStrictEqual(oldComparable, decodeSignalState(encodeSignalState(proposedComparable))))
+      return null;
   }
   const record: AlertRecord = { ...proposed, revision: (prior?.revision ?? 0) + 1 };
   saveRecord(db, scopeId, record, mode, true);
@@ -78,15 +98,23 @@ function saveRecord(
   mode: CaptureMode,
   active: boolean,
 ) {
-  db.prepare(
+  // Ledger mode retains whether this identity ever needed a live withdrawal.
+  // Each outbox revision still uses its actual capture mode below.
+  statement(
+    db,
     `insert into alerts(scope_id,id,revision,capture_mode,active,payload_json) values(?,?,?,?,?,?)
-    on conflict(scope_id,id) do update set revision=excluded.revision,capture_mode=excluded.capture_mode,active=excluded.active,payload_json=excluded.payload_json`,
+    on conflict(scope_id,id) do update set revision=excluded.revision,capture_mode=case when alerts.capture_mode='live' then 'live' else excluded.capture_mode end,active=excluded.active,payload_json=excluded.payload_json`,
   ).run(scopeId, record.id, record.revision, mode, active ? 1 : 0, encodeSignalState(record));
-  new AlertOutbox(db).enqueue(scopeId, record, mode);
+  let outbox = outboxes.get(db);
+  if (!outbox) {
+    outbox = new AlertOutbox(db);
+    outboxes.set(db, outbox);
+  }
+  outbox.enqueue(scopeId, record, mode);
 }
 
 /** Conservative invalidation: all reminders at/after changed history lose their
- * provisional evidence. Re-evaluate current conditions under a new epoch.
+ * provisional evidence. Preserve identity/cooldown until a real branch change.
  * Does not claim the historical condition was definitely false. P5 may add
  * precise historical replay, but unverified old notifications must not survive. */
 export function retractSignals(
@@ -95,15 +123,21 @@ export function retractSignals(
   context: SignalBatchContext,
   reason: string,
   fromBlock = 0n,
+  affectedPoolIds?: ReadonlySet<string>,
 ): AlertRecord[] {
   return db.transaction(() => {
-    const rows = db
-      .prepare('select capture_mode,payload_json from alerts where scope_id=? and active=1')
-      .all(scopeId) as { capture_mode: CaptureMode; payload_json: string }[];
+    const rows = statement(
+      db,
+      'select capture_mode,payload_json from alerts where scope_id=? and active=1',
+    ).all(scopeId) as { capture_mode: CaptureMode; payload_json: string }[];
     const records: AlertRecord[] = [];
     for (const row of rows) {
       const prior = decodeSignalState<AlertRecord>(row.payload_json);
-      if (prior.endAnchor.number < fromBlock) continue;
+      if (
+        prior.endAnchor.number < fromBlock ||
+        (affectedPoolIds && !affectedPoolIds.has(prior.poolId))
+      )
+        continue;
       const record: AlertRecord = {
         ...prior,
         revision: prior.revision + 1,
@@ -118,19 +152,51 @@ export function retractSignals(
       saveRecord(db, scopeId, record, row.capture_mode, false);
       records.push(record);
     }
-    db.prepare('delete from signal_snapshots where scope_id=?').run(scopeId);
-    db.prepare('delete from signal_cursors where scope_id=?').run(scopeId);
+    // Preserve consumed evidence and cooldown across a recovery recheck.
+    // Recorder uses scope-rechecking only for detected recovery. Persist this
+    // marker until accepted replacement evidence is projected, even if its new
+    // tip advances beyond the old tip.
+    if (reason === 'scope-rechecking') {
+      const cursor = statement(db, 'select evidence_json from signal_cursors where scope_id=?').get(
+        scopeId,
+      ) as { evidence_json: string } | undefined;
+      if (cursor)
+        statement(db, 'update signal_cursors set evidence_json=? where scope_id=?').run(
+          encodeSignalState({
+            ...decodeSignalState<Evidence>(cursor.evidence_json),
+            branchRecovery: true,
+          }),
+          scopeId,
+        );
+    }
     return records;
   })();
 }
 function readEvidence(db: Database.Database, input: MetricInput, report: MetricsReport): Evidence {
   const raw = new SqliteRangeStore(db);
   const times = raw.logTimes(input.scopeId);
+  const valuations = new Map(report.valuations.map((v) => [v.eventId, v]));
+  const dependencies = new Map<string, Set<string>>();
+  for (const v of report.valuations) {
+    for (const id of [
+      v.eventId,
+      ...(v.quoteEvidence ? [rawLogKey(v.quoteEvidence.effectiveAt)] : []),
+    ]) {
+      const owners = dependencies.get(id) ?? new Set<string>();
+      owners.add(poolRegistrationId(v));
+      dependencies.set(id, owners);
+    }
+  }
   const events: Evidence['events'] = {};
   for (const log of raw.activeLogs(input.scopeId))
     events[rawLogKey(log)] = {
       block: log.blockNumber,
-      digest: digest({ log, time: times.get(rawLogKey(log)) ?? null }),
+      poolIds: [...(dependencies.get(rawLogKey(log)) ?? [])],
+      digest: digest({
+        log,
+        time: times.get(rawLogKey(log)) ?? null,
+        valuation: valuations.get(rawLogKey(log)) ?? null,
+      }),
     };
   const closedCoverage: Evidence['closedCoverage'] = {};
   const currentMinuteSec = Math.floor(report.at.timestampSec / 60) * 60;
@@ -147,12 +213,22 @@ function readEvidence(db: Database.Database, input: MetricInput, report: Metrics
     };
   const pools: Evidence['pools'] = {};
   for (const p of [...raw.pools(input.registryScopeId), ...raw.pools(input.scopeId)])
-    pools[poolRegistrationId(p)] = { block: p.discoveredAt.blockNumber, digest: digest(p) };
+    pools[poolRegistrationId(p)] = {
+      block: p.discoveredAt.blockNumber,
+      digest: digest(p),
+      poolIds: [poolRegistrationId(p)],
+    };
   return { events, closedCoverage, pools };
 }
-function repairedFrom(old: Evidence, current: Evidence, tip: bigint): bigint | null {
+function repairedFrom(
+  old: Evidence,
+  current: Evidence,
+  tip: bigint,
+  affected: Set<string>,
+): bigint | null {
   let from: bigint | null = null;
-  const add = (block: bigint) => {
+  const add = (block: bigint, owners?: string[]) => {
+    for (const owner of owners ?? ['*']) affected.add(owner);
     if (from === null || block < from) from = block;
   };
   for (const group of ['events', 'pools', 'closedCoverage'] as const) {
@@ -168,46 +244,64 @@ function repairedFrom(old: Evidence, current: Evidence, tip: bigint): bigint | n
       // Coverage evidence is bounded; expiry outside the retained window is
       // not a repair. Missing raw events/registrations still invalidate.
       if (group === 'closedCoverage' && !now) continue;
-      if (!now || now.digest !== item.digest) add(item.block);
+      if (!now || now.digest !== item.digest)
+        add(
+          item.block,
+          group === 'closedCoverage'
+            ? undefined
+            : [...(item.poolIds ?? ['*']), ...(now?.poolIds ?? [])],
+        );
     }
     if (group !== 'closedCoverage')
       for (const [id, item] of Object.entries(current[group]))
-        if (!old[group][id] && item.block <= tip) add(item.block);
+        if (!old[group][id] && item.block <= tip) add(item.block, item.poolIds);
   }
   return from;
 }
-function presentation(
-  report: MetricsReport,
-  w: MetricsReport['windows'][number],
-  input: MetricInput,
-): SignalInput['presentation'] {
-  const rwa = report.rwa.find((r) => r.poolIds.includes(w.poolId));
-  const annotation = report.annotations.find((a) => a.poolId === w.poolId);
-  const tokens = annotation ? [annotation.pair.token0, annotation.pair.token1] : [];
-  const names = tokens.map((t) =>
-    t === input.usdg ? 'USDG' : (input.assets.assets.find((a) => a.address === t)?.symbol ?? t),
-  );
-  const start = Math.floor(report.at.timestampSec / 300) * 300 - 300;
-  const local = report.valuations.filter(
-    (v) =>
-      poolRegistrationId(v) === w.poolId &&
-      v.time.minuteStartSec !== null &&
-      v.time.minuteStartSec >= start,
-  );
-  const txs = [...new Set(local.map((v) => v.transactionHash))];
-  const cooccurring = new Set<string>();
-  for (const v of report.valuations)
-    if (txs.includes(v.transactionHash)) {
-      const a = report.annotations.find((x) => x.poolId === poolRegistrationId(v));
-      for (const t of a ? [a.pair.token0, a.pair.token1] : [])
-        if (t !== input.usdg && !input.assets.has(t)) cooccurring.add(t);
-    }
-  return {
-    rwaSymbol: rwa?.asset.symbol ?? 'unknown',
-    pairLabel: names.join(' / '),
-    associatedTokens: [...cooccurring],
-    evidenceTxs: txs,
-    liquidityNote: annotation ? encodeJson(annotation.lastSwap) : 'unknown',
+function presentationIndex(report: MetricsReport, input: MetricInput) {
+  const annotations = new Map(report.annotations.map((a) => [a.poolId, a]));
+  const rwa = new Map(report.rwa.flatMap((r) => r.poolIds.map((id) => [id, r] as const)));
+  const symbols = new Map(input.assets.assets.map((a) => [a.address, a.symbol]));
+  const byPool = new Map<string, MetricsReport['valuations']>();
+  const tokensByTx = new Map<string, Set<string>>();
+  for (const v of report.valuations) {
+    const id = poolRegistrationId(v);
+    const group = byPool.get(id) ?? [];
+    group.push(v);
+    byPool.set(id, group);
+    const tokens = tokensByTx.get(v.transactionHash) ?? new Set<string>();
+    const a = annotations.get(id);
+    for (const token of a ? [a.pair.token0, a.pair.token1] : [])
+      if (token !== input.usdg && !input.assets.has(token)) tokens.add(token);
+    tokensByTx.set(v.transactionHash, tokens);
+  }
+  return (
+    poolId: string,
+    endSec: number,
+    closed = false,
+  ): { presentation: SignalInput['presentation']; evidenceEventIds: string[] } => {
+    const a = annotations.get(poolId);
+    const local = (byPool.get(poolId) ?? []).filter(
+      (v) =>
+        v.time.minuteStartSec !== null &&
+        v.time.minuteStartSec >= Math.floor(endSec / 300) * 300 - 300 &&
+        (closed ? v.time.minuteStartSec < endSec : v.time.minuteStartSec <= endSec),
+    );
+    const txs = [...new Set(local.map((v) => v.transactionHash))];
+    return {
+      presentation: {
+        rwaSymbol: rwa.get(poolId)?.asset.symbol ?? 'unknown',
+        pairLabel: (a ? [a.pair.token0, a.pair.token1] : [])
+          .map((t) => (t === input.usdg ? 'USDG' : (symbols.get(t) ?? t)))
+          .join(' / '),
+        associatedTokens: [...new Set(txs.flatMap((tx) => [...(tokensByTx.get(tx) ?? [])]))],
+        evidenceTxs: txs,
+        liquidityNote: closed
+          ? 'unknown (historical liquidity observation unavailable)'
+          : formatObservedLiquidity(a?.lastSwap ?? null),
+      },
+      evidenceEventIds: local.map((v) => v.eventId),
+    };
   };
 }
 export function projectSignals(
@@ -227,54 +321,97 @@ export function projectSignals(
         assets: input.assets.assets,
         metricVersion: report.version,
       });
-      const old = db.prepare('select * from signal_cursors where scope_id=?').get(input.scopeId) as
-        Cursor | undefined;
-      if (old && old.config_hash === configHash && old.source_hash === report.sourceHash) return [];
+      const old = statement(db, 'select * from signal_cursors where scope_id=?').get(
+        input.scopeId,
+      ) as Cursor | undefined;
+      const oldEvidence = old ? decodeSignalState<Evidence>(old.evidence_json) : undefined;
+      if (
+        old &&
+        !oldEvidence?.branchRecovery &&
+        old.config_hash === configHash &&
+        old.source_hash === report.sourceHash
+      )
+        return [];
       const evidence = readEvidence(db, input, report);
       let repair: bigint | null = null;
+      const affected = new Set<string>();
+      let branchChanged = false;
       if (old) {
-        if (old.config_hash !== configHash) repair = 0n;
-        else {
+        if (old.config_hash !== configHash) {
+          repair = 0n;
+          affected.add('*');
+        } else {
           repair = repairedFrom(
             decodeSignalState<Evidence>(old.evidence_json),
             evidence,
             BigInt(old.block_number),
+            affected,
           );
           if (
             report.at.number < BigInt(old.block_number) ||
             (report.at.number === BigInt(old.block_number) && report.at.hash !== old.block_hash)
-          )
-            repair =
-              repair === null
-                ? report.at.number
-                : repair < report.at.number
-                  ? repair
-                  : report.at.number;
+          ) {
+            branchChanged = true;
+            affected.add('*');
+            repair = repair === null || report.at.number < repair ? report.at.number : repair;
+          }
         }
+      }
+      if (oldEvidence?.branchRecovery) {
+        branchChanged = true;
+        affected.add('*');
+        repair = 0n;
       }
       const records =
         repair === null
           ? []
-          : retractSignals(db, input.scopeId, context, 'source-history-revised', repair);
+          : retractSignals(
+              db,
+              input.scopeId,
+              context,
+              'source-history-revised',
+              repair,
+              affected.has('*') ? undefined : affected,
+            );
       const epoch =
-        repair === null && old
+        old && !branchChanged && old.config_hash === configHash
           ? old.epoch
-          : digest({ source: report.sourceHash, configHash, batch: context.batchId });
+          : digest({
+              configHash,
+              scopeId: input.scopeId,
+              ...(branchChanged ? { branch: report.at.hash } : {}),
+            });
+      const present = presentationIndex(report, input);
       for (const w of report.windows) {
-        const row = db
-          .prepare('select payload_json from signal_snapshots where scope_id=? and pool_id=?')
-          .get(input.scopeId, w.poolId) as { payload_json: string } | undefined;
-        const previous = row
-          ? decodeSignalState<SignalSnapshot>(row.payload_json)
-          : initialSignalSnapshot();
+        const row = statement(
+          db,
+          'select payload_json from signal_snapshots where scope_id=? and pool_id=?',
+        ).get(input.scopeId, w.poolId) as { payload_json: string } | undefined;
+        const previous =
+          row && !branchChanged
+            ? decodeSignalState<SignalSnapshot>(row.payload_json)
+            : initialSignalSnapshot();
         const coverage =
           w.partialCurrent?.status === 'partial'
             ? 'complete'
             : w.partialCurrent?.status === 'gap'
               ? 'gap'
               : 'warming';
+        // Reconsider a corrected entry bucket under the existing episode and
+        // logical cooldown. Only material escalation can bypass that cooldown;
+        // unchanged quantities cannot reappear as a fresh historical reminder.
+        const correctedEntry =
+          repair !== null &&
+          !branchChanged &&
+          (affected.has('*') || affected.has(w.poolId)) &&
+          previous.lastAlertScale === '5m' &&
+          previous.lastFiveEndSec !== null &&
+          previous.lastAlertSec === previous.lastFiveEndSec;
+        const evaluationPrevious = correctedEntry
+          ? { ...previous, lastFiveEndSec: previous.lastFiveEndSec! - 300 }
+          : previous;
         const decision = evaluateSignal(
-          previous,
+          evaluationPrevious,
           {
             pool: w.pool,
             batchId: context.batchId,
@@ -284,48 +421,64 @@ export function projectSignals(
             metrics: w,
             coverage,
             epoch,
-            presentation: presentation(report, w, input),
+            presentation: present(w.poolId, report.at.timestampSec).presentation,
           },
           config,
         );
-        db.prepare(
-          `insert into signal_snapshots(scope_id,pool_id,payload_json) values(?,?,?)
-        on conflict(scope_id,pool_id) do update set payload_json=excluded.payload_json`,
-        ).run(input.scopeId, w.poolId, encodeSignalState(decision.nextSnapshot));
-        db.prepare(
-          `insert into signal_evaluations(scope_id,batch_id,source_hash,pool_id,payload_json) values(?,?,?,?,?)
-        on conflict(scope_id,batch_id,source_hash,pool_id) do nothing`,
-        ).run(
-          input.scopeId,
-          context.batchId,
-          report.sourceHash,
-          w.poolId,
-          encodeSignalState({
-            matches: decision.matches,
-            at: report.at,
-            observedAtMs: context.observedAtMs,
-            coverage,
-          }),
-        );
-        const record = commitSignalDecision(db, input.scopeId, decision, context.captureMode, {
-          metricSourceHash: report.sourceHash,
-          projectionSourceHash: report.projectionSourceHash,
-          metricVersion: report.version,
-          chainConfigVersion: report.configVersion,
-          assetVersion: report.assetVersion,
-          metadataVersion: report.metadata.version,
-          evidenceEventIds: report.valuations
-            .filter(
-              (v) =>
-                poolRegistrationId(v) === w.poolId &&
-                v.time.minuteStartSec !== null &&
-                v.time.minuteStartSec >= Math.floor(report.at.timestampSec / 300) * 300 - 300,
-            )
-            .map((v) => v.eventId),
-        });
-        if (record) records.push(record);
+        const snapshotChanged = !isDeepStrictEqual(previous, decision.nextSnapshot);
+        if (snapshotChanged || !row)
+          statement(
+            db,
+            `insert into signal_snapshots(scope_id,pool_id,payload_json) values(?,?,?)
+           on conflict(scope_id,pool_id) do update set payload_json=excluded.payload_json`,
+          ).run(input.scopeId, w.poolId, encodeSignalState(decision.nextSnapshot));
+        const drafts = decision.alertDrafts ?? (decision.alertDraft ? [decision.alertDraft] : []);
+        // Audit material state transitions, matched decisions and historical
+        // evaluations. Quiet pools do not append a receipt for every poll.
+        if (snapshotChanged || drafts.length > 0)
+          statement(
+            db,
+            `insert into signal_evaluations(scope_id,batch_id,source_hash,pool_id,payload_json) values(?,?,?,?,?)
+           on conflict(scope_id,batch_id,source_hash,pool_id) do nothing`,
+          ).run(
+            input.scopeId,
+            context.batchId,
+            report.sourceHash,
+            w.poolId,
+            encodeSignalState({
+              matches: decision.matches,
+              evaluations: decision.evaluations,
+              at: report.at,
+              observedAtMs: context.observedAtMs,
+              coverage,
+            }),
+          );
+        for (const draft of drafts) {
+          const evidenceAt = present(
+            w.poolId,
+            draft.logicalTimeSec ?? draft.watermarkSec,
+            draft.metrics.partialCurrent === null,
+          );
+          const record = commitSignalDecision(
+            db,
+            input.scopeId,
+            { ...decision, alertDraft: { ...draft, presentation: evidenceAt.presentation } },
+            draft.historical && context.captureMode === 'live' ? 'backfill' : context.captureMode,
+            {
+              metricSourceHash: report.sourceHash,
+              projectionSourceHash: report.projectionSourceHash,
+              metricVersion: report.version,
+              chainConfigVersion: report.configVersion,
+              assetVersion: report.assetVersion,
+              metadataVersion: report.metadata.version,
+              evidenceEventIds: evidenceAt.evidenceEventIds,
+            },
+          );
+          if (record) records.push(record);
+        }
       }
-      db.prepare(
+      statement(
+        db,
         `insert into signal_cursors(scope_id,config_hash,source_hash,epoch,block_number,block_hash,evidence_json) values(?,?,?,?,?,?,?)
       on conflict(scope_id) do update set config_hash=excluded.config_hash,source_hash=excluded.source_hash,epoch=excluded.epoch,block_number=excluded.block_number,block_hash=excluded.block_hash,evidence_json=excluded.evidence_json`,
       ).run(
@@ -364,4 +517,29 @@ export function commitAcceptedSignalBatch(
       return { changes, alerts };
     })
     .immediate();
+}
+
+/** Explicit maintenance only: preserve raw history, current alerts, snapshots,
+ * cursors and all pending/failed deliveries. Limits count newest derived rows
+ * per scope; terminal outbox payloads remain in the alert ledger where current. */
+export function pruneSignalDerivedHistory(
+  db: Database.Database,
+  scopeId: string,
+  limits: { evaluations: number; terminalDeliveries: number },
+): { evaluations: number; terminalDeliveries: number } {
+  for (const limit of Object.values(limits))
+    if (!Number.isSafeInteger(limit) || limit < 0)
+      throw new RangeError('Retention limits must be non-negative safe integers');
+  return db.transaction(() => ({
+    evaluations: statement(
+      db,
+      `delete from signal_evaluations where scope_id=? and rowid not in
+      (select rowid from signal_evaluations where scope_id=? order by rowid desc limit ?)`,
+    ).run(scopeId, scopeId, limits.evaluations).changes,
+    terminalDeliveries: statement(
+      db,
+      `delete from alert_outbox where scope_id=? and status in ('sent','superseded') and sequence not in
+      (select sequence from alert_outbox where scope_id=? and status in ('sent','superseded') order by sequence desc limit ?)`,
+    ).run(scopeId, scopeId, limits.terminalDeliveries).changes,
+  }))();
 }

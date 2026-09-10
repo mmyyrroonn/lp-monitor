@@ -16,7 +16,6 @@ export function initialSignalSnapshot(): SignalSnapshot {
     lowBuckets: 0,
     entryThreshold: null,
     lastAlertKind: null,
-    alertSequence: 0,
   };
 }
 function sample(m: MinuteMetric | AggregateMetric): BaselineSample {
@@ -41,7 +40,7 @@ const empty = (startSec: number, duration: number): BaselineSample => ({
   unit: null,
 });
 const hash = (x: unknown) => createHash('sha256').update(JSON.stringify(x)).digest('hex');
-export function evaluateSignal(
+function evaluateOne(
   previous: SignalSnapshot,
   input: SignalInput,
   config: SignalConfig,
@@ -53,6 +52,21 @@ export function evaluateSignal(
       : previous),
     configVersion: version,
   };
+  if (
+    input.coverage !== 'gap' &&
+    input.coverage !== 'rechecking' &&
+    config.episodeExpiry.enabled &&
+    next.lastHeatSec !== undefined &&
+    input.watermarkSec - next.lastHeatSec >= config.episodeExpiry.threshold
+  ) {
+    next.state = 'watch';
+    next.episodeId = null;
+    next.entryThreshold = null;
+    next.lowBuckets = 0;
+    next.lastHeatSec = undefined;
+    next.lastAlertKind = null;
+    next.lastAlertSec = null;
+  }
   const partial = input.metrics.partialCurrent;
   const currentMinute = Math.floor(input.watermarkSec / 60) * 60;
   const minute =
@@ -112,24 +126,41 @@ export function evaluateSignal(
       ruleId: 'candidate',
       version: config.candidate.version,
       matched: !!candidate,
-      reason: 'minute-absolute-and-relative',
+      reason: !config.candidate.enabled
+        ? 'disabled'
+        : !absoluteMinute
+          ? 'below-absolute-or-unpriced'
+          : baseline.minute.status !== 'ready'
+            ? [baseline.minute.status, 'absolute-only'].join('/')
+            : candidate
+              ? 'relative-met'
+              : 'below-multiple',
     },
     {
       ruleId: 'confirmRelative',
       version: config.confirmRelative.version,
       matched: !!relative,
-      reason: 'natural5m-absolute-and-relative',
+      reason: !config.confirmRelative.enabled
+        ? 'disabled'
+        : baseline.fiveMinute.status !== 'ready'
+          ? [baseline.fiveMinute.status, 'relative-unavailable'].join('/')
+          : relative
+            ? 'relative-met'
+            : 'below-absolute-or-multiple',
     },
     {
       ruleId: 'confirmConsecutive',
       version: config.confirmConsecutive.version,
       matched: !!consecutive,
-      reason: 'two-consecutive-natural5m',
+      reason: !config.confirmConsecutive.enabled
+        ? 'disabled'
+        : consecutive
+          ? 'two-consecutive-natural5m'
+          : 'no-two-adjacent-above-threshold',
     },
   ];
   const noAlert = (): SignalDecision => ({ nextSnapshot: next, alertDraft: null, matches });
   if (input.coverage === 'gap' || input.coverage === 'rechecking') {
-    next.lowBuckets = 0;
     return noAlert();
   }
   const fresh =
@@ -186,13 +217,30 @@ export function evaluateSignal(
     reasons.push('partial');
   }
   if (kind === null) return noAlert();
+  if (kind === 'hot' || kind === 'reheat') next.lastHeatSec = input.watermarkSec;
 
+  const candidateFingerprint = minute
+    ? hash([
+        minute.usdMicros?.toString(),
+        minute.rawNotional?.raw.toString(),
+        minute.swapCount,
+        minute.txCount,
+        minute.addCount,
+        minute.removeCount,
+        minute.zeroDeltaCount,
+        minute.reasons,
+      ])
+    : '';
+  const sameMinute =
+    kind === 'candidate' && next.candidateMinuteStartSec === minute?.minuteStartSec;
+  if (sameMinute && next.candidateFingerprint === candidateFingerprint) return noAlert();
   const sameLevel =
     (kind === 'hot' && next.state === 'hot') ||
     (kind === 'candidate' && (next.state === 'candidate' || next.lastAlertKind === 'candidate'));
   if (
     sameLevel &&
     !upgrade &&
+    !sameMinute &&
     config.cooldown.enabled &&
     next.lastAlertSec !== null &&
     input.watermarkSec - next.lastAlertSec < config.cooldown.threshold
@@ -204,11 +252,10 @@ export function evaluateSignal(
       input.epoch ?? '',
       version,
       poolRegistrationId({ pool: input.pool }),
-      input.batchId,
-      input.endAnchor.hash,
+      kind === 'candidate' ? currentMinute : latest?.endSec,
       kind,
     ]);
-  next.alertSequence++;
+
   const id = hash([
     input.pool.chainId,
     poolRegistrationId({ pool: input.pool }),
@@ -223,6 +270,10 @@ export function evaluateSignal(
       );
     next.state = 'hot';
   } else if (kind === 'candidate' && next.state !== 'cooling') next.state = 'candidate';
+  if (kind === 'candidate') {
+    next.candidateMinuteStartSec = minute!.minuteStartSec;
+    next.candidateFingerprint = candidateFingerprint;
+  }
   next.lastAlertSec = input.watermarkSec;
   next.lastAlertVolume = volume;
   next.lastAlertScale = scale;
@@ -249,5 +300,70 @@ export function evaluateSignal(
       presentation: input.presentation,
       baseline,
     },
+  };
+}
+
+/** Evaluate complete history chronologically; receipt metadata remains separate from logical time. */
+export function evaluateSignal(
+  previous: SignalSnapshot,
+  input: SignalInput,
+  config: SignalConfig,
+): SignalDecision {
+  const version = signalConfigVersion(config);
+  let state =
+    previous.configVersion !== null && previous.configVersion !== version
+      ? initialSignalSnapshot()
+      : previous;
+  const drafts: NonNullable<SignalDecision['alertDraft']>[] = [];
+  const evaluations: NonNullable<SignalDecision['evaluations']>[number][] = [];
+  const five = input.metrics.natural5mBuckets
+    .filter(
+      (b) =>
+        b.status === 'closed' &&
+        b.startSec % 300 === 0 &&
+        b.endSec - b.startSec === 300 &&
+        b.endSec <= input.watermarkSec,
+    )
+    .sort((a, b) => a.startSec - b.startSec);
+  const closedBoundary = Math.floor(input.watermarkSec / 300) * 300;
+  if (input.coverage !== 'rechecking') {
+    for (const b of five.filter(
+      (b) => state.lastFiveEndSec === null || b.endSec > state.lastFiveEndSec,
+    )) {
+      const metrics = {
+        ...input.metrics,
+        partialCurrent: null,
+        minutes: input.metrics.minutes.filter((m) => m.minuteStartSec + 60 <= b.endSec),
+        natural5mBuckets: five.filter((p) => p.endSec <= b.endSec),
+        naturalClosed5m: b,
+        recentClosed1m: null,
+        recentClosed5x1m: null,
+      };
+      const decision = evaluateOne(
+        state,
+        { ...input, coverage: 'complete', watermarkSec: b.endSec, metrics },
+        config,
+      );
+      state = decision.nextSnapshot;
+      evaluations.push({ endSec: b.endSec, matches: decision.matches });
+      if (decision.alertDraft)
+        drafts.push({
+          ...decision.alertDraft,
+          watermarkSec: input.watermarkSec,
+          logicalTimeSec: b.endSec,
+          historical: b.endSec < closedBoundary,
+        });
+    }
+  }
+  const current = evaluateOne(state, input, config);
+  state = current.nextSnapshot;
+  if (current.alertDraft)
+    drafts.push({ ...current.alertDraft, logicalTimeSec: input.watermarkSec, historical: false });
+  return {
+    nextSnapshot: state,
+    matches: current.matches,
+    alertDraft: drafts.at(-1) ?? null,
+    alertDrafts: drafts,
+    evaluations,
   };
 }

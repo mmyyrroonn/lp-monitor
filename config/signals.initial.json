@@ -1,5 +1,6 @@
 {
-  "version": "p4-v1",
+  "version": "p4-v2",
+  "episodeExpiry": { "enabled": true, "threshold": 3600, "version": "1" },
   "candidate": {
     "enabled": true,
     "threshold": "20000000000",

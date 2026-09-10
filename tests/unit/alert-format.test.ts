@@ -4,14 +4,15 @@ import { join } from 'node:path';
 import { expect, test, vi } from 'vitest';
 import type { Address, Hex } from 'viem';
 import { createConsoleSink } from '../../src/notify/console.js';
-import { formatAlert } from '../../src/notify/format.js';
+import { formatAlert, formatObservedLiquidity } from '../../src/notify/format.js';
 import { createJsonlSink } from '../../src/notify/jsonl.js';
+import type { AggregateMetric, MinuteMetric } from '../../src/metrics/windows.js';
 import type { AlertRecord } from '../../src/signals/types.js';
 
 const HASH = (digit: string) => `0x${digit.repeat(64)}` as Hex;
 const ADDRESS = '0x0000000000000000000000000000000000000010' as Address;
 
-function metric(usdMicros: bigint | null, status: 'closed' | 'partial' = 'closed') {
+function metric(usdMicros: bigint | null, status: 'closed' | 'partial' = 'closed'): MinuteMetric {
   return {
     minuteStartSec: 1_788_839_040,
     status,
@@ -33,19 +34,31 @@ function metric(usdMicros: bigint | null, status: 'closed' | 'partial' = 'closed
     baselineMedianDenominator: usdMicros === null ? null : 1n,
     baselineUnit: usdMicros === null ? null : 'usdMicros',
     volumeMultiplier: usdMicros === null ? null : 12,
-  } as const;
+  };
 }
 
-function alert(overrides: Partial<AlertRecord> = {}): AlertRecord {
-  const partial = metric(25_000_000_000n, 'partial');
-  const recent5m = {
-    ...metric(120_000_000_000n),
-    startSec: 1_788_838_740,
-    endSec: 1_788_839_040,
-    status: 'closed' as const,
+function aggregateMetric(
+  usdMicros: bigint,
+  startSec = 1_788_838_740,
+  endSec = 1_788_839_040,
+): AggregateMetric {
+  return {
+    ...metric(usdMicros),
+    startSec,
+    endSec,
+    status: 'closed',
+    swapCount: 200,
+    txCount: 180,
+    addCount: 5,
+    removeCount: 2,
+    zeroDeltaCount: 0,
     activeMinutes: 5,
   };
-  const natural5m = { ...recent5m, startSec: 1_788_838_800, endSec: 1_788_839_100 };
+}
+function alert(overrides: Partial<AlertRecord> = {}): AlertRecord {
+  const partial = metric(25_000_000_000n, 'partial');
+  const recent5m = aggregateMetric(120_000_000_000n);
+  const natural5m = aggregateMetric(120_000_000_000n, 1_788_838_800, 1_788_839_100);
   return {
     id: 'alert-1',
     revision: 2,
@@ -72,6 +85,26 @@ function alert(overrides: Partial<AlertRecord> = {}): AlertRecord {
       unknownTimeBlockCounts: [],
     },
     coverage: 'complete',
+    baseline: {
+      minute: {
+        sampleCount: 60,
+        median: 10_000_000_000n,
+        medianNumerator: 10_000_000_000n,
+        medianDenominator: 1n,
+        multiplier: 12,
+        status: 'ready',
+        unit: 'usdMicros',
+      },
+      fiveMinute: {
+        sampleCount: 12,
+        median: 10_000_000_000n,
+        medianNumerator: 10_000_000_000n,
+        medianDenominator: 1n,
+        multiplier: 12,
+        status: 'ready',
+        unit: 'usdMicros',
+      },
+    },
     presentation: {
       rwaSymbol: 'AMC',
       pairLabel: 'AMC / USDG',
@@ -80,7 +113,7 @@ function alert(overrides: Partial<AlertRecord> = {}): AlertRecord {
       liquidityNote: '观察到加减流动性动作；L变化不代表已提款',
     },
     ...overrides,
-  } as AlertRecord;
+  };
 }
 
 test('formats a real hot alert with minute precision, evidence, and provisional caveats', () => {
@@ -171,9 +204,23 @@ test('recent rolling and natural confirmation baselines are not mixed', () => {
     ...base,
     metrics: { ...base.metrics, recentClosed5x1m: recent, naturalClosed5m: natural },
     baseline: {
-      fiveMinute: { median: 10_000_000_000n, unit: 'usdMicros', multiplier: 10 },
-      minute: { median: null, unit: null, multiplier: null },
-    } as AlertRecord['baseline'],
+      ...base.baseline,
+      fiveMinute: {
+        ...base.baseline.fiveMinute,
+        median: 10_000_000_000n,
+        unit: 'usdMicros',
+        multiplier: 10,
+      },
+      minute: {
+        ...base.baseline.minute,
+        median: null,
+        medianNumerator: null,
+        medianDenominator: null,
+        unit: null,
+        multiplier: null,
+        status: 'unpriced',
+      },
+    },
   });
   expect(text).toContain('最近5m：300,000 USDG；过去基线：100,000 USDG；3倍');
   expect(text).toContain('自然完整5m：100,000 USDG；过去基线：10,000 USDG；10倍');
@@ -194,4 +241,77 @@ test('natural confirmation counts are labeled separately from recent rolling cou
   expect(
     formatAlert({ ...base, metrics: { ...base.metrics, naturalClosed5m: natural } }),
   ).toContain('自然5m次数：Swap：50次；不同tx：45笔');
+});
+
+test('renders exact half-micro rational baselines instead of unknown', () => {
+  const base = alert();
+  const text = formatAlert({
+    ...base,
+    baseline: {
+      ...base.baseline,
+      fiveMinute: {
+        sampleCount: 12,
+        median: null,
+        medianNumerator: 20_000_000_013n,
+        medianDenominator: 2n,
+        unit: 'usdMicros',
+        multiplier: 29.999999,
+        status: 'ready',
+      },
+    },
+  });
+  expect(text).toContain('过去基线：10,000.0000065 USDG；29.999999倍');
+});
+
+test.each([
+  [-500_000n, '-0.5 USDG'],
+  [-1_500_000n, '-1.5 USDG'],
+] as const)('formats signed USDG micros %s as %s', (value, expected) => {
+  const base = alert();
+  const text = formatAlert({
+    ...base,
+    metrics: {
+      ...base.metrics,
+      partialCurrent: { ...metric(value, 'partial'), usdMicros: value },
+    },
+  });
+  expect(text).toContain(`本分钟累计：${expected}`);
+});
+
+test('formats observed Swap liquidity as a readable caution rather than JSON', () => {
+  const note = formatObservedLiquidity({
+    liquidityRaw: 987_654_321n,
+    tick: 42,
+    observedAt: {
+      blockNumber: 120n,
+      blockHash: HASH('c'),
+      transactionHash: HASH('d'),
+      transactionIndex: 1,
+      logIndex: 2,
+    },
+    anchor: { number: 130n, hash: HASH('e'), timestampSec: 1_788_839_058 },
+    ageSecInterval: { min: 15, max: 74 },
+    freshness: 'before-last-liquidity-action',
+    interpretation:
+      'L is from the last Swap before a later liquidity action; it is not proof of a withdrawal or current L.',
+  });
+  expect(note).toContain('L=987,654,321');
+  expect(note).toContain('tick=42');
+  expect(note).toContain('区块120');
+  expect(note).toContain('15–74秒');
+  expect(note).toContain('不代表提款');
+  expect(note).not.toContain('{');
+});
+
+test('labels delayed historical alerts with their logical evaluated bucket time and keeps gaps', () => {
+  const text = formatAlert(
+    alert({
+      historical: true,
+      logicalTimeSec: 1_788_838_800,
+      coverage: 'gap',
+    }),
+  );
+  expect(text).toContain('评估桶时间：2026-09-08T03:40Z（历史补评）');
+  expect(text).toContain('到达时间：2026-09-08T03:44:18.000Z');
+  expect(text).toContain('覆盖状态：gap；缺失数据按unknown展示');
 });

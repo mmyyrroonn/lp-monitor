@@ -1,0 +1,19 @@
+{
+  "initialProjectMs": 851.3835000000001,
+  "projectUnchangedMs": [
+    660.9887999999996,
+    648.1770000000001,
+    660.1341000000002
+  ],
+  "rebuildAndProjectMs": [
+    808.1887999999999,
+    802.1769999999997,
+    788.2540000000008
+  ],
+  "auditRowsBefore": 1827,
+  "auditRowsAfter": 1827,
+  "pools": 1827,
+  "swaps": 603,
+  "rpcCalls": 0,
+  "note": "Same local historical SQLite snapshot. Rebuild+project excludes RPC, fetch decoding/timing, file delivery and growing-history cost; no live latency guarantee. Full metrics freshness scan remains deliberate."
+}

@@ -13,6 +13,10 @@ const relative = rule
 export const signalConfigSchema = z
   .object({
     version,
+    episodeExpiry: z
+      .object({ enabled: z.boolean(), threshold: z.number().int().positive().safe(), version })
+      .strict()
+      .default({ enabled: true, threshold: 3600, version: '1' }),
     candidate: relative,
     confirmRelative: relative,
     confirmConsecutive: rule,
@@ -37,7 +41,7 @@ export function parseSignalConfig(value: unknown): SignalConfig {
   return signalConfigSchema.parse(value);
 }
 export const initialSignalConfig: SignalConfig = parseSignalConfig({
-  version: 'p4-v1',
+  version: 'p4-v2',
   candidate: { enabled: true, threshold: '20000000000', multiple: 5, samples: 60, version: '1' },
   confirmRelative: {
     enabled: true,

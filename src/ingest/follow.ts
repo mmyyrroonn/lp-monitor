@@ -28,6 +28,7 @@ export interface FollowOptions {
     fromBlock: bigint,
     end: BlockAnchor,
     previous: BlockAnchor | null,
+    head: BlockAnchor,
   ) => Promise<RangeChangeSet | null>;
   onChanges?: (changes: RangeChangeSet, cause: 'range' | 'reorg' | 'warmup') => void;
   onProgress?: (health: ReturnType<typeof ingestHealth>) => void;
@@ -131,7 +132,7 @@ export async function follow(
           const limit = from + BigInt(maxRange) - 1n;
           const end = limit < target.number ? await reader.getAnchor(limit) : target;
           if (now() >= stopAtMs) break;
-          const changes = await options.recordRange(from, end, previous);
+          const changes = await options.recordRange(from, end, previous, head);
           if (!changes) {
             gap = true;
             result.failures.push('incomplete-range');

@@ -14,7 +14,8 @@ CREATE TABLE IF NOT EXISTS signal_evaluations (
 );
 CREATE TABLE IF NOT EXISTS alerts (
  scope_id TEXT NOT NULL, id TEXT NOT NULL, revision INTEGER NOT NULL,
- capture_mode TEXT NOT NULL, active INTEGER NOT NULL, payload_json TEXT NOT NULL,
+ capture_mode TEXT NOT NULL CHECK(capture_mode IN ('live','backfill','synthetic')),
+ active INTEGER NOT NULL CHECK(active IN (0,1)), payload_json TEXT NOT NULL,
  PRIMARY KEY(scope_id,id)
 );
 CREATE TABLE IF NOT EXISTS alert_outbox (
@@ -25,3 +26,16 @@ CREATE TABLE IF NOT EXISTS alert_outbox (
  attempts INTEGER NOT NULL DEFAULT 0, last_error TEXT, payload_json TEXT NOT NULL,
  UNIQUE(scope_id,alert_id,revision)
 );
+-- Partial indexes keep terminal history out of the pending delivery scan.
+CREATE INDEX IF NOT EXISTS alert_outbox_live_pending_scope ON alert_outbox(scope_id,sequence)
+ WHERE capture_mode='live' AND status IN ('pending','failed');
+CREATE INDEX IF NOT EXISTS alert_outbox_live_pending ON alert_outbox(sequence)
+ WHERE capture_mode='live' AND status IN ('pending','failed');
+-- Existing 004 databases also receive the same constraints without rebuilding
+-- or risking loss of their durable alerts/outbox.
+CREATE TRIGGER IF NOT EXISTS alerts_validate_insert BEFORE INSERT ON alerts
+ WHEN new.capture_mode NOT IN ('live','backfill','synthetic') OR new.active NOT IN (0,1)
+ BEGIN SELECT RAISE(ABORT,'invalid alert mode or active flag'); END;
+CREATE TRIGGER IF NOT EXISTS alerts_validate_update BEFORE UPDATE ON alerts
+ WHEN new.capture_mode NOT IN ('live','backfill','synthetic') OR new.active NOT IN (0,1)
+ BEGIN SELECT RAISE(ABORT,'invalid alert mode or active flag'); END;

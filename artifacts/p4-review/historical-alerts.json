@@ -1,0 +1,22 @@
+{
+  "historical": {
+    "sourcePath": "data/p3-acceptance.sqlite",
+    "targetPath": "data/p4-review-acceptance.sqlite",
+    "sourceHash": "f2e6ae88f8d5912d6e69cab441eea126b4b90991fd3dc9588b5a1405a6299345",
+    "at": {
+      "number": "57625255",
+      "hash": "0xc03ff86009711d4f95cd2dd255ef54e79dae617873a745221d1e7a70e390dfba",
+      "timestampSec": 1788863932
+    },
+    "pools": 1827,
+    "swaps": 603,
+    "unpriced": 34,
+    "closedMinutes": 29,
+    "alerts": 0,
+    "alertKinds": [],
+    "liveDeliveries": 0,
+    "rpcCalls": 0,
+    "note": "Historical source only; observedAtMs=0 is a synthetic offline evaluation receipt marker, not historical arrival evidence."
+  },
+  "alerts": []
+}

@@ -1,3 +1,4 @@
+import type { MetricInput } from '../storage/metric-store.js';
 import { ConfigError } from '../config/env.js';
 import type { SignalConfig } from '../signals/config.js';
 import type { MetricMetadata } from '../metrics/metadata.js';
@@ -29,6 +30,21 @@ import type { BlockAnchor, ChainReader, RangeChangeSet } from '../domain/types.j
 import { encodeJson } from '../domain/json.js';
 import { RpcFailure, classifyRpcError } from '../rpc/errors.js';
 import { saveJson } from './files.js';
+class SignalEvaluationFailure extends Error {
+  constructor(
+    readonly phase: 'startup' | 'accepted-batch' | 'recovery',
+    cause: unknown,
+  ) {
+    super('Signal evaluation failed', { cause });
+  }
+}
+function signalStage<T>(phase: SignalEvaluationFailure['phase'], action: () => T): T {
+  try {
+    return action();
+  } catch (cause) {
+    throw new SignalEvaluationFailure(phase, cause);
+  }
+}
 export interface RecorderOptions {
   command: 'ingest' | 'follow';
   notify?: 'local';
@@ -68,20 +84,24 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
   mkdirSync(dirname(options.databasePath), { recursive: true });
   const db = openDatabase(options.databasePath);
   const store = new SqliteRangeStore(db);
-  const metricInput = {
-    scopeId,
-    registryScopeId: discoveryScope,
-    configVersion: config.version,
-    assets,
-    usdg: config.tokens.USDG,
-    metadata: options.metricMetadata!,
-  };
+  const metricInput: MetricInput | null =
+    options.notify === 'local' && options.metricMetadata
+      ? {
+          scopeId,
+          registryScopeId: discoveryScope,
+          configVersion: config.version,
+          assets,
+          usdg: config.tokens.USDG,
+          metadata: options.metricMetadata,
+        }
+      : null;
   const outbox = new AlertOutbox(db);
   const fileSink = createJsonlSink(options.databasePath + '.alerts.jsonl');
   const consoleSink = createConsoleSink();
+  const alertDelivery = { sent: 0, failed: 0, status: 'ok' as 'ok' | 'degraded' };
   const drain = async (retractionsOnly = false) => {
     if (options.notify !== 'local') return;
-    await outbox.deliverPending(
+    const delivered = await outbox.deliverPending(
       async (alert) => {
         await fileSink(alert);
         await consoleSink(alert);
@@ -89,6 +109,19 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       scopeId,
       retractionsOnly ? 'retracted' : undefined,
     );
+    alertDelivery.sent += delivered.sent;
+    alertDelivery.failed += delivered.failed;
+    if (delivered.failed > 0) alertDelivery.status = 'degraded';
+    if (delivered.sent > 0 || delivered.failed > 0)
+      console.log(
+        encodeJson({
+          event: 'alert-delivery',
+          runId: id,
+          ...delivered,
+          status: alertDelivery.status,
+          retractionsOnly,
+        }),
+      );
   };
   const recoveryContext = () => ({
     batchId: 'recovery-' + randomUUID(),
@@ -101,13 +134,15 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         ? store.invalidateAfter(targetScope, anchor)
         : store.resetForWarmup(targetScope);
       if (options.notify === 'local')
-        retractSignals(
-          db,
-          scopeId,
-          recoveryContext(),
-          'scope-rechecking',
-          // Registry revalidation follows; every active reminder is provisional again.
-          0n,
+        signalStage('recovery', () =>
+          retractSignals(
+            db,
+            scopeId,
+            recoveryContext(),
+            'scope-rechecking',
+            // Registry revalidation follows; every active reminder is provisional again.
+            0n,
+          ),
         );
       return changes;
     })();
@@ -281,19 +316,25 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       // Verify the operation checkpoint before delivering a persisted backlog.
       // This also reconciles config/source changes when no new range is available.
       const priorTip = store.acceptedTip(scopeId);
-      if (options.notify === 'local' && priorTip) {
+      if (metricInput && options.signalConfig && priorTip) {
         const current = await endpointReader.getAnchor(priorTip.number);
+        const latest = await endpointReader.getAnchor('latest');
         if (
           current.hash.toLowerCase() === priorTip.hash.toLowerCase() &&
-          current.timestampSec === priorTip.timestampSec
+          current.timestampSec === priorTip.timestampSec &&
+          latest.number === priorTip.number &&
+          latest.hash.toLowerCase() === priorTip.hash.toLowerCase() &&
+          latest.timestampSec === priorTip.timestampSec
         ) {
-          db.transaction(() => {
-            new SqliteProjectionStore(db).rebuild(scopeId, discoveryScope, config.version);
-            projectSignals(db, metricInput, options.signalConfig!, {
-              ...recoveryContext(),
-              captureMode: 'backfill',
-            });
-          })();
+          signalStage('startup', () =>
+            db.transaction(() => {
+              new SqliteProjectionStore(db).rebuild(scopeId, discoveryScope, config.version);
+              projectSignals(db, metricInput, options.signalConfig!, {
+                ...recoveryContext(),
+                captureMode: 'live',
+              });
+            })(),
+          );
           await drain();
         }
       }
@@ -320,7 +361,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           const head = await endpointReader.getAnchor('latest');
           if (!(await bootstrap(head))) throw new RpcFailure('discovery-incomplete');
         },
-        recordRange: async (from, end, previous) => {
+        recordRange: async (from, end, previous, head) => {
           const pools = new PoolRegistry([...store.pools(discoveryScope), ...store.pools(scopeId)]);
           const batch = await fetchRange(endpointReader, {
             mode: 'operations',
@@ -336,7 +377,10 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
             maxFilterValues: config.maxFilterValues,
             maxRangeBlocks: config.maxRangeBlocks,
             observedAtMs: Date.now(),
-            captureMode: options.command === 'ingest' ? 'backfill' : 'live',
+            captureMode:
+              options.command === 'ingest' || end.number !== head.number || end.hash !== head.hash
+                ? 'backfill'
+                : 'live',
           });
           store.saveRaw(batch);
           const priorTimes = store.logTimes(scopeId);
@@ -397,10 +441,12 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           if (batch.completeness !== 'complete') return null;
           await reader.flush?.();
           const changes =
-            options.notify === 'local'
-              ? commitAcceptedSignalBatch(db, metricInput, options.signalConfig!, timed).changes
+            metricInput && options.signalConfig
+              ? signalStage('accepted-batch', () =>
+                  commitAcceptedSignalBatch(db, metricInput, options.signalConfig!, timed),
+                ).changes
               : store.acceptRange(timed);
-          await drain();
+          await drain(batch.captureMode !== 'live');
           batchRecords.at(-1)!.accepted = true;
           counts.operationBatches++;
           return changes;
@@ -412,6 +458,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
               runId: id,
               health,
               counts,
+              alertDelivery,
               meter: reader.meter.summary(),
             }),
           ),
@@ -425,8 +472,17 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
   } catch (error) {
     primary = error;
     result.status = 'failed';
-    const failure = classifyRpcError(error);
-    result.failures.push(failure.kind);
+    if (error instanceof SignalEvaluationFailure) {
+      result.failures.push('signal-evaluation');
+      console.error(
+        encodeJson({
+          event: 'signal-evaluation-failure',
+          phase: error.phase,
+          atomicRollback: true,
+          rawEvidenceRetained: true,
+        }),
+      );
+    } else result.failures.push(classifyRpcError(error).kind);
     exitCode =
       error instanceof RpcFailure ? (['budget', 'deadline'].includes(error.kind) ? 4 : 3) : 1;
   } finally {
@@ -460,6 +516,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       maxFilterValues: config.maxFilterValues,
       logResponseGuard: config.logResponseGuard,
       ...result,
+      alertDelivery,
       counts,
       meter: reader.meter.summary(),
       acceptedTip: store.acceptedTip(scopeId),
@@ -509,6 +566,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           exitCode,
           counts,
           failures: result.failures,
+          alertDelivery,
           meter: reader.meter.summary(),
         }),
       );

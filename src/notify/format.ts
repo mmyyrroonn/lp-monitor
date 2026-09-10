@@ -1,3 +1,4 @@
+import type { SwapLiquidityAnnotation } from '../metrics/liquidity.js';
 import type { AggregateMetric, MinuteMetric } from '../metrics/windows.js';
 import type { AlertKind, AlertRecord } from '../signals/types.js';
 
@@ -16,12 +17,31 @@ function grouped(value: bigint): string {
   return `${sign}${digits.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}`;
 }
 
+function rationalUnits(numerator: bigint, denominator: bigint, decimals: number): string {
+  if (denominator <= 0n) throw new RangeError('Invalid rational denominator');
+  const negative = numerator < 0n;
+  let remainder = negative ? -numerator : numerator;
+  const divisor = denominator * 10n ** BigInt(decimals);
+  const whole = remainder / divisor;
+  remainder %= divisor;
+  if (remainder === 0n) return `${negative ? '-' : ''}${grouped(whole)}`;
+  let fraction = '';
+  while (remainder !== 0n) {
+    remainder *= 10n;
+    fraction += (remainder / divisor).toString();
+    remainder %= divisor;
+  }
+  return `${negative ? '-' : ''}${grouped(whole)}.${fraction}`;
+}
+
 function usdg(value: bigint | null | undefined): string {
-  if (value === null || value === undefined) return 'unknown';
-  const whole = value / 1_000_000n,
-    remainder = value % 1_000_000n;
-  if (remainder === 0n) return `${grouped(whole)} USDG`;
-  return `${grouped(whole)}.${remainder.toString().padStart(6, '0').replace(/0+$/, '')} USDG`;
+  return value === null || value === undefined ? 'unknown' : `${rationalUnits(value, 1n, 6)} USDG`;
+}
+
+function rationalUsdg(numerator: bigint | null, denominator: bigint | null): string {
+  return numerator === null || denominator === null
+    ? 'unknown'
+    : `${rationalUnits(numerator, denominator, 6)} USDG`;
 }
 
 function count(value: number | null | undefined, suffix: string): string {
@@ -36,11 +56,36 @@ function ratio(
   metric: MinuteMetric | AggregateMetric | null,
   baseline?: AlertRecord['baseline']['minute'],
 ): string {
-  const median = baseline?.median ?? metric?.baselineMedian ?? null;
-  const unit = baseline?.unit ?? metric?.baselineUnit ?? null;
-  const multiplier = baseline?.multiplier ?? metric?.volumeMultiplier ?? null;
+  const median = baseline ? baseline.median : (metric?.baselineMedian ?? null);
+  const numerator = baseline ? baseline.medianNumerator : (metric?.baselineMedianNumerator ?? null);
+  const denominator = baseline
+    ? baseline.medianDenominator
+    : (metric?.baselineMedianDenominator ?? null);
+  const unit = baseline ? baseline.unit : (metric?.baselineUnit ?? null);
+  const multiplier = baseline ? baseline.multiplier : (metric?.volumeMultiplier ?? null);
   const multiple = multiplier === null ? 'unknown' : `${multiplier}倍`;
-  return `过去基线：${unit === 'usdMicros' ? usdg(median) : 'unknown'}；${multiple}`;
+  const renderedBaseline =
+    unit !== 'usdMicros'
+      ? 'unknown'
+      : median !== null
+        ? usdg(median)
+        : rationalUsdg(numerator, denominator);
+  return `过去基线：${renderedBaseline}；${multiple}`;
+}
+
+export function formatObservedLiquidity(annotation: SwapLiquidityAnnotation | null): string {
+  if (annotation === null) return '未观察到 Swap 流动性状态';
+  const age =
+    annotation.ageSecInterval === null
+      ? '时距unknown'
+      : annotation.ageSecInterval.min === annotation.ageSecInterval.max
+        ? `距锚点${annotation.ageSecInterval.min}秒`
+        : `距锚点${annotation.ageSecInterval.min}–${annotation.ageSecInterval.max}秒`;
+  const freshness =
+    annotation.freshness === 'before-last-liquidity-action'
+      ? '之后发生过流动性动作'
+      : '最近 Swap 时观察值';
+  return `最近 Swap 观察到 L=${grouped(annotation.liquidityRaw)}，tick=${annotation.tick}，区块${grouped(annotation.observedAt.blockNumber)}，${age}；${freshness}；L 不是美元流动性，不代表当前 L，也不代表提款`;
 }
 
 function poolLabel(alert: AlertRecord): string {
@@ -61,16 +106,20 @@ export function formatAlert(alert: AlertRecord): string {
     `${poolLabel(alert)} — ${KIND_LABEL[alert.kind]}（暂未最终确认）`,
     `RWA：${alert.presentation?.rwaSymbol ?? 'unknown'}；pool：${alert.poolId}`,
     `最近5m：${usdg(recent?.usdMicros)}；${ratio(recent)}`,
-    `自然完整5m：${usdg(natural?.usdMicros)}；${ratio(natural, alert.baseline?.fiveMinute)}`,
+    `自然完整5m：${usdg(natural?.usdMicros)}；${ratio(natural, alert.baseline.fiveMinute)}`,
     `本分钟累计：${usdg(partial?.usdMicros)}${partial?.status === 'partial' ? '（仍在更新）' : ''}`,
     `最近5m次数：${metricCounts(recent)}`,
     `自然5m次数：${metricCounts(natural)}`,
     `本分钟次数：${metricCounts(partial)}`,
-    `本分钟${ratio(partial, alert.baseline?.minute)}`,
+    `本分钟${ratio(partial, alert.baseline.minute)}`,
     '时间：分钟归桶；本分钟累计可能仍在更新；数据可能修订',
     `归桶分钟：${new Date(alert.watermarkSec * 1_000).toISOString().slice(0, 16)}Z`,
     `关联代币：${tokens}`,
   ];
+  if (alert.logicalTimeSec !== undefined)
+    lines.push(
+      `评估桶时间：${new Date(alert.logicalTimeSec * 1_000).toISOString().slice(0, 16)}Z${alert.historical ? '（历史补评）' : ''}`,
+    );
   if (alert.presentation?.liquidityNote)
     lines.push(`流动性附注：${alert.presentation.liquidityNote}`);
   lines.push(

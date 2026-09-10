@@ -8,12 +8,22 @@ import {
   commitSignalDecision,
   projectSignals,
   retractSignals,
+  pruneSignalDerivedHistory,
 } from '../../src/signals/project.js';
+import { AlertOutbox } from '../../src/notify/outbox.js';
 import { initialSignalConfig } from '../../src/signals/config.js';
 import { decodeSignalState } from '../../src/signals/codec.js';
 import { buildMetricsReport } from '../../src/storage/metric-store.js';
 import type { AlertRecord, SignalDecision } from '../../src/signals/types.js';
-import { batch, hotLogs, metricInput, hash, swap } from '../helpers/alert-fixture.js';
+import {
+  batch,
+  hotLogs,
+  metricInput,
+  hash,
+  swap,
+  registration,
+  addr,
+} from '../helpers/alert-fixture.js';
 const dbs: Database.Database[] = [];
 afterEach(() => dbs.splice(0).forEach((db) => db.close()));
 function setup() {
@@ -234,4 +244,216 @@ test('ordinary current partial becoming a gap retracts its active candidate', ()
     batchId: 'current-prefix-became-gap',
   });
   expect(records(db).map((record) => record.kind)).toEqual(['candidate', 'retracted']);
+});
+
+test('unchanged recovery preserves cooldown and does not create a fresh episode', () => {
+  const db = setup();
+  commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, batch('a', hotLogs()));
+  const snapshot = db.prepare('select payload_json from signal_snapshots').get();
+  retractSignals(db, 's', { ...context, batchId: 'recheck' }, 'rechecking');
+  expect(db.prepare('select payload_json from signal_snapshots').get()).toEqual(snapshot);
+  projectSignals(db, metricInput, initialSignalConfig, {
+    ...context,
+    batchId: 'unchanged',
+    observedAtMs: 999999,
+  });
+  expect(records(db).map((record) => record.kind)).toEqual(['hot', 'retracted']);
+});
+
+test('fromBlock after old alert preserves its active identity and snapshot', () => {
+  const db = setup();
+  commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, batch('a', hotLogs()));
+  const snapshot = db.prepare('select payload_json from signal_snapshots').get();
+  expect(retractSignals(db, 's', context, 'later-evidence', 99999n)).toEqual([]);
+  expect(db.prepare('select payload_json from signal_snapshots').get()).toEqual(snapshot);
+  expect(db.prepare('select active from alerts').get()).toEqual({ active: 1 });
+});
+
+test('unrelated historical registration does not retract an existing hot pool', () => {
+  const db = setup();
+  commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, batch('a', hotLogs()));
+  const first = records(db)[0]!;
+  const snapshot = db
+    .prepare('select payload_json from signal_snapshots where pool_id=?')
+    .get(first.poolId);
+  const next = batch('b', hotLogs());
+  next.poolRegistrations = [
+    ...next.poolRegistrations!,
+    {
+      ...registration,
+      pool: { chainId: 4663, protocol: 'v3', address: addr(100) },
+      discoveredAt: swap(70),
+    },
+  ];
+  commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, next);
+  expect(records(db).filter((record) => record.poolId === first.poolId)).toHaveLength(1);
+  expect(
+    db.prepare('select payload_json from signal_snapshots where pool_id=?').get(first.poolId),
+  ).toEqual(snapshot);
+});
+
+test('same chain evidence with different batch and arrival time has stable alert IDs', () => {
+  const ids = ['receipt-one', 'receipt-two'].map((id, index) => {
+    const db = setup();
+    commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, {
+      ...batch(id, hotLogs()),
+      observedAtMs: index * 10000,
+    });
+    return records(db).map((record) => record.id);
+  });
+  expect(ids[0]).toEqual(ids[1]);
+});
+
+test('durable comparison ignores undefined properties removed by JSON storage', () => {
+  const db = setup();
+  commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, batch('a', hotLogs()));
+  const first = records(db)[0]!;
+  const decision = {
+    alertDraft: { ...first, revision: 1, absent: undefined },
+  } as unknown as SignalDecision;
+  db.transaction(() => commitSignalDecision(db, 's', decision, 'synthetic'))();
+  expect(records(db)).toHaveLength(1);
+});
+
+test('explicit derived retention preserves pending, failed and raw evidence', () => {
+  const db = setup();
+  commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, batch('a', hotLogs()));
+  const raw = db.prepare('select count(*) n from raw_logs').get();
+  const insert = db.prepare(
+    "insert into alert_outbox(scope_id,alert_id,revision,capture_mode,status,payload_json) values('s',?,1,'live',?,'{}')",
+  );
+  for (const status of ['sent', 'superseded', 'failed', 'pending']) insert.run(status, status);
+  expect(pruneSignalDerivedHistory(db, 's', { evaluations: 0, terminalDeliveries: 0 })).toEqual({
+    evaluations: 1,
+    terminalDeliveries: 2,
+  });
+  expect(db.prepare('select count(*) n from raw_logs').get()).toEqual(raw);
+  expect(db.prepare('select status from alert_outbox order by sequence').all()).toEqual([
+    { status: 'pending' },
+    { status: 'failed' },
+    { status: 'pending' },
+  ]);
+  expect(db.prepare('select count(*) n from alerts').get()).toEqual({ n: 1 });
+});
+
+test('material correction to consumed entry bucket revises the same episode under cooldown', () => {
+  const db = setup();
+  commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, batch('a', hotLogs()));
+  const first = records(db)[0]!;
+  const changed = [
+    ...hotLogs(),
+    ...hotLogs()
+      .slice(73, 78)
+      .map((log) => ({ ...log, logIndex: 1 })),
+  ];
+  commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, batch('corrected', changed));
+  expect(records(db).map((record) => record.kind)).toEqual(['hot', 'retracted', 'hot']);
+  expect(records(db).at(-1)).toMatchObject({
+    id: first.id,
+    episodeId: first.episodeId,
+    revision: 3,
+  });
+});
+
+test('closed bucket evidence excludes future minute transaction and future liquidity observation', () => {
+  const db = setup();
+  const future = swap(4741, 2000);
+  commitAcceptedSignalBatch(
+    db,
+    metricInput,
+    initialSignalConfig,
+    batch('a', [...hotLogs(), future]),
+  );
+  const closed = records(db).find((record) => record.kind === 'hot')!;
+  expect(closed.logicalTimeSec).toBe(4800);
+  expect(closed.presentation!.evidenceTxs).not.toContain(future.transactionHash);
+  expect(
+    closed.provenance!.evidenceEventIds.some((id) => id.includes(future.transactionHash)),
+  ).toBe(false);
+  expect(closed.presentation!.liquidityNote).toContain('unknown');
+});
+
+test('live identity with later backfill revision still withdraws live evidence', async () => {
+  const db = setup();
+  commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, {
+    ...batch('a', hotLogs()),
+    captureMode: 'live',
+  });
+  const first = records(db)[0]!;
+  const decision = {
+    alertDraft: { ...first, revision: 1, observedAtMs: 999999 },
+  } as unknown as SignalDecision;
+  db.transaction(() => commitSignalDecision(db, 's', decision, 'backfill'))();
+  retractSignals(db, 's', context, 'invalidated');
+  const seen: AlertRecord[] = [];
+  await new AlertOutbox(db).deliverPending((record) => {
+    seen.push(record);
+  });
+  expect(seen.map((record) => [record.kind, record.revision])).toEqual([['retracted', 3]]);
+  expect(db.prepare('select capture_mode,status from alert_outbox where revision=1').get()).toEqual(
+    { capture_mode: 'live', status: 'superseded' },
+  );
+});
+
+test('same closed signal has stable identity across different initial batch endpoints', () => {
+  const ids = [4800, 4801].map((tip) => {
+    const db = setup();
+    const source = batch(String(tip), hotLogs());
+    source.end = { number: BigInt(tip), timestampSec: tip + 60, hash: hash(tip) };
+    source.toBlock = BigInt(tip);
+    source.manifest.shards[0]!.request.toBlock = BigInt(tip);
+    commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, source);
+    return records(db).map((record) => record.id);
+  });
+  expect(ids[0]).toEqual(ids[1]);
+});
+
+test('quiet new receipt does not append redundant rule audit', () => {
+  const db = setup();
+  commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, batch('a', hotLogs()));
+  const count = db.prepare('select count(*) n from signal_evaluations').get();
+  const source = batch('new-head', hotLogs());
+  source.end = { number: 4801n, timestampSec: 4861, hash: hash(4801) };
+  source.toBlock = 4801n;
+  source.manifest.shards[0]!.request.toBlock = 4801n;
+  commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, source);
+  expect(db.prepare('select count(*) n from signal_evaluations').get()).toEqual(count);
+});
+
+test('delayed historical closed draft from live capture is persisted as backfill only', async () => {
+  const db = setup();
+  const source = { ...batch('delayed', hotLogs()), captureMode: 'live' as const };
+  source.end = { number: 5100n, timestampSec: 5160, hash: hash(5100) };
+  source.toBlock = 5100n;
+  source.manifest.shards[0]!.request.toBlock = 5100n;
+  commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, source);
+  expect(records(db).find((record) => record.kind === 'hot')!.historical).toBe(true);
+  expect(
+    db
+      .prepare(
+        "select distinct capture_mode from alert_outbox where json_extract(payload_json,'$.kind')='hot'",
+      )
+      .all(),
+  ).toEqual([{ capture_mode: 'backfill' }]);
+  expect(
+    await new AlertOutbox(db).deliverPending(() => {
+      throw new Error('historical must not deliver');
+    }),
+  ).toEqual({ sent: 0, failed: 0 });
+});
+
+test('detected recovery resets branch identity even when replacement tip advances', () => {
+  const db = setup();
+  commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, batch('old', hotLogs()));
+  const first = records(db)[0]!;
+  retractSignals(db, 's', context, 'scope-rechecking');
+  const source = batch('replacement', hotLogs());
+  source.end = { number: 4801n, timestampSec: 4861, hash: hash(900001) };
+  source.toBlock = 4801n;
+  source.manifest.shards[0]!.request.toBlock = 4801n;
+  commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, source);
+  const replacement = records(db).at(-1)!;
+  expect(replacement.kind).toBe('hot');
+  expect(replacement.id).not.toBe(first.id);
+  expect(replacement.endAnchor.hash).toBe(hash(900001));
 });

@@ -181,3 +181,58 @@ test('retracted-only drain leaves ordinary pending alerts untouched', async () =
     status: 'pending',
   });
 });
+
+test('backfill revision cannot supersede a pending live reminder', async () => {
+  const { db, outbox } = setup();
+  outbox.enqueue('s', alert, 'live');
+  outbox.enqueue('s', { ...alert, revision: 2 }, 'backfill');
+  const seen: number[] = [];
+  expect(
+    await outbox.deliverPending((record) => {
+      seen.push(record.revision);
+    }),
+  ).toEqual({ sent: 1, failed: 0 });
+  expect(seen).toEqual([1]);
+  expect(db.prepare('select status from alert_outbox where revision=2').get()).toEqual({
+    status: 'pending',
+  });
+});
+
+test('failed alert does not block unrelated alert identities', async () => {
+  const { db, outbox } = setup();
+  outbox.enqueue('s', alert, 'live');
+  outbox.enqueue('s', { ...alert, id: 'unrelated' }, 'live');
+  const seen: string[] = [];
+  expect(
+    await outbox.deliverPending((record) => {
+      seen.push(record.id);
+      if (record.id === 'a') throw new Error('failed');
+    }),
+  ).toEqual({ sent: 1, failed: 1 });
+  expect(seen).toEqual(['a', 'unrelated']);
+  expect(db.prepare("select status from alert_outbox where alert_id='a'").get()).toEqual({
+    status: 'failed',
+  });
+});
+
+test('alerts SQL rejects invalid capture mode and active flag', () => {
+  const { db } = setup();
+  const insert = db.prepare(
+    'insert into alerts(scope_id,id,revision,capture_mode,active,payload_json) values(?,?,?,?,?,?)',
+  );
+  expect(() => insert.run('s', 'a', 1, 'invalid', 1, '{}')).toThrow();
+  expect(() => insert.run('s', 'a', 1, 'live', 2, '{}')).toThrow();
+  insert.run('s', 'a', 1, 'live', 1, '{}');
+  expect(() => db.prepare('update alerts set active=2').run()).toThrow();
+});
+
+test('pending scope drain uses a partial sequence index', () => {
+  const { db } = setup();
+  const plan = db
+    .prepare(
+      "explain query plan select sequence,payload_json from alert_outbox where capture_mode='live' and status in ('pending','failed') and scope_id=? order by sequence",
+    )
+    .all('s');
+  expect(JSON.stringify(plan)).toContain('alert_outbox_live_pending_scope');
+  expect(JSON.stringify(plan)).not.toContain('TEMP B-TREE');
+});

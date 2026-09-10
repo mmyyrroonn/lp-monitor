@@ -1,5 +1,5 @@
 import { CHAIN_ID } from '../domain/chain.js';
-import { readFileSync } from 'node:fs';
+import { loadValidatedJson } from '../config/json-file.js';
 import { z } from 'zod';
 import { ConfigError } from '../config/env.js';
 const schema = z.strictObject({
@@ -17,14 +17,10 @@ const schema = z.strictObject({
 });
 export type MetricMetadata = z.infer<typeof schema>;
 export function loadMetricMetadata(path: string): MetricMetadata {
-  try {
-    const data = schema.parse(JSON.parse(readFileSync(path, 'utf8')));
-    if (new Set(data.entries.map((e) => e.address)).size !== data.entries.length)
-      throw new Error('duplicate');
-    return data;
-  } catch {
-    throw new ConfigError('Invalid metric metadata cache');
-  }
+  const data = loadValidatedJson(path, 'metric metadata cache', (value) => schema.parse(value));
+  if (new Set(data.entries.map((entry) => entry.address)).size !== data.entries.length)
+    throw new ConfigError('Invalid metric metadata cache: duplicate entries.address');
+  return data;
 }
 /** Cached decimals are a documented carry-forward assumption from this anchor.
  * A snapshot does not establish decimals for earlier blocks or unknown tokens. */

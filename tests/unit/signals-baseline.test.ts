@@ -15,7 +15,10 @@ it('uses only closed past same scale and returns null on insufficient and zero',
     sample(120, 99n),
   ];
   expect(signalBaseline(current, mixed, 2).status).toBe('warming');
-  expect(signalBaseline(current, [sample(0, 0n), sample(60, 0n)], 2).status).toBe('zero-baseline');
+  const zero = signalBaseline(current, [sample(0, 0n), sample(60, 0n)], 2);
+  expect(zero.status).toBe('zero-baseline');
+  expect(zero.multiplier).toBeNull();
+  expect(meetsMultiple(300000000000n, zero, 5)).toBe(false);
   expect(signalBaseline(current, [sample(0, 10n), sample(60, 10n)], 2).multiplier).toBe(5);
 });
 it('exact half median comparison above Number precision', () => {

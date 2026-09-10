@@ -51,6 +51,7 @@ import { readFileSync } from 'node:fs';
 import { AlertOutbox } from '../../src/notify/outbox.js';
 import { encodeSignalState } from '../../src/signals/codec.js';
 import type { AlertRecord } from '../../src/signals/types.js';
+import { signalBaseline } from '../../src/signals/baseline.js';
 
 test.each([
   { fork: false, outage: false },
@@ -89,20 +90,48 @@ test.each([
         const { scope_id: scope } = db.prepare('select scope_id from signal_cursors').get() as {
           scope_id: string;
         };
-        const record = {
+        const pool = {
+          chainId: 4663 as const,
+          protocol: 'v3' as const,
+          address: '0x0000000000000000000000000000000000000010' as const,
+        };
+        const baseline = signalBaseline(
+          { startSec: 1200, endSec: 1260, status: 'warming', value: null, unit: null },
+          [],
+          60,
+        );
+        const record: AlertRecord = {
           id: 'crash-before-delivery',
           revision: 1,
           status: 'provisional',
           kind: 'hot',
           poolId: 'fixture',
+          pool,
+          ruleVersion: 'fixture-v1',
+          episodeId: 'fixture-episode',
+          baseline: { minute: baseline, fiveMinute: baseline },
           atBatchId: 'seed',
-          endAnchor: { number: 200n, hash: '0x' + '0'.repeat(62) + 'c8', timestampSec: 1200 },
+          endAnchor: {
+            number: 200n,
+            hash: '0x00000000000000000000000000000000000000000000000000000000000000c8',
+            timestampSec: 1200,
+          },
           observedAtMs: 1200000,
           watermarkSec: 1200,
           reasons: [],
-          metrics: { recentClosed5x1m: null, naturalClosed5m: null, partialCurrent: null },
+          metrics: {
+            pool,
+            poolId: 'fixture',
+            minutes: [],
+            natural5mBuckets: [],
+            recentClosed1m: null,
+            unknownTimeBlockCounts: [],
+            recentClosed5x1m: null,
+            naturalClosed5m: null,
+            partialCurrent: null,
+          },
           coverage: 'complete',
-        } as unknown as AlertRecord;
+        };
         db.prepare(
           'insert into alerts(scope_id,id,revision,capture_mode,active,payload_json) values(?,?,?,?,?,?)',
         ).run(scope, record.id, 1, 'live', 1, encodeSignalState(record));

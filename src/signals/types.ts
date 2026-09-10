@@ -33,10 +33,14 @@ export type SignalSnapshot = {
   lowBuckets: number;
   entryThreshold: bigint | null;
   lastAlertKind: AlertKind | null;
-  alertSequence: number;
+  candidateMinuteStartSec?: number;
+  candidateFingerprint?: string;
+  lastHeatSec?: number;
 };
 export type AlertDraft = {
   id: string;
+  historical?: boolean;
+  logicalTimeSec?: number;
   revision: 1;
   status: 'provisional';
   kind: AlertKind;
@@ -72,4 +76,6 @@ export type SignalDecision = {
   nextSnapshot: SignalSnapshot;
   alertDraft: AlertDraft | null;
   matches: readonly RuleMatch[];
+  alertDrafts?: readonly AlertDraft[];
+  evaluations?: readonly { endSec: number; matches: readonly RuleMatch[] }[];
 };

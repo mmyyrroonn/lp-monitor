@@ -172,13 +172,14 @@ it('keeps cooling episode through partial candidate until confirmed reheat', () 
   );
   expect(hot.alertDraft?.kind).toBe('reheat');
 });
-it('does not emit a stale last closed bucket after an unresolved interval', () => {
+it('evaluates a delayed last closed bucket as historical', () => {
   const d = evaluateSignal(
     initialSignalSnapshot(),
     input(5100, [...history, bucket(3600, 120000)]),
     initialSignalConfig,
   );
-  expect(d.alertDraft).toBeNull();
+  expect(d.alertDraft?.kind).toBe('hot');
+  expect(d.alertDraft?.historical).toBe(true);
 });
 it('stable hot identity across upgrade revisions and epoch resets separate IDs', () => {
   const a = input(3900, [...history, bucket(3600, 120000)]);
@@ -311,15 +312,15 @@ it('upgrades an already-hot pool after one low bucket without confirmation', () 
   expect(upgraded.nextSnapshot.lastAlertVolume).toBe(100000n * 1_000_000n);
   expect(upgraded.nextSnapshot.lowBuckets).toBe(0);
   expect(evaluateSignal(upgraded.nextSnapshot, next, initialSignalConfig).alertDraft).toBeNull();
-  for (const coverage of ['gap', 'rechecking'] as const) {
+  for (const coverage of ['rechecking'] as const) {
     expect(
       evaluateSignal(low.nextSnapshot, { ...next, coverage }, initialSignalConfig).alertDraft,
     ).toBeNull();
   }
   expect(
     evaluateSignal(low.nextSnapshot, { ...next, watermarkSec: 5100 }, initialSignalConfig)
-      .alertDraft,
-  ).toBeNull();
+      .alertDraft?.historical,
+  ).toBe(true);
   expect(
     evaluateSignal({ ...low.nextSnapshot, lastAlertScale: '1m' }, next, initialSignalConfig)
       .alertDraft,
@@ -352,13 +353,13 @@ it('upgrades after ten seconds while the same-level cooldown remains active', ()
   const firstInput = input(4190, [...history, bucket(3600, 120000)]);
   const first = evaluateSignal(initialSignalSnapshot(), firstInput, initialSignalConfig);
   expect(first.alertDraft?.kind).toBe('hot');
-  expect(first.nextSnapshot.lastAlertSec).toBe(4190);
+  expect(first.nextSnapshot.lastAlertSec).toBe(3900);
   const normal = evaluateSignal(
     first.nextSnapshot,
     input(4200, [...firstInput.metrics.natural5mBuckets, bucket(3900, 120000)]),
     initialSignalConfig,
   );
-  expect(normal.alertDraft).toBeNull();
+  expect(normal.alertDraft?.kind).toBe('hot');
   const upgraded = evaluateSignal(
     first.nextSnapshot,
     input(4200, [...firstInput.metrics.natural5mBuckets, bucket(3900, 240000)]),
@@ -368,4 +369,152 @@ it('upgrades after ten seconds while the same-level cooldown remains active', ()
   expect(upgraded.alertDraft?.reasons).toContain('upgrade');
   expect(upgraded.alertDraft?.id).toBe(first.alertDraft?.id);
   expect(upgraded.nextSnapshot.lastAlertSec).toBe(4200);
+});
+it('evaluates all unseen buckets with as-of baselines and batch-independent identities', () => {
+  const buckets = [...history, bucket(3600, 120000), bucket(3900, 150000)];
+  const batch = evaluateSignal(initialSignalSnapshot(), input(4500, buckets), initialSignalConfig);
+  const first = evaluateSignal(
+    initialSignalSnapshot(),
+    input(4190, buckets.slice(0, -1)),
+    initialSignalConfig,
+  );
+  const second = evaluateSignal(first.nextSnapshot, input(4200, buckets), initialSignalConfig);
+  expect(batch.alertDrafts?.map((a) => a.id)).toEqual([
+    first.alertDraft?.id,
+    second.alertDraft?.id,
+  ]);
+  expect(batch.alertDrafts?.map((a) => a.logicalTimeSec)).toEqual([3900, 4200]);
+  expect(batch.alertDrafts?.every((a) => a.historical && a.observedAtMs === 4500000)).toBe(true);
+  expect(batch.alertDrafts?.[0]?.baseline.fiveMinute.median).toBe(10000000000n);
+});
+it('revises material current-minute candidates but suppresses unchanged and next-minute cooldown', () => {
+  const first = evaluateSignal(
+    initialSignalSnapshot(),
+    input(3601, [], 25000),
+    initialSignalConfig,
+  );
+  const revised = evaluateSignal(first.nextSnapshot, input(3603, [], 90000), initialSignalConfig);
+  expect(revised.alertDraft?.id).toBe(first.alertDraft?.id);
+  expect(revised.alertDraft?.metrics.partialCurrent?.usdMicros).toBe(90000000000n);
+  expect(
+    evaluateSignal(revised.nextSnapshot, input(3620, [], 90000), initialSignalConfig).alertDraft,
+  ).toBeNull();
+  expect(
+    evaluateSignal(revised.nextSnapshot, input(3661, [], 90000), initialSignalConfig).alertDraft,
+  ).toBeNull();
+});
+it('expires inactive episodes at configured logical time and ignores receipt identity', () => {
+  const firstInput = input(3900, [...history, bucket(3600, 120000)]);
+  const first = evaluateSignal(initialSignalSnapshot(), firstInput, initialSignalConfig);
+  expect(
+    evaluateSignal(
+      initialSignalSnapshot(),
+      { ...firstInput, batchId: 'refetched', observedAtMs: 9999999 },
+      initialSignalConfig,
+    ).alertDraft?.id,
+  ).toBe(first.alertDraft?.id);
+  const quiet = Array.from({ length: 12 }, (_, i) => bucket(3900 + i * 300, 30000));
+  const next = evaluateSignal(
+    first.nextSnapshot,
+    input(7800, [...firstInput.metrics.natural5mBuckets, ...quiet, bucket(7500, 500000)]),
+    initialSignalConfig,
+  );
+  expect(next.alertDraft?.kind).toBe('hot');
+  expect(next.alertDraft?.id).not.toBe(first.alertDraft?.id);
+});
+it('preserves complete cooling history through a transient current-minute gap', () => {
+  const first = evaluateSignal(
+    initialSignalSnapshot(),
+    input(3900, [...history, bucket(3600, 120000)]),
+    initialSignalConfig,
+  );
+  const low = evaluateSignal(
+    first.nextSnapshot,
+    input(4500, [bucket(3900, 1), bucket(4200, 1)]),
+    initialSignalConfig,
+  );
+  const gap = evaluateSignal(
+    low.nextSnapshot,
+    { ...input(4501, []), coverage: 'gap' },
+    initialSignalConfig,
+  );
+  expect(gap.nextSnapshot.lowBuckets).toBe(2);
+  expect(
+    evaluateSignal(gap.nextSnapshot, input(4800, [bucket(4500, 1)]), initialSignalConfig).alertDraft
+      ?.kind,
+  ).toBe('cooling');
+});
+it('reports absolute-only candidate and zero-baseline relative unavailability truthfully', () => {
+  const x = input(
+    3901,
+    Array.from({ length: 13 }, (_, i) => bucket(i * 300, i === 12 ? 300000 : 0)),
+    25000,
+  );
+  const d = evaluateSignal(initialSignalSnapshot(), x, initialSignalConfig);
+  expect(d.matches[0]?.reason).toBe('warming/absolute-only');
+  expect(d.matches[1]?.reason).toBe('zero-baseline/relative-unavailable');
+  expect(d.matches[1]?.matched).toBe(false);
+  const consecutive = evaluateSignal(
+    d.nextSnapshot,
+    input(4200, [...x.metrics.natural5mBuckets, bucket(3900, 300000)]),
+    initialSignalConfig,
+  );
+  expect(consecutive.alertDraft?.reasons).toContain('confirmConsecutive');
+});
+it('uses configurable episode expiry at the exact boundary', () => {
+  const config = {
+    ...initialSignalConfig,
+    episodeExpiry: { ...initialSignalConfig.episodeExpiry, threshold: 600 },
+  };
+  const firstInput = input(3900, [...history, bucket(3600, 120000)]);
+  const first = evaluateSignal(initialSignalSnapshot(), firstInput, config);
+  const before = evaluateSignal(
+    first.nextSnapshot,
+    input(4499, [...firstInput.metrics.natural5mBuckets, bucket(3900, 30000)]),
+    config,
+  );
+  expect(before.nextSnapshot.episodeId).toBe(first.nextSnapshot.episodeId);
+  const expired = evaluateSignal(
+    before.nextSnapshot,
+    input(4500, [
+      ...firstInput.metrics.natural5mBuckets,
+      bucket(3900, 30000),
+      bucket(4200, 500000),
+    ]),
+    config,
+  );
+  expect(expired.alertDraft?.kind).toBe('hot');
+  expect(expired.alertDraft?.id).not.toBe(first.alertDraft?.id);
+});
+it('qualifying heat suppressed by cooldown still extends episode activity', () => {
+  const config = {
+    ...initialSignalConfig,
+    cooldown: { ...initialSignalConfig.cooldown, threshold: 900 },
+    episodeExpiry: { ...initialSignalConfig.episodeExpiry, threshold: 600 },
+  };
+  const firstInput = input(3900, [...history, bucket(3600, 120000)]);
+  const first = evaluateSignal(initialSignalSnapshot(), firstInput, config);
+  const suppressed = evaluateSignal(
+    first.nextSnapshot,
+    input(4200, [...firstInput.metrics.natural5mBuckets, bucket(3900, 120000)]),
+    config,
+  );
+  expect(suppressed.alertDraft).toBeNull();
+  expect(suppressed.nextSnapshot.lastHeatSec).toBe(4200);
+  const low = evaluateSignal(suppressed.nextSnapshot, input(4500, [bucket(4200, 30000)]), config);
+  expect(low.nextSnapshot.episodeId).toBe(first.nextSnapshot.episodeId);
+});
+it('a current gap preserves independently complete closed confirmation but rechecking is fail-closed', () => {
+  const x = input(3900, [...history, bucket(3600, 120000)]);
+  expect(
+    evaluateSignal(initialSignalSnapshot(), { ...x, coverage: 'gap' }, initialSignalConfig)
+      .alertDraft?.kind,
+  ).toBe('hot');
+  const hot = evaluateSignal(initialSignalSnapshot(), x, initialSignalConfig);
+  const rechecking = evaluateSignal(
+    hot.nextSnapshot,
+    { ...input(9000, []), coverage: 'rechecking' },
+    initialSignalConfig,
+  );
+  expect(rechecking.nextSnapshot).toEqual(hot.nextSnapshot);
 });
