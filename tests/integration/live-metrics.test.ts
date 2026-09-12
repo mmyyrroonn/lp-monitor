@@ -99,7 +99,7 @@ it('does not replay accumulated history; old contributions expire and a new swap
       m: 13200,
     });
     const current = buildMetricsReport(db, metricInput, { live: { historyMinutes: 180 } });
-    expect(current.windows[0]!.recentClosed1m?.usdMicros).toBe(3000_000000n);
+    expect(current.windows[0]!.rolling?.['1m']?.usdMicros).toBe(3000_000000n);
     expect(
       current.valuations.every(
         (v) => v.time.minuteStartSec === null || v.time.minuteStartSec >= current.liveSinceSec!,
@@ -195,7 +195,7 @@ it('reads an upgraded database through the live cursor without writing or consul
     });
     const report = buildMetricsReport(db, metricInput);
     expect(report.at.number).toBe(4801n);
-    expect(report.windows[0]!.recentClosed5x1m?.swapCount).toBe(5);
+    expect(report.windows[0]!.rolling?.['5m']?.swapCount).toBe(5);
     expect(offline).not.toHaveBeenCalled();
     expect(db.prepare('select count(*) n from live_metric_cache').get()).toEqual(before);
   } finally {

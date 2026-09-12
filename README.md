@@ -143,19 +143,19 @@ pnpm lp inspect-pool --config config/robinhood.json --db data/recorder.sqlite --
 
 ```powershell
 pnpm lp metrics --db data/p3-acceptance.sqlite --rwa AMC --window 5m
-pnpm lp rank --db data/p3-acceptance.sqlite --sort volume5mClosed
+pnpm lp rank --db data/p3-acceptance.sqlite --sort volume5m
 pnpm lp rank --db data/p3-acceptance.sqlite --sort volumeMultiplier
 pnpm lp metrics --db data/p3-acceptance.sqlite --rwa AMC --window 5m --out artifacts/p3/amc-view.json
 pnpm lp metrics --db data/p3-acceptance.sqlite --save --out artifacts/p3/saved-view.json
 ```
 
-命令无需 RPC 环境，默认只读；`--save` 才更新派生分钟缓存，`--out` 导出 JSON。已有录制库先运行 `project --rebuild`；过期投影返回 4。默认 DB 为 `LP_DATA_DIR/recorder.sqlite`；仅支持 `--window 5m`。`--watchlist`、`--config` 继续决定独立 scope；`--metadata` 默认 `config/metric-metadata.json`。
+命令无需 RPC 环境，默认只读；`--save` 才更新派生分钟缓存，`--out` 导出 JSON。已有录制库先运行 `project --rebuild`；过期投影返回 4。默认 DB 为 `LP_DATA_DIR/recorder.sqlite`；支持 `--window 1m|5m|15m|1h`，省略时输出全部四种滚动窗口。`--watchlist`、`--config` 继续决定独立 scope；`--metadata` 默认 `config/metric-metadata.json`。
 
-输出分列 `partialCurrent`、`recentClosed1m`、`recentClosed5x1m`、`naturalClosed5m`，显示窗口时间、覆盖、基线样本数与计价单位。当前前缀失败时 RWA 与池累计均不可用。CLI 仅展示窗口摘要；全分钟列表由业务核心返回，并可通过 `--save` 存入 `metric_windows`，不可跳过新鲜度检查直接消费旧缓存。
+输出 `rolling.1m/5m/15m/1h`，均以已采集链上时间 T 为终点，统计 (T−时长, T]。自然窗口和本分钟累计不再作为实时窗口输出；边界交易缺少确定时间或覆盖不完整时标记不可用。CLI 仅展示窗口摘要；全分钟列表由业务核心返回，并可通过 `--save` 存入 `metric_windows`，不可跳过新鲜度检查直接消费旧缓存。
 
 同一 Swap 只计一个侧的成交；USDG 等值量和 `usdMicros` 为整数，十进制字符串无损保存。RWA 合计称 `poolActivity`，跨池交易重新去重；原币单位分开。未知估值、手续费、精确秒数继续为 null。默认比较前60个完整1m/12个完整5m，样本不足或零中位数不输出倍率。`baselineMedianNumerator/Denominator` 保留半整数中位数；`baselineMedian` 只在中位数为整数时显示。
 
-登记池没有成交仍保留零窗口，但不制造出生前的零历史。`activeMinutes` 统计有 Swap 的分钟；流动性动作另计。新池标签用最近5分钟发现位置；观察到的再活跃仅指已有活动后连续3个闭合安静分钟再次有 Swap，未替代 P4 提醒状态机。
+登记池没有成交仍保留零窗口，但不制造出生前的零历史。`activeMinutes` 统计窗口内有 Swap 的60秒分段；事件精度不足以判定分段时保持null；流动性动作另计。新池标签用最近5分钟发现位置；观察到的再活跃仅指已有活动后连续3个闭合安静分钟再次有 Swap，未替代 P4 提醒状态机。
 
 P0 身份快照中的 decimals 自记录块向后沿用；若与已知同高度哈希冲突则停用该条缓存，未知高度明确是历史沿用假设。新代币不默认18位；无价成交原币量和次数仍保留。USDG 近似美元只是显示假设，毛费不是 LP 净收益。
 
@@ -172,7 +172,7 @@ node artifacts/p4/verify-acceptance.mjs
 
 follow 默认只记录；--notify local 才在每个完整范围事务中更新P2/P3与信号，并在提交后输出控制台和数据库路径后追加 .alerts.jsonl 的文件。只接受local，不接受聊天/email/webhook地址。初始参数与开关见config/signals.initial.json：金额是USDG估值micro单位，20k为20000000000；更改阈值会改变配置hash并重检旧提醒。
 
-候选使用本分钟partial；热度确认使用自然完整5m，两种确认规则独立留痕。300秒冷却不屏蔽同口径翻倍升级或再热；缺口不判降温。样本不足/零基线/未知量保持null或unknown；原币不能套估值阈值。流动性动作与Swap后L仅作附注，不等于已验证撤资或LP收益。
+候选使用滚动过去1分钟；热度确认使用滚动过去5分钟，两种确认规则独立留痕。连续确认/降温比较相邻、不重叠的5分钟区间；15分钟和1小时用于统计，不新增提醒门槛。300秒冷却不屏蔽同口径翻倍升级或再热；缺口不判降温。样本不足/零基线/未知量保持null或unknown；原币不能套估值阈值。流动性动作与Swap后L仅作附注，不等于已验证撤资或LP收益。
 
 每条提醒有稳定id、递增revision和provisional标记。历史事件/时间/覆盖/登记修正会撤回受影响证据并重评当前状态；修复范围尚未恢复时也能保留撤回。文件写完而sent未落盘时允许重试，JSONL消费者应以id/revision识别重复。旧pending修订被新修订替代后跳过；普通backfill/synthetic不会投递到live sink。重启先重检历史锚点，再恢复旧live队列，旧历史不会自动提升为实时提醒。
 

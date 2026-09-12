@@ -45,6 +45,15 @@ test('metrics and rank are offline and reject stale/missing P2 projections with 
   expect(readerFactory).not.toHaveBeenCalled();
   expect(readFileSync(path)).toEqual(bytes);
 });
+test.each(['1m', '5m', '15m', '1h'])('accepts rolling window %s', async (window) => {
+  const dir = mkdtempSync(join(tmpdir(), 'p3-cli-'));
+  dirs.push(dir);
+  const path = join(dir, 'test.sqlite');
+  const db = openDatabase(path);
+  db.close();
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  expect(await runCli(['metrics', '--db', path, '--window', window], { environment: {} })).toBe(4);
+});
 test('P3 validates selectors, windows, sort and nonexistent db without creating it', async () => {
   for (const args of [
     ['metrics', '--window', '60s'],

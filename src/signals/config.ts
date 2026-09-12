@@ -59,6 +59,6 @@ export const initialSignalConfig: SignalConfig = parseSignalConfig({
 });
 export function signalConfigVersion(config: SignalConfig): string {
   return `${config.version}:${createHash('sha256')
-    .update(JSON.stringify(parseSignalConfig(config)))
+    .update(JSON.stringify({ windowSemantics: 'rolling-v1', config: parseSignalConfig(config) }))
     .digest('hex')}`;
 }

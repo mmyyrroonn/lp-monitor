@@ -1,3 +1,4 @@
+import type { RollingMetric } from '../metrics/rolling.js';
 import type { SwapLiquidityAnnotation } from '../metrics/liquidity.js';
 import type { AggregateMetric, MinuteMetric } from '../metrics/windows.js';
 import type { AlertKind, AlertRecord } from '../signals/types.js';
@@ -48,12 +49,12 @@ function count(value: number | null | undefined, suffix: string): string {
   return value === null || value === undefined ? `unknown${suffix}` : `${value}${suffix}`;
 }
 
-function metricCounts(metric: MinuteMetric | AggregateMetric | null): string {
+function metricCounts(metric: MinuteMetric | AggregateMetric | RollingMetric | null): string {
   return `Swap：${count(metric?.swapCount, '次')}；不同tx：${count(metric?.txCount, '笔')}；加池动作${count(metric?.addCount, '次')}、减池动作${count(metric?.removeCount, '次')}`;
 }
 
 function ratio(
-  metric: MinuteMetric | AggregateMetric | null,
+  metric: MinuteMetric | AggregateMetric | RollingMetric | null,
   baseline?: AlertRecord['baseline']['minute'],
 ): string {
   const median = baseline ? baseline.median : (metric?.baselineMedian ?? null);
@@ -116,6 +117,17 @@ export function formatAlert(alert: AlertRecord): string {
     `归桶分钟：${new Date(alert.watermarkSec * 1_000).toISOString().slice(0, 16)}Z`,
     `关联代币：${tokens}`,
   ];
+  if (alert.metrics.rolling) {
+    lines.splice(
+      2,
+      9,
+      ...Object.entries(alert.metrics.rolling).map(
+        ([name, m]) =>
+          `过去${name}：${usdg(m.usdMicros)}；Swap ${m.swapCount ?? 'unknown'}；交易 ${m.txCount ?? 'unknown'}；${m.status}；${name === '1m' ? ratio(m, alert.baseline.minute) : name === '5m' ? ratio(m, alert.baseline.fiveMinute) : ''}`,
+      ),
+      '时间：以已采集链上时间为终点的滚动窗口 (start, end]；边界不确定时不可用',
+    );
+  }
   if (alert.logicalTimeSec !== undefined)
     lines.push(
       `评估桶时间：${new Date(alert.logicalTimeSec * 1_000).toISOString().slice(0, 16)}Z${alert.historical ? '（历史补评）' : ''}`,

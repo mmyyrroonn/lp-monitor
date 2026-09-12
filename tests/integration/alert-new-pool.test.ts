@@ -4,7 +4,7 @@ import { commitAcceptedSignalBatch } from '../../src/signals/project.js';
 import { initialSignalConfig } from '../../src/signals/config.js';
 import { buildMetricsReport } from '../../src/storage/metric-store.js';
 import { batch, swap, anchor, metricInput } from '../helpers/alert-fixture.js';
-test('birth-minute observed 25k produces absolute-only candidate but never prebirth baseline', () => {
+test('new pool without a full rolling minute stays warming and cannot manufacture a baseline', () => {
   const db = openDatabase(':memory:');
   try {
     const b = batch('birth', [swap(4802, 25000)]);
@@ -12,18 +12,14 @@ test('birth-minute observed 25k produces absolute-only candidate but never prebi
     b.toBlock = 4805n;
     b.manifest.shards[0]!.request.toBlock = 4805n;
     const first = commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, b);
-    expect(first.alerts[0]).toMatchObject({
-      kind: 'candidate',
-      reasons: expect.arrayContaining(['warming/absolute-only', 'partial']),
-    });
+    expect(first.alerts).toEqual([]);
     const m = buildMetricsReport(db, metricInput).windows[0]!;
-    expect(m.partialCurrent).toMatchObject({ status: 'partial', usdMicros: 25000000000n });
-    expect(
-      m.minutes
-        .filter((x) => x.minuteStartSec < 4860)
-        .every((x) => x.status === 'warming' && x.usdMicros === null),
-    ).toBe(true);
-    expect(m.partialCurrent!.baselineSampleCount).toBe(0);
+    expect(m.rolling!['1m']).toMatchObject({
+      status: 'warming',
+      usdMicros: null,
+      baselineSampleCount: 0,
+    });
+    expect(m.rolling!['1m'].reasons).toContain('pool-lifetime-incomplete');
     const next = batch('after-birth', [swap(4802, 25000)]);
     next.previous = b.end;
     next.end = anchor(4865);

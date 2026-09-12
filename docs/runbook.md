@@ -183,3 +183,11 @@ pnpm lp replay --manifest <portable-manifest.json> --rules <rules.json> --mode m
 | 本机通知                     | live follow 可写控制台和 `data/p6.sqlite.alerts.jsonl`，支持 revision/retraction | backfill 不重发旧热点；阈值效果尚未通过实录验证                 |
 | 分钟历史评估                 | 引擎支持 minute-close，P5 replay/study 入口已实现                                | 实录缺少合格 portable 输入时不得声称 recorded-observed 对照通过 |
 | 远端通知、自动交易、永久服务 | 未实现且不在 P6 范围                                                             | 不自动安装服务，不发交易或钱包操作                              |
+
+## 实时滚动窗口（2026-09-12）
+
+实时指标为过去 1 分钟、5 分钟、15 分钟、1 小时，区间统一为 (T-duration,T]，T 是已采集链上时间，并非电脑当前时间。不再输出自然五分钟和本分钟累计。
+
+`metrics --window 1m|5m|15m|1h` 选择窗口，省略时输出四种；`rank --sort volume5m` 按过去五分钟排序（旧参数 volume5mClosed 仅作兼容别名）。新池不足完整窗口、覆盖缺口或边界交易只有分钟精度时显示不可用；完整且没有交易才为零。15m/1h 暂不计算相对基线；1m/5m 使用前置、不重叠同长度区间的中位数。
+
+候选/确认使用滚动1m/5m，连续确认和降温仍要求不重叠区间，轮询次数不能代替持续时长。历史补评仅进入 backfill，不发送实时通知。指标/信号语义版本已变化，旧状态会重新核对；显式 minute-close 历史回放保留旧窗口口径，不代表新实时统计。

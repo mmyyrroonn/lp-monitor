@@ -128,8 +128,8 @@ function batch(id: string, logs: RawLog[]): RecordedRangeBatch {
       ref,
       time: {
         minuteStartSec: Math.floor((Number(ref.blockNumber) + 60) / 60) * 60,
-        exactTimestampSec: null,
-        source: 'minute-boundary',
+        exactTimestampSec: Number(ref.blockNumber) + 60,
+        source: 'log-verified',
       },
     })),
     boundaries: Array.from({ length: 80 }, (_, i) => {
@@ -160,7 +160,7 @@ test('replay persists lossless metrics, rejects stale P2 and recomputes removed 
   });
   const store = new SqliteMetricStore(db);
   store.replace(first);
-  expect(first.windows[0]?.recentClosed5x1m).toMatchObject({ swapCount: 5, usdMicros: 10000000n });
+  expect(first.windows[0]?.rolling?.['5m']).toMatchObject({ swapCount: 5, usdMicros: 10000000n });
   expect(db.prepare('select count(*) as n from metric_windows').get()).toMatchObject({
     n: expect.any(Number),
   });
@@ -169,7 +169,7 @@ test('replay persists lossless metrics, rejects stale P2 and recomputes removed 
   projection.rebuild('s', 's', 'c');
   const next = buildMetricsReport(db, input);
   store.replace(next);
-  expect(next.windows[0]?.recentClosed5x1m).toMatchObject({ swapCount: 4, usdMicros: 8000000n });
+  expect(next.windows[0]?.rolling?.['5m']).toMatchObject({ swapCount: 4, usdMicros: 8000000n });
   expect(next.sourceHash).not.toBe(first.sourceHash);
   expect(buildMetricsReport(db, input)).toEqual(next);
   expect(db.prepare('select count(*) as n from raw_logs').get()).toEqual({ n: 79 });
@@ -192,7 +192,7 @@ test('retime, scope mismatch and a changed boundary cannot reuse cached closed w
   db.prepare('delete from minute_boundaries where timestamp_sec=4800').run();
   const revised = buildMetricsReport(db, input);
   expect(revised.sourceHash).not.toBe(next.sourceHash);
-  expect(revised.windows[0]?.recentClosed5x1m ?? null).toBeNull();
+  expect(revised.windows[0]?.rolling?.['5m'].usdMicros).toBeNull();
 });
 test('metric replacement rolls back windows and cursor together on failure', () => {
   const { db, raw, projection } = setup();
@@ -238,7 +238,7 @@ test('removing the final active swap keeps the registered pool and recomputes cl
   projection.rebuild('s', 's', 'c');
   const report = buildMetricsReport(db, input);
   expect(report.windows).toHaveLength(1);
-  expect(report.windows[0]?.recentClosed5x1m).toMatchObject({
+  expect(report.windows[0]?.rolling?.['5m']).toMatchObject({
     swapCount: 0,
     txCount: 0,
     usdMicros: 0n,
@@ -251,7 +251,7 @@ test('RWA partial current is unavailable when the current accepted prefix is inc
   projection.rebuild('s', 's', 'c');
   db.prepare('delete from fetch_shards').run();
   const report = buildMetricsReport(db, input);
-  expect(report.rwa[0]?.partialCurrent).toMatchObject({ available: false, activity: null });
+  expect(report.rwa[0]?.rolling['1m']).toMatchObject({ available: false, activity: null });
 });
 
 test.each([true, false])(
@@ -302,7 +302,7 @@ test('retained block range is explicit and remains uncertified across gaps and u
     coverageVerified: false,
     swapCount: 1,
   });
-  expect(report.rwa[0]!.closed5m.available).toBe(false);
+  expect(report.rwa[0]!.rolling['5m'].available).toBe(false);
   new SqliteMetricStore(db).replace(report);
   const row = db.prepare('select payload_json from metric_cursors').get() as {
     payload_json: string;
@@ -389,7 +389,7 @@ test('offline metrics and rank publish observed output, explicit retained bounds
     });
     if (command === 'rank')
       expect(output.ranked).toMatchObject([
-        { volume5mClosed: '2000000', txCount: 1, multiplierUnit: 'usdMicros' },
+        { volume5m: '2000000', txCount: 1, multiplierUnit: 'usdMicros' },
       ]);
   }
   expect(readerFactory).not.toHaveBeenCalled();

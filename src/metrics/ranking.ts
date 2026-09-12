@@ -1,13 +1,36 @@
 import type { PoolMetricWindows } from './windows.js';
 
-export type PoolRankSort = 'volume5mClosed' | 'volumeMultiplier';
+export type PoolRankSort = 'volume5m' | 'volume5mClosed' | 'volumeMultiplier';
 
 export function rankPools(
   windows: readonly PoolMetricWindows[],
   sortBy: PoolRankSort,
 ): readonly PoolMetricWindows[] {
+  if (windows.some((w) => w.rolling)) {
+    const key = sortBy !== 'volumeMultiplier' ? '5m' : '1m';
+    const value = (w: PoolMetricWindows) =>
+      sortBy !== 'volumeMultiplier'
+        ? w.rolling?.[key].usdMicros
+        : w.rolling?.[key].volumeMultiplier;
+    return windows
+      .filter(
+        (w) =>
+          w.rolling?.[key].status === 'closed' &&
+          value(w) !== null &&
+          value(w) !== undefined &&
+          (w.rolling[key].swapCount ?? 0) > 0,
+      )
+      .sort((a, b) =>
+        value(a)! > value(b)!
+          ? -1
+          : value(a)! < value(b)!
+            ? 1
+            : (b.rolling![key].txCount ?? 0) - (a.rolling![key].txCount ?? 0) ||
+              a.poolId.localeCompare(b.poolId),
+      );
+  }
   const included = windows.filter((window) =>
-    sortBy === 'volume5mClosed'
+    sortBy !== 'volumeMultiplier'
       ? window.recentClosed5x1m?.usdMicros !== null &&
         window.recentClosed5x1m?.usdMicros !== undefined &&
         window.recentClosed5x1m.swapCount > 0
@@ -18,19 +41,19 @@ export function rankPools(
   );
   return [...included].sort((a, b) => {
     const av =
-      sortBy === 'volume5mClosed'
+      sortBy !== 'volumeMultiplier'
         ? a.recentClosed5x1m!.usdMicros!
         : a.recentClosed1m!.volumeMultiplier!;
     const bv =
-      sortBy === 'volume5mClosed'
+      sortBy !== 'volumeMultiplier'
         ? b.recentClosed5x1m!.usdMicros!
         : b.recentClosed1m!.volumeMultiplier!;
     if (av < bv) return 1;
     if (av > bv) return -1;
     const at =
-      sortBy === 'volume5mClosed' ? a.recentClosed5x1m!.txCount : a.recentClosed1m!.txCount!;
+      sortBy !== 'volumeMultiplier' ? a.recentClosed5x1m!.txCount : a.recentClosed1m!.txCount!;
     const bt =
-      sortBy === 'volume5mClosed' ? b.recentClosed5x1m!.txCount : b.recentClosed1m!.txCount!;
+      sortBy !== 'volumeMultiplier' ? b.recentClosed5x1m!.txCount : b.recentClosed1m!.txCount!;
     return bt - at || a.poolId.localeCompare(b.poolId);
   });
 }

@@ -69,7 +69,7 @@ export const registration: PersistedPoolRegistration = {
   source: 'synthetic',
 };
 export function hotLogs(): RawLog[] {
-  return Array.from({ length: 79 }, (_, i) => swap(70 + i * 60, i >= 73 && i <= 77 ? 24000 : 2000));
+  return Array.from({ length: 79 }, (_, i) => swap(70 + i * 60, i >= 73 && i <= 77 ? 30000 : 2000));
 }
 export function batch(id: string, logs: RawLog[]): RecordedRangeBatch {
   return {
@@ -107,8 +107,8 @@ export function batch(id: string, logs: RawLog[]): RecordedRangeBatch {
       ref,
       time: {
         minuteStartSec: Math.floor((Number(ref.blockNumber) + 60) / 60) * 60,
-        exactTimestampSec: null,
-        source: 'minute-boundary',
+        exactTimestampSec: Number(ref.blockNumber) + 60,
+        source: 'log-verified',
       },
     })),
     boundaries: Array.from({ length: 80 }, (_, i) => {

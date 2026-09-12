@@ -1,3 +1,10 @@
+import {
+  buildRollingMetrics,
+  ROLLING_DURATIONS,
+  inRollingWindow,
+  rollingCoverage,
+  type RollingWindowName,
+} from '../metrics/rolling.js';
 import { readCachedMetricMetadata } from './token-metadata.js';
 import { CHAIN_ID } from '../domain/chain.js';
 import type Database from 'better-sqlite3';
@@ -22,7 +29,7 @@ import { buildMinuteMetrics, type MetricEvent } from '../metrics/windows.js';
 import { summarizeLiquidityActions, annotateLatestSwapLiquidity } from '../metrics/liquidity.js';
 import { estimateGrossSwapFee } from '../metrics/fees.js';
 
-export const METRIC_VERSION = 'p3-v4';
+export const METRIC_VERSION = 'rolling-v1';
 export class StaleMetricProjectionError extends Error {
   constructor() {
     super('P2 projection is stale or missing; run project --rebuild');
@@ -42,6 +49,8 @@ export type MetricsReport = ReturnType<typeof buildMetricsReport>;
 /** A single SQLite read snapshot covers freshness, decoded input, registration and
  * minute evidence. Consumers never read naked projected_events or cached metrics. */
 export interface MetricBuildOptions {
+  /** Reproduce the explicitly selected legacy minute-close replay format. */
+  legacyWindows?: boolean;
   live?: { historyMinutes: number };
   projection?: StoredProjection;
 }
@@ -217,7 +226,7 @@ export function buildMetricsReport(
           : null,
       });
     }
-    const windows = buildMinuteMetrics(
+    const windows = (options.legacyWindows ? buildMinuteMetrics : buildRollingMetrics)(
       sinceSec === null
         ? metricEvents
         : metricEvents.filter(
@@ -238,24 +247,8 @@ export function buildMetricsReport(
       },
     );
     const current = Math.floor(projection.end.timestampSec / 60) * 60;
-    const lastFive = coverage.filter(
-      (c) => c.minuteStartSec >= current - 300 && c.minuteStartSec < current,
-    );
-    const closedFive = lastFive.length === 5 && lastFive.every((c) => c.complete);
-    const prefix = coverage.find((c) => c.minuteStartSec === current);
-    const prefixAvailable =
-      prefix !== undefined &&
-      prefix.fromBlock !== null &&
-      prefix.toBlock !== null &&
-      prefix.reasons.every((r) => r === 'watermark-partial');
     const rwa = input.assets.assets.map((asset) => {
       const swaps = valuedByRwa.get(asset.address) ?? [];
-      const recent = swaps.filter(
-        (s) =>
-          s.time.minuteStartSec !== null &&
-          s.time.minuteStartSec >= current - 300 &&
-          s.time.minuteStartSec < current,
-      );
       return {
         asset,
         poolIds: registrations
@@ -266,20 +259,38 @@ export function buildMetricsReport(
           ...retained,
           coverageVerified: false as const,
         },
-        closed5m: {
-          startSec: current - 300,
-          endSec: current,
-          available: closedFive,
-          activity: closedFive ? aggregateRwa(recent) : null,
-        },
-        partialCurrent: {
-          startSec: current,
-          endSec: current + 60,
-          available: prefixAvailable,
-          activity: prefixAvailable
-            ? aggregateRwa(swaps.filter((s) => s.time.minuteStartSec === current))
-            : null,
-        },
+        rolling: Object.fromEntries(
+          Object.entries(ROLLING_DURATIONS).map(([name, duration]) => {
+            const endSec = projection.end.timestampSec,
+              startSec = endSec - duration;
+            const reasons = rollingCoverage(coverage, startSec, endSec, endSec);
+            const selected = swaps.filter((s) => {
+              const inside = inRollingWindow(s.time, startSec, endSec, true);
+              if (inside === null) reasons.push('boundary-time-unknown');
+              return inside === true;
+            });
+            const available = reasons.length === 0;
+            return [
+              name,
+              {
+                startSec,
+                endSec,
+                available,
+                reasons: [...new Set(reasons)],
+                activity: available ? aggregateRwa(selected) : null,
+              },
+            ];
+          }),
+        ) as Record<
+          RollingWindowName,
+          {
+            startSec: number;
+            endSec: number;
+            available: boolean;
+            reasons: string[];
+            activity: ReturnType<typeof aggregateRwa> | null;
+          }
+        >,
       };
     });
     const observationByPool = new Map<string, (typeof projection.observations)[number]>();
@@ -336,10 +347,11 @@ export function buildMetricsReport(
         lastSwap: annotateLatestSwapLiquidity(observation, projection.end),
       };
     });
+    const metricVersion = options.legacyWindows ? 'p3-v4-legacy' : METRIC_VERSION;
     const sourceHash = createHash('sha256')
       .update(
         encodeJson({
-          version: METRIC_VERSION,
+          version: metricVersion,
           projectionSourceHash: projection.sourceHash,
           usdg: input.usdg,
           assets: input.assets.assets,
@@ -353,7 +365,7 @@ export function buildMetricsReport(
     return {
       liveSinceSec: sinceSec,
       windowContextIncomplete: projection.windowContextIncomplete === true,
-      version: METRIC_VERSION,
+      version: metricVersion,
       chainId: CHAIN_ID,
       scopeId: input.scopeId,
       registryScopeId: input.registryScopeId,

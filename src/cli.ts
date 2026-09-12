@@ -19,8 +19,8 @@ const help = `Robinhood read-only P0/P1/P2/P3/P4/P5/P6 CLI
   pnpm lp replay --manifest PATH --rules PATH --mode minute-close|recorded-observed --out PATH
   pnpm lp study --cases config/history.cases.json --grid config/signals.grid.json --out artifacts/p5
   P5: offline, uses existing raw only; insufficient history exits 4.
-  pnpm lp metrics --db data/recorder.sqlite --rwa AMC --window 5m
-  pnpm lp rank --db data/recorder.sqlite --sort volume5mClosed
+  pnpm lp metrics --db data/recorder.sqlite --rwa AMC --window 15m
+  pnpm lp rank --db data/recorder.sqlite --sort volume5m
   P3: offline; --out PATH saves JSON, --save persists derived cache.
   pnpm lp project --db data/recorder.sqlite --rebuild
   pnpm lp inspect-pool --db data/recorder.sqlite --pool amc-usdg-v3

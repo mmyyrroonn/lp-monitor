@@ -71,6 +71,9 @@ export type UnknownTimeBlockCount = {
   readonly zeroDeltaCount: number;
 };
 export type PoolMetricWindows = {
+  readonly rolling?: import('./rolling.js').RollingWindows;
+  readonly rollingHistory1m?: readonly import('./rolling.js').RollingMetric[];
+  readonly rollingHistory5m?: readonly import('./rolling.js').RollingMetric[];
   readonly pool: PoolRef;
   readonly poolId: string;
   readonly minutes: readonly MinuteMetric[];
@@ -89,6 +92,7 @@ export type MetricMemo = <T>(
   compute: () => T,
 ) => T;
 export type BuildMinuteMetricOptions = {
+  readonly internalMinutesOnly?: boolean;
   readonly memo?: MetricMemo;
   readonly pools?: readonly {
     pool: PoolRef;
@@ -224,29 +228,33 @@ export function buildMinuteMetrics(
             : compute();
         });
       applyMinuteBaselines(minutes, minuteMinimumSamples, oneMinuteLimit);
-      const natural5mBuckets = buildNaturalBuckets(
-        minutes,
-        eventByMinute,
-        fiveMinuteMinimumSamples,
-        fiveMinuteLimit,
-        options.memo
-          ? (key, at, input, compute) => options.memo!(poolId + ':' + key, at, input, compute)
-          : undefined,
-      );
+      const natural5mBuckets = options.internalMinutesOnly
+        ? []
+        : buildNaturalBuckets(
+            minutes,
+            eventByMinute,
+            fiveMinuteMinimumSamples,
+            fiveMinuteLimit,
+            options.memo
+              ? (key, at, input, compute) => options.memo!(poolId + ':' + key, at, input, compute)
+              : undefined,
+          );
       const closed = minutes.filter(
         (item) => item.status === 'closed' && item.minuteStartSec < currentMinute,
       );
       const recentClosed1m = closed.at(-1) ?? null;
-      const recentClosed5x1m = recentFive(
-        minutes,
-        eventByMinute,
-        currentMinute,
-        fiveMinuteMinimumSamples,
-        fiveMinuteLimit,
-        options.memo
-          ? (key, at, input, compute) => options.memo!(poolId + ':' + key, at, input, compute)
-          : undefined,
-      );
+      const recentClosed5x1m = options.internalMinutesOnly
+        ? null
+        : recentFive(
+            minutes,
+            eventByMinute,
+            currentMinute,
+            fiveMinuteMinimumSamples,
+            fiveMinuteLimit,
+            options.memo
+              ? (key, at, input, compute) => options.memo!(poolId + ':' + key, at, input, compute)
+              : undefined,
+          );
       const naturalClosed5m =
         natural5mBuckets.filter((item) => item.endSec <= currentMinute).at(-1) ?? null;
       const core: WindowCore = {

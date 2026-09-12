@@ -1,3 +1,4 @@
+import { inRollingWindow } from '../metrics/rolling.js';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import type Database from 'better-sqlite3';
@@ -338,8 +339,7 @@ function presentationIndex(report: MetricsReport, input: MetricInput) {
     const local = (byPool.get(poolId) ?? []).filter(
       (v) =>
         v.time.minuteStartSec !== null &&
-        v.time.minuteStartSec >= Math.floor(endSec / 300) * 300 - 300 &&
-        (closed ? v.time.minuteStartSec < endSec : v.time.minuteStartSec <= endSec),
+        inRollingWindow(v.time, endSec - 300, endSec, endSec === report.at.timestampSec) === true,
     );
     const txs = [...new Set(local.map((v) => v.transactionHash))];
     return {
@@ -493,8 +493,13 @@ export function projectSignals(
           row && !branchChanged
             ? decodeSignalState<SignalSnapshot>(row.payload_json)
             : initialSignalSnapshot();
-        const coverage =
-          w.partialCurrent?.status === 'partial'
+        const coverage = w.rolling
+          ? w.rolling['1m'].status === 'closed'
+            ? 'complete'
+            : w.rolling['1m'].status === 'gap'
+              ? 'gap'
+              : 'warming'
+          : w.partialCurrent?.status === 'partial'
             ? 'complete'
             : w.partialCurrent?.status === 'gap'
               ? 'gap'
@@ -537,7 +542,15 @@ export function projectSignals(
         const drafts = decision.alertDrafts ?? (decision.alertDraft ? [decision.alertDraft] : []);
         // Audit material state transitions, matched decisions and historical
         // evaluations. Quiet pools do not append a receipt for every poll.
-        if (snapshotChanged || drafts.length > 0)
+        const auditChanged = !isDeepStrictEqual(
+          {
+            ...previous,
+            lastFiveEndSec: decision.nextSnapshot.lastFiveEndSec,
+            lastHeatSec: decision.nextSnapshot.lastHeatSec,
+          },
+          decision.nextSnapshot,
+        );
+        if (auditChanged || drafts.length > 0)
           statement(
             db,
             `insert into signal_evaluations(scope_id,batch_id,source_hash,pool_id,payload_json) values(?,?,?,?,?)

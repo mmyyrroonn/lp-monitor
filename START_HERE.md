@@ -58,7 +58,7 @@ node artifacts/p4/verify-acceptance.mjs
 pnpm lp metrics --db data/p4-acceptance.sqlite --watchlist config/watchlist.amc.json --rwa AMC --window 5m
 ```
 
-JSONL写入数据库路径加.alerts.jsonl。配置见config/signals.initial.json，金额阈值以USDG估值的micro单位表达。每条规则有enabled/threshold/version；默认60个完整1m或12个完整5m基线；不足/零中位数保留null。自然5m、最近五个完整1m和当前partial分开。
+JSONL写入数据库路径加.alerts.jsonl。配置见config/signals.initial.json，金额阈值以USDG估值的micro单位表达。每条规则有enabled/threshold/version；默认60个完整1m或12个完整5m基线；不足/零中位数保留null。实时仅输出过去1m、5m、15m和1h的滚动窗口，以已采集链上时间为终点；边界时间或覆盖不确定则不可用。
 
 P4历史输入有603笔Swap、34笔未计价、29个闭合分钟、1827个登记池；该样本提醒为0。本轮无新RPC。合成提醒示例与真实历史结果分开，liquidity-watch只有格式示例。阈值未经过P5效果验证。
 

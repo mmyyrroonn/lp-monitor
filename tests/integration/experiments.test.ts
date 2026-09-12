@@ -45,7 +45,12 @@ async function dataset(
   }));
   x.raw.logTimes = x.raw.logTimes!.map((t, i) => ({
     ref: x.raw.logs[i]!,
-    time: { ...t.time, minuteStartSec: t.time.minuteStartSec! + offset },
+    time: {
+      ...t.time,
+      minuteStartSec: t.time.minuteStartSec! + offset,
+      exactTimestampSec:
+        t.time.exactTimestampSec === null ? null : t.time.exactTimestampSec + offset,
+    },
   }));
   const raw = encodeJson(x.raw);
   x.manifest.batches[0]!.sha256 = createHash('sha256').update(raw).digest('hex');

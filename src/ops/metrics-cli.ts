@@ -1,3 +1,4 @@
+import { ROLLING_DURATIONS, type RollingWindowName } from '../metrics/rolling.js';
 import type { MetricsReport } from '../storage/metric-store.js';
 import { poolRegistrationId } from '../registry/pools.js';
 import { rawLogKey } from '../storage/manifest.js';
@@ -53,10 +54,10 @@ export function runMetricsCli(
     throw new ConfigError('rwa/window require metrics');
   if (command === 'metrics' && values.sort !== undefined)
     throw new ConfigError('sort requires rank');
-  if (values.window !== undefined && values.window !== '5m')
-    throw new ConfigError('P3 supports --window 5m');
-  const sort = String(values.sort ?? 'volume5mClosed');
-  if (!['volume5mClosed', 'volumeMultiplier'].includes(sort))
+  if (values.window !== undefined && !Object.hasOwn(ROLLING_DURATIONS, String(values.window)))
+    throw new ConfigError('Supported windows: 1m, 5m, 15m, 1h');
+  const sort = String(values.sort ?? 'volume5m');
+  if (!['volume5m', 'volume5mClosed', 'volumeMultiplier'].includes(sort))
     throw new ConfigError('Invalid rank sort');
   const config = loadChainConfig(String(values.config ?? 'config/robinhood.json'));
   const assets = loadAssetVersion(String(values.watchlist ?? 'config/watchlist.stocks.json'));
@@ -109,25 +110,32 @@ export function runMetricsCli(
       : report.rwa;
     const poolIds = new Set(rwa.flatMap((r) => r.poolIds));
     const windows = report.windows.filter((w) => poolIds.has(w.poolId));
-    const current = Math.floor(report.at.timestampSec / 60) * 60;
-    const lastFive = report.coverage.filter(
-      (c) => c.minuteStartSec >= current - 300 && c.minuteStartSec < current,
-    );
+    const selectedWindow: RollingWindowName | undefined =
+      command === 'rank'
+        ? sort === 'volumeMultiplier'
+          ? '1m'
+          : '5m'
+        : (values.window as RollingWindowName | undefined);
     const complete =
-      lastFive.length === 5 &&
-      lastFive.every((c) => c.complete) &&
-      report.qualityErrors.length === 0;
+      report.qualityErrors.length === 0 &&
+      rwa.every((r) =>
+        (selectedWindow
+          ? [selectedWindow]
+          : (Object.keys(ROLLING_DURATIONS) as RollingWindowName[])
+        ).every((k) => r.rolling[k].available),
+      );
     const result = {
       ...report,
       ...filterMetricEvidence(report, poolIds),
       status: complete ? 'observed' : 'incomplete',
       command,
-      window: '5m',
+      window: selectedWindow ?? 'all',
       rwa,
-      windows: windows.map(({ minutes, natural5mBuckets, ...summary }) => ({
-        ...summary,
-        minuteCount: minutes.length,
-        natural5mBucketCount: natural5mBuckets.length,
+      windows: windows.map((w) => ({
+        pool: w.pool,
+        poolId: w.poolId,
+        rolling: selectedWindow ? { [selectedWindow]: w.rolling![selectedWindow] } : w.rolling,
+        unknownTimeBlockCounts: w.unknownTimeBlockCounts,
       })),
       annotations: report.annotations.filter((a) => poolIds.has(a.poolId)),
       ...(command === 'rank'
@@ -186,11 +194,18 @@ export function summarizeRankedPool(
 ) {
   return {
     poolId: w.poolId,
-    volume5mClosed: w.recentClosed5x1m?.usdMicros ?? null,
-    volumeMultiplier: w.recentClosed1m?.volumeMultiplier ?? null,
-    multiplierUnit: w.recentClosed1m?.baselineUnit ?? null,
-    txCount: (sort === 'volume5mClosed' ? w.recentClosed5x1m : w.recentClosed1m)?.txCount ?? null,
-    partialCurrent: w.partialCurrent,
+    volume5m: w.rolling?.['5m'].usdMicros ?? w.recentClosed5x1m?.usdMicros ?? null,
+    volumeMultiplier:
+      w.rolling?.['1m'].volumeMultiplier ?? w.recentClosed1m?.volumeMultiplier ?? null,
+    multiplierUnit: w.rolling?.['1m'].baselineUnit ?? w.recentClosed1m?.baselineUnit ?? null,
+    txCount:
+      (w.rolling
+        ? w.rolling[sort !== 'volumeMultiplier' ? '5m' : '1m']
+        : sort !== 'volumeMultiplier'
+          ? w.recentClosed5x1m
+          : w.recentClosed1m
+      )?.txCount ?? null,
+    rolling: w.rolling,
     annotation,
   };
 }

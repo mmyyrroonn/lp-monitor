@@ -343,7 +343,7 @@ test('material correction to consumed entry bucket revises the same episode unde
   const changed = [
     ...hotLogs(),
     ...hotLogs()
-      .slice(73, 78)
+      .slice(74, 79)
       .map((log) => ({ ...log, logIndex: 1 })),
   ];
   commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, batch('corrected', changed));
@@ -355,7 +355,7 @@ test('material correction to consumed entry bucket revises the same episode unde
   });
 });
 
-test('closed bucket evidence excludes future minute transaction and future liquidity observation', () => {
+test('rolling evidence includes the current minute up to its endpoint', () => {
   const db = setup();
   const future = swap(4741, 2000);
   commitAcceptedSignalBatch(
@@ -365,11 +365,11 @@ test('closed bucket evidence excludes future minute transaction and future liqui
     batch('a', [...hotLogs(), future]),
   );
   const closed = records(db).find((record) => record.kind === 'hot')!;
-  expect(closed.logicalTimeSec).toBe(4800);
-  expect(closed.presentation!.evidenceTxs).not.toContain(future.transactionHash);
+  expect(closed.logicalTimeSec).toBe(4860);
+  expect(closed.presentation!.evidenceTxs).toContain(future.transactionHash);
   expect(
     closed.provenance!.evidenceEventIds.some((id) => id.includes(future.transactionHash)),
-  ).toBe(false);
+  ).toBe(true);
   expect(closed.presentation!.liquidityNote).toContain('unknown');
 });
 
@@ -395,7 +395,7 @@ test('live identity with later backfill revision still withdraws live evidence',
   );
 });
 
-test('same closed signal has stable identity across different initial batch endpoints', () => {
+test('different rolling endpoints have distinct initial signal identities', () => {
   const ids = [4800, 4801].map((tip) => {
     const db = setup();
     const source = batch(String(tip), hotLogs());
@@ -405,7 +405,7 @@ test('same closed signal has stable identity across different initial batch endp
     commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, source);
     return records(db).map((record) => record.id);
   });
-  expect(ids[0]).toEqual(ids[1]);
+  expect(ids[0]).not.toEqual(ids[1]);
 });
 
 test('quiet new receipt does not append redundant rule audit', () => {
@@ -426,6 +426,19 @@ test('delayed historical closed draft from live capture is persisted as backfill
   source.end = { number: 5100n, timestampSec: 5160, hash: hash(5100) };
   source.toBlock = 5100n;
   source.manifest.shards[0]!.request.toBlock = 5100n;
+  source.boundaries = [
+    ...source.boundaries!,
+    ...Array.from({ length: 5 }, (_, i) => {
+      const timestampSec = 4920 + i * 60,
+        n = timestampSec - 60;
+      return {
+        timestampSec,
+        firstBlock: BigInt(n),
+        before: { number: BigInt(n - 1), hash: hash(n - 1), timestampSec: timestampSec - 1 },
+        at: { number: BigInt(n), hash: hash(n), timestampSec },
+      };
+    }),
+  ];
   commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, source);
   expect(records(db).find((record) => record.kind === 'hot')!.historical).toBe(true);
   expect(

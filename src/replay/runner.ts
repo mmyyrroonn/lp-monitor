@@ -252,7 +252,9 @@ export async function replay(
                 input.configVersion,
               );
             }
-            const metrics = buildMetricsReport(db, input);
+            const metrics = buildMetricsReport(db, input, {
+              legacyWindows: mode === 'minute-close',
+            });
             if (mode === 'minute-close')
               for (const w of metrics.windows) {
                 const minute = w.minutes.find(

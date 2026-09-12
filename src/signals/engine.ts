@@ -1,3 +1,4 @@
+import type { RollingMetric } from '../metrics/rolling.js';
 import { createHash } from 'node:crypto';
 import { poolRegistrationId } from '../registry/pools.js';
 import type { AggregateMetric, MinuteMetric } from '../metrics/windows.js';
@@ -67,11 +68,23 @@ function evaluateOne(
     next.lastAlertKind = null;
     next.lastAlertSec = null;
   }
-  const partial = input.metrics.partialCurrent;
+  const rolling = input.metrics.rolling;
+  const toMinute = (m: RollingMetric): MinuteMetric => ({
+    ...m,
+    minuteStartSec: m.startSec,
+    fromBlock: null,
+    toBlock: null,
+    status: m.status,
+  });
+  const partial = rolling ? toMinute(rolling['1m']) : input.metrics.partialCurrent;
   const currentMinute =
-    Math.floor(input.watermarkSec / 60) * 60 - (input.evaluationMode === 'minute-close' ? 60 : 0);
-  const minute =
-    input.evaluationMode === 'minute-close'
+    (rolling ? rolling['1m'].startSec : Math.floor(input.watermarkSec / 60) * 60) -
+    (input.evaluationMode === 'minute-close' ? 60 : 0);
+  const minute = rolling
+    ? partial?.status === 'closed'
+      ? partial
+      : null
+    : input.evaluationMode === 'minute-close'
       ? input.metrics.recentClosed1m?.minuteStartSec === currentMinute &&
         input.metrics.recentClosed1m.status === 'closed'
         ? input.metrics.recentClosed1m
@@ -79,11 +92,17 @@ function evaluateOne(
       : partial && partial.minuteStartSec === currentMinute && partial.status === 'partial'
         ? partial
         : null;
-  const five = input.metrics.natural5mBuckets
+  const five = (
+    rolling
+      ? input.metrics.rollingHistory5m!.filter(
+          (m): m is RollingMetric & AggregateMetric => m.status === 'closed',
+        )
+      : input.metrics.natural5mBuckets
+  )
     .filter(
       (b) =>
         b.status === 'closed' &&
-        b.startSec % 300 === 0 &&
+        (rolling || b.startSec % 300 === 0) &&
         b.endSec - b.startSec === 300 &&
         b.endSec <= input.watermarkSec,
     )
@@ -92,7 +111,7 @@ function evaluateOne(
   const baseline = {
     minute: signalBaseline(
       minute ? sample(minute) : empty(currentMinute, 60),
-      input.metrics.minutes.map(sample),
+      (rolling ? input.metrics.rollingHistory1m!.map(toMinute) : input.metrics.minutes).map(sample),
       config.candidate.samples,
     ),
     fiveMinute: signalBaseline(
@@ -163,8 +182,12 @@ function evaluateOne(
         ? 'disabled'
         : consecutive
           ? config.confirmConsecutive.buckets === 1
-            ? 'one-complete-natural5m'
-            : 'two-consecutive-natural5m'
+            ? rolling
+              ? 'one-complete-rolling5m'
+              : 'one-complete-natural5m'
+            : rolling
+              ? 'two-consecutive-rolling5m'
+              : 'two-consecutive-natural5m'
           : config.confirmConsecutive.buckets === 1
             ? 'no-complete-above-threshold'
             : 'no-two-adjacent-above-threshold',
@@ -176,10 +199,34 @@ function evaluateOne(
   }
   const fresh =
     latest !== null &&
-    latest.endSec === Math.floor(input.watermarkSec / 300) * 300 &&
+    latest.endSec === (rolling ? input.watermarkSec : Math.floor(input.watermarkSec / 300) * 300) &&
     (next.lastFiveEndSec === null || latest.endSec > next.lastFiveEndSec);
   let cooled = false;
-  if (fresh) {
+  if (fresh && rolling) {
+    // Count disjoint, adjacent windows, never repeated overlapping polls.
+    let lows = 0,
+      boundary = latest!.endSec;
+    for (const b of [...five].reverse()) {
+      if (
+        b.endSec !== boundary ||
+        (next.lastHeatSec !== undefined && b.startSec < next.lastHeatSec) ||
+        next.state !== 'hot' ||
+        next.entryThreshold === null ||
+        b.usdMicros === null ||
+        b.usdMicros * 100n >= next.entryThreshold * BigInt(config.cooling.threshold)
+      )
+        break;
+      lows++;
+      boundary = b.startSec;
+    }
+    next.lowBuckets = lows;
+    next.lastFiveEndSec = latest!.endSec;
+    if (config.cooling.enabled && lows >= config.cooling.buckets) {
+      next.state = 'cooling';
+      cooled = true;
+    }
+  }
+  if (fresh && !rolling) {
     for (const b of five.filter((b) =>
       next.lastFiveEndSec === null ? b === latest : b.endSec > next.lastFiveEndSec,
     )) {
@@ -218,14 +265,14 @@ function evaluateOne(
   } else if (cooled) {
     kind = 'cooling';
     volume = latest!.usdMicros;
-    reasons.push('three-complete-low-natural5m');
+    reasons.push(rolling ? 'consecutive-low-rolling5m' : 'three-complete-low-natural5m');
   } else if (candidate && next.state !== 'hot') {
     kind = 'candidate';
     volume = minute!.usdMicros;
     scale = '1m';
     reasons.push('candidate');
     if (baseline.minute.status !== 'ready') reasons.push(`${baseline.minute.status}/absolute-only`);
-    reasons.push('partial');
+    reasons.push(rolling ? 'rolling-1m' : 'partial');
   }
   if (kind === null) return noAlert();
   if (kind === 'hot' || kind === 'reheat') next.lastHeatSec = input.watermarkSec;
@@ -320,6 +367,62 @@ export function evaluateSignal(
   input: SignalInput,
   config: SignalConfig,
 ): SignalDecision {
+  if (input.metrics.rolling) {
+    let state =
+      previous.configVersion !== null && previous.configVersion !== signalConfigVersion(config)
+        ? initialSignalSnapshot()
+        : previous;
+    const drafts: NonNullable<SignalDecision['alertDraft']>[] = [];
+    const evaluations: NonNullable<SignalDecision['evaluations']>[number][] = [];
+    if (input.coverage !== 'rechecking')
+      for (const m of input.metrics.rollingHistory5m ?? []) {
+        if (
+          m.status !== 'closed' ||
+          m.endSec >= input.watermarkSec ||
+          (state.lastFiveEndSec !== null && m.endSec <= state.lastFiveEndSec)
+        )
+          continue;
+        const missing = (duration: number): RollingMetric => ({
+          ...m,
+          startSec: m.endSec - duration,
+          status: 'warming',
+          usdMicros: null,
+          usdgNotionalRaw: null,
+          rawNotional: null,
+          swapCount: null,
+          txCount: null,
+          activeMinutes: null,
+          addCount: null,
+          removeCount: null,
+          zeroDeltaCount: null,
+          reasons: ['historical-window-not-materialized'],
+        });
+        const metrics = {
+          ...input.metrics,
+          rolling: { '1m': missing(60), '5m': m, '15m': missing(900), '1h': missing(3600) },
+          rollingHistory1m: [],
+          rollingHistory5m: input.metrics.rollingHistory5m!.filter((p) => p.endSec <= m.endSec),
+        };
+        const d = evaluateOne(
+          state,
+          { ...input, metrics, watermarkSec: m.endSec, coverage: 'complete' },
+          config,
+        );
+        state = d.nextSnapshot;
+        evaluations.push({ endSec: m.endSec, matches: d.matches });
+        if (d.alertDraft)
+          drafts.push({
+            ...d.alertDraft,
+            watermarkSec: input.watermarkSec,
+            logicalTimeSec: m.endSec,
+            historical: true,
+          });
+      }
+    const result = evaluateOne(state, input, config);
+    if (result.alertDraft)
+      drafts.push({ ...result.alertDraft, logicalTimeSec: input.watermarkSec, historical: false });
+    return { ...result, alertDraft: drafts.at(-1) ?? null, alertDrafts: drafts, evaluations };
+  }
   const version = signalConfigVersion(config);
   let state =
     previous.configVersion !== null && previous.configVersion !== version
