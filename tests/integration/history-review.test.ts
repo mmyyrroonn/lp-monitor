@@ -37,6 +37,8 @@ test('history uses complete local raw without RPC and clips events to requested 
     await runCli(
       [
         'ingest',
+        '--watchlist',
+        'config/watchlist.amc.json',
         '--from-block',
         '90',
         '--to-block',
@@ -65,17 +67,37 @@ test('history uses complete local raw without RPC and clips events to requested 
   expect(report.complete).toBe(true);
   expect(report.projection?.events.map((e) => e.ref.blockNumber)).toEqual([180n]);
   expect(report.acquired).toEqual([]);
-  expect(report.activity[0]?.coveredSubset?.activity.poolActivityUsdgRaw).toBeNull();
+  expect(report.activity[0]?.coveredSubset?.activity.poolActivityUsdgRaw).toBe(489322400n);
   expect(report.activity[0]?.coveredSubset?.activity.swapCount).toBe(1);
   vi.restoreAllMocks();
 });
 
 test('history rejects unsafe and reversed bounds before opening any database', async () => {
   await expect(
-    runCli(['history', '--db', 'missing', '--from-block', '9', '--to-block', '2']),
+    runCli([
+      'history',
+      '--watchlist',
+      'config/watchlist.amc.json',
+      '--db',
+      'missing',
+      '--from-block',
+      '9',
+      '--to-block',
+      '2',
+    ]),
   ).rejects.toThrow(/ordered/);
   await expect(
-    runCli(['history', '--db', 'missing', '--from-block', '0', '--to-block', '9007199254740992']),
+    runCli([
+      'history',
+      '--watchlist',
+      'config/watchlist.amc.json',
+      '--db',
+      'missing',
+      '--from-block',
+      '0',
+      '--to-block',
+      '9007199254740992',
+    ]),
   ).rejects.toThrow(/safe/);
 });
 
@@ -89,6 +111,8 @@ test('history acquires only missing operation suffix into an isolated snapshot',
     await runCli(
       [
         'ingest',
+        '--watchlist',
+        'config/watchlist.amc.json',
         '--from-block',
         '90',
         '--to-block',
@@ -171,6 +195,8 @@ test('complete operations cannot hide incomplete discovery coverage', async () =
     await runCli(
       [
         'ingest',
+        '--watchlist',
+        'config/watchlist.amc.json',
         '--from-block',
         '90',
         '--to-block',

@@ -193,7 +193,7 @@ test('offline CLI projects, inspects minute precision, rejects stale state and n
   const configPath = join(dir, 'config.json');
   writeFileSync(configPath, JSON.stringify(config));
   const scope = computeWatchScopeId(
-    loadAssetVersion('config/watchlist.amc.json'),
+    loadAssetVersion('config/watchlist.stocks.json'),
     'operations',
     config,
   );

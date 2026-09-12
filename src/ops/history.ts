@@ -1,3 +1,4 @@
+import { readCachedMetricMetadata } from '../storage/token-metadata.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdirSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -419,7 +420,10 @@ export async function reviewHistory(options: HistoryOptions) {
         )
       : null;
     const metadataCheck = reconcileMetricMetadata(
-      options.metadata ?? loadMetricMetadata('config/metric-metadata.json'),
+      readCachedMetricMetadata(
+        db,
+        options.metadata ?? loadMetricMetadata('config/metric-metadata.json'),
+      ),
       [
         ...store.anchors(scopeId),
         ...store.anchors(registryScopeId),
@@ -427,6 +431,7 @@ export async function reviewHistory(options: HistoryOptions) {
       ],
     );
     const valuations: SwapValuation[] = [];
+    const valuedByRwa = new Map<string, SwapValuation[]>();
     const quotes: QuoteObservation[] = [];
     const registrations = registry.snapshot();
     for (const event of projection?.events ?? []) {
@@ -438,39 +443,41 @@ export async function reviewHistory(options: HistoryOptions) {
       const related = assets.addresses.filter(
         (a) => a === registration.token0 || a === registration.token1,
       );
-      if (related.length > 1)
-        throw new ConfigError('Multiple watched RWA assets in a pool are unsupported');
-      const rwa = related[0];
-      if (!rwa) continue;
-      const token = (address: Address) => ({
-        address,
-        decimals: decimalsAt(metadataCheck.metadata, address, event.ref.blockNumber),
-        role:
-          address === config.tokens.USDG
-            ? ('usdg' as const)
-            : assets.has(address)
-              ? ('rwa' as const)
-              : ('other' as const),
-      });
-      const metadata: SwapValuationMetadata = {
-        token0: token(registration.token0),
-        token1: token(registration.token1),
-        rwa,
-        usdg: config.tokens.USDG,
-        usdgDecimals: decimalsAt(metadataCheck.metadata, config.tokens.USDG, event.ref.blockNumber),
-        maxQuoteAgeSec: 60,
-      };
-      valuations.push(valueSwap(event, metadata, quotes));
-      const quote = quoteFromRwaUsdgSwap(event, metadata);
-      if (quote) quotes.push(quote);
+      let canonical: SwapValuation | null = null;
+      for (const rwa of related) {
+        const token = (address: Address) => ({
+          address,
+          decimals: decimalsAt(metadataCheck.metadata, address, event.ref.blockNumber),
+          role:
+            address === config.tokens.USDG
+              ? ('usdg' as const)
+              : assets.has(address)
+                ? ('rwa' as const)
+                : ('other' as const),
+        });
+        const metadata: SwapValuationMetadata = {
+          token0: token(registration.token0),
+          token1: token(registration.token1),
+          rwa,
+          usdg: config.tokens.USDG,
+          usdgDecimals: decimalsAt(
+            metadataCheck.metadata,
+            config.tokens.USDG,
+            event.ref.blockNumber,
+          ),
+          maxQuoteAgeSec: 60,
+        };
+        const side = valueSwap(event, metadata, quotes);
+        valuedByRwa.set(rwa, [...(valuedByRwa.get(rwa) ?? []), side]);
+        if (!canonical || (canonical.usdMicros === null && side.usdMicros !== null))
+          canonical = side;
+        const quote = quoteFromRwaUsdgSwap(event, metadata);
+        if (quote) quotes.push(quote);
+      }
+      if (canonical) valuations.push(canonical);
     }
     const activity = assets.assets.map((asset) => {
-      const poolIds = new Set(
-        registrations
-          .filter((p) => p.token0 === asset.address || p.token1 === asset.address)
-          .map(poolRegistrationId),
-      );
-      const observed = aggregateRwa(valuations.filter((v) => poolIds.has(poolRegistrationId(v))));
+      const observed = aggregateRwa(valuedByRwa.get(asset.address) ?? []);
       const intervalComplete =
         missing.length === 0 &&
         registryMissing.length === 0 &&
@@ -490,7 +497,7 @@ export async function reviewHistory(options: HistoryOptions) {
       valuations,
       activity,
       metadataConflicts: metadataCheck.conflicts,
-      version: 'history-v1',
+      version: 'history-v2',
       sourceDatabase: resolve(options.databasePath),
       databasePath,
       scopeId,
@@ -498,6 +505,8 @@ export async function reviewHistory(options: HistoryOptions) {
       fromBlock,
       toBlock,
       sourceHash: digest({
+        metadata: metadataCheck.metadata,
+        metadataConflicts: metadataCheck.conflicts,
         logs,
         times: logs.map((l) => times.get(rawLogKey(l)) ?? null),
         registry: registry.snapshot(),

@@ -1,7 +1,12 @@
+import {
+  refreshTokenMetadata,
+  validateTokenMetadata,
+  type TokenMetadataTarget,
+} from '../storage/token-metadata.js';
 import type { MetricInput } from '../storage/metric-store.js';
 import { ConfigError } from '../config/env.js';
 import type { SignalConfig } from '../signals/config.js';
-import type { MetricMetadata } from '../metrics/metadata.js';
+import { loadMetricMetadata, type MetricMetadata } from '../metrics/metadata.js';
 import { commitAcceptedSignalBatch, projectSignals, retractSignals } from '../signals/project.js';
 import { LiveProjectionStore } from '../storage/live-projection.js';
 import { AlertOutbox } from '../notify/outbox.js';
@@ -97,6 +102,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       'notify local requires follow and validated signal/metadata configuration',
     );
   const assets = loadAssetVersion(options.watchlistPath);
+  const seedMetadata = options.metricMetadata ?? loadMetricMetadata('config/metric-metadata.json');
   const deployments = { v3Factory: config.v3Factory, v4Manager: config.v4Manager };
   const scopeId = computeWatchScopeId(assets, 'operations', deployments);
   const discoveryScope = computeWatchScopeId(assets, 'discovery-only', deployments);
@@ -160,6 +166,10 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       const changes = anchor
         ? store.invalidateAfter(targetScope, anchor)
         : store.resetForWarmup(targetScope);
+      db.prepare('delete from token_metadata where block_number>?').run(
+        Number(anchor?.number ?? -1n),
+      );
+      db.prepare('delete from token_metadata_failures').run();
       if (options.notify === 'local')
         signalStage('recovery', () =>
           retractSignals(
@@ -235,6 +245,24 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     },
   });
   const endpointReader = metered('endpointAnchors');
+  const metadataReader = {
+    getAnchor: (block: bigint | 'latest') => {
+      shutdown.throwIfRequested();
+      return reader.meter.withPurpose('metadata', () => reader.getAnchor(block));
+    },
+    request: (method: string, params: readonly unknown[]) => {
+      shutdown.throwIfRequested();
+      return reader.meter.withPurpose('metadata', () => reader.request(method, params));
+    },
+  };
+  const refreshMetadata = async (targets: readonly TokenMetadataTarget[], maxTokens = 16) => {
+    const update = await refreshTokenMetadata(db, metadataReader, targets, {
+      maxTokens,
+      seed: seedMetadata,
+    });
+    if (update.attempted)
+      console.log(encodeJson({ event: 'token-metadata', runId: id, ...update }));
+  };
   const batchRecords: {
     id: string;
     scopeId: string;
@@ -319,6 +347,15 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     result.identity = identity;
     shutdown.throwIfRequested();
     if (!identity.requiredPassed) throw new RpcFailure('identity-unverified');
+    await validateTokenMetadata(db, metadataReader, seedMetadata);
+    if (options.command === 'follow')
+      await refreshMetadata(
+        [config.tokens.USDG, ...assets.addresses].map((address) => ({
+          address,
+          blockNumber: initial.number,
+        })),
+        assets.addresses.length + 1,
+      );
     const verifiedDeployments = [identity.deployments.v3Factory, identity.deployments.v4Manager];
     const floor = verifiedDeployments.every((d) => d.firstCodeBlock !== null)
       ? verifiedDeployments.reduce(
@@ -582,6 +619,25 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
             accepted: false,
           });
           if (batch.completeness !== 'complete') return null;
+          if (batch.completeness === 'complete') {
+            const registered = new PoolRegistry([
+              ...pools.snapshot(),
+              ...(batch.poolRegistrations ?? []),
+            ]).snapshot();
+            const targets: TokenMetadataTarget[] = [
+              { address: config.tokens.USDG, blockNumber: from },
+            ];
+            // A new pool may contain a token deployed after the range start.
+            for (const pool of registered) {
+              const height =
+                pool.discoveredAt.blockNumber > from ? pool.discoveredAt.blockNumber : from;
+              if (height <= end.number)
+                for (const address of [pool.token0, pool.token1])
+                  targets.push({ address, blockNumber: height });
+            }
+            await refreshMetadata(targets);
+          }
+
           await reader.flush?.();
           shutdown.throwIfRequested();
           const commitAt = Date.now();

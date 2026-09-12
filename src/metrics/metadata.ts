@@ -25,7 +25,13 @@ export function loadMetricMetadata(path: string): MetricMetadata {
 /** Cached decimals are a documented carry-forward assumption from this anchor.
  * A snapshot does not establish decimals for earlier blocks or unknown tokens. */
 export function decimalsAt(cache: MetricMetadata, address: string, block: bigint): number | null {
-  const entry = cache.entries.find((e) => e.address === address.toLowerCase());
+  const entry = cache.entries
+    .filter((e) => e.address === address.toLowerCase() && BigInt(e.observedAtBlock) <= block)
+    .reduce<MetricMetadata['entries'][number] | undefined>(
+      (latest, e) =>
+        !latest || BigInt(e.observedAtBlock) >= BigInt(latest.observedAtBlock) ? e : latest,
+      undefined,
+    );
   return entry && BigInt(entry.observedAtBlock) <= block ? entry.decimals : null;
 }
 

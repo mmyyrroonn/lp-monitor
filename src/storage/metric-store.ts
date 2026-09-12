@@ -1,5 +1,5 @@
+import { readCachedMetricMetadata } from './token-metadata.js';
 import { CHAIN_ID } from '../domain/chain.js';
-import { ConfigError } from '../config/env.js';
 import type Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import type { Address } from 'viem';
@@ -22,7 +22,7 @@ import { buildMinuteMetrics, type MetricEvent } from '../metrics/windows.js';
 import { summarizeLiquidityActions, annotateLatestSwapLiquidity } from '../metrics/liquidity.js';
 import { estimateGrossSwapFee } from '../metrics/fees.js';
 
-export const METRIC_VERSION = 'p3-v3';
+export const METRIC_VERSION = 'p3-v4';
 export class StaleMetricProjectionError extends Error {
   constructor() {
     super('P2 projection is stale or missing; run project --rebuild');
@@ -51,6 +51,7 @@ export function buildMetricsReport(
   options: MetricBuildOptions = {},
 ) {
   return db.transaction(() => {
+    input = { ...input, metadata: readCachedMetricMetadata(db, input.metadata) };
     // Live recording has its own cursor. Legacy offline databases keep their strict
     // explicit-project freshness contract; readonly CLI inspection never writes.
     if (
@@ -112,17 +113,6 @@ export function buildMetricsReport(
       ...raw.pools(input.scopeId),
     ]);
     const registrations = registry.snapshot();
-    // Multi-asset watchlists are supported; a shared RWA/RWA pool needs an
-    // explicit attribution contract before its activity can be published.
-    for (const registration of registrations) {
-      const related = input.assets.addresses.filter(
-        (address) => address === registration.token0 || address === registration.token1,
-      );
-      if (related.length > 1)
-        throw new ConfigError(
-          `Multiple watched RWA assets in pool ${poolRegistrationId(registration)} are unsupported`,
-        );
-    }
     const byId = new Map(registrations.map((r) => [poolRegistrationId(r), r]));
     const rawCoverage = readMetricCoverage(
       db,
@@ -168,8 +158,11 @@ export function buildMetricsReport(
         const related = input.assets.assets.filter(
           (a) => a.address === registration.token0 || a.address === registration.token1,
         );
-        const rwa = related[0]?.address;
-        if (rwa) {
+        const inWindow =
+          sinceSec === null ||
+          event.time.minuteStartSec === null ||
+          event.time.minuteStartSec >= sinceSec;
+        for (const asset of related) {
           const token = (address: Address) => ({
             address,
             decimals: decimalsAt(metricMetadata, address, event.ref.blockNumber),
@@ -183,7 +176,7 @@ export function buildMetricsReport(
           const metadata: SwapValuationMetadata = {
             token0: token(registration.token0),
             token1: token(registration.token1),
-            rwa,
+            rwa: asset.address,
             usdg: input.usdg,
             usdgDecimals: decimalsAt(metricMetadata, input.usdg, event.ref.blockNumber),
             maxQuoteAgeSec: 60,
@@ -191,33 +184,28 @@ export function buildMetricsReport(
           const hasUsdg = registration.token0 === input.usdg || registration.token1 === input.usdg;
           const preceding = hasUsdg
             ? null
-            : findPrecedingQuote(event, metadata.rwa, metadata.usdg, quotes, 60);
-          const quoteContext = preceding ? [preceding] : [];
-          valuation = cache
+            : findPrecedingQuote(event, asset.address, input.usdg, quotes, 60);
+          const side = cache
             ? cache.memo(
-                'valuation:' + rawLogKey(event.ref),
+                'valuation:' + rawLogKey(event.ref) + ':' + asset.address,
                 event.time.minuteStartSec ?? Math.floor(projection.end.timestampSec / 60) * 60,
                 { event, metadata, preceding },
-                () => valueSwap(event, metadata, quoteContext),
+                () => valueSwap(event, metadata, preceding ? [preceding] : []),
               )
             : valueSwap(event, metadata, quotes);
-          const inWindow =
-            sinceSec === null ||
-            event.time.minuteStartSec === null ||
-            event.time.minuteStartSec >= sinceSec;
           if (inWindow) {
-            valuations.push(valuation);
-            for (const asset of related) {
-              const group = valuedByRwa.get(asset.address) ?? [];
-              group.push(valuation);
-              valuedByRwa.set(asset.address, group);
-            }
+            const group = valuedByRwa.get(asset.address) ?? [];
+            group.push(side);
+            valuedByRwa.set(asset.address, group);
           }
-          // Appending after valuation makes as-of order explicit even though the
-          // price helper also enforces it. No source event is retimestamped.
+          // One pool contribution, preferring the first priced stock in stable address order.
+          // Stock aggregates retain each side's own raw amount and as-of valuation.
+          if (!valuation || (valuation.usdMicros === null && side.usdMicros !== null))
+            valuation = side;
           const quote = quoteFromRwaUsdgSwap(event, metadata);
           if (quote) quotes.push(quote);
         }
+        if (inWindow && valuation) valuations.push(valuation);
       }
       metricEvents.push({
         event,
@@ -411,6 +399,7 @@ export function buildMetricsReport(
         'USDG = USD is a display assumption, not a verified dollar peg.',
         'Cached decimals are carried forward from their recorded identity anchor; unknown tokens and earlier history remain unpriced.',
         'Pool activity sums count each pool Swap once; multi-hop activity is not unique-user volume.',
+        'Shared stock pools count once in each stock aggregate with independent raw amounts and quotes; summing stock aggregates is not deduplicated market volume.',
         'Co-occurrence is only same-transaction evidence, not a complete route or user count.',
         'Fees are gross trade estimates; current pool L, dollar withdrawals and LP net return are unknown.',
       ],

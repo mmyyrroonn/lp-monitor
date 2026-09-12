@@ -1,5 +1,19 @@
 # Robinhood RWA monitor
 
+## 2026-09-12 全量股票监控目标
+
+默认名单为 `config/watchlist.stocks.json`：从 Robinhood 官方 `https://api.robinhood.com/rhj/assets` 当日接口纳入 chainId 4663 上全部 194 个 active 股票代币，按 symbol 排序、地址去重。原始响应保存在 `artifacts/watchlist/2026-09-12/stock-assets.json`，抓取时间和 SHA256 记录在名单中。这是静态快照，后续上新需刷新。
+
+`ingest`、`follow`、`history`、`project`、`inspect-pool`、`metrics`、`rank` 使用同一默认名单。名单变化会创建独立 scope，旧 AMC 游标和指标不会自动成为全量覆盖；第一次运行需完成新范围的池发现。旧样本使用 `--watchlist config/watchlist.amc.json`，该文件保持原样。
+
+股票共池现在分别计入两只股票：各自保留原始数量并使用本股票的前序 USDG 报价；池窗口和原始成交只计一次，提醒标签列出双方股票。股票聚合相加包含共池的双边参与量，不能当作去重后的全市场成交额。历史回顾沿用同样口径。
+
+2026-09-12 已在区块 `61051971` 核验 194 只股票均为 18 位精度、USDG 为 6 位，195/195 成功，已补齐配置。证据见 `artifacts/watchlist/2026-09-12/metadata-evidence.json`，AMC/USDG 原有较早核验锚点保留供历史数据使用。
+
+精度先复用 `config/metric-metadata.json` 及数据库 `token_metadata`。`follow` 启动时预取缺少的股票/USDG 精度；采集每批最多补查 16 个未知池代币，成功后按合约地址和区块/hash 缓存，失败保留 unknown 并至少等待 60 秒再试。未知精度不会阻断原始日志采集；RPC 总预算、截止时间和用户停止仍生效。重启检查已缓存区块，已知分叉会失效缓存。零地址原生币不调用 ERC20 decimals。
+
+缓存只用于观测区块及之后，不把当前精度回填为历史事实。缺少精度或有效前序报价时仍保留未计价；有股票登记也不等于有池、成交或完整覆盖。本次未启动长期采集和提醒服务，实链长时验收状态保持不变。
+
 ## 2026-09-12 实时增量修正与独立历史回顾
 
 实时 `follow --notify local` 已改用持久化增量协议投影、逐事件估值和分钟/五分钟贡献缓存。普通批次只解码新增或修订事件，未变时间桶复用已有结果；实时计算保留规则所需有界窗口（默认180分钟，包含60分钟基线，另读最多120秒报价上下文），过期贡献退出热路径，原始证据保留。
@@ -74,7 +88,7 @@ P0 `probe`/`capture` 仍为单次运行，最多 150 次 RPC、5 RPS、10 秒超
 
 `--evidence full|sampled|off` 默认 full。full 保留每条响应，默认每片 16 MiB、最多 8 片，满后明确失败而不覆盖旧证据；sampled 每 100 条保留一个完整响应，其余记录哈希，并滚动保留最近分片；off 不写请求证据。CLI 退出会等待异步落盘。sampled/off 不应被当作全量请求归档。
 
-P1 使用 `pollIntervalMs`、`overlapBlocks` 和 `config/watchlist.amc.json`。`historyTimestampSec` 为后续历史范围入口预留，P0 使用逐池 `v4PoolHistoryHints`。`RH_RPC_WS` 尚不发起 WS 请求。
+P1 使用 `pollIntervalMs`、`overlapBlocks` 和 `config/watchlist.stocks.json`。`historyTimestampSec` 为后续历史范围入口预留，P0 使用逐池 `v4PoolHistoryHints`。`RH_RPC_WS` 尚不发起 WS 请求。
 
 本轮 review 的全部编号、处理依据及验证边界见 [处理记录](docs/reviews/2026-09-08-p0-review-resolution.md)。
 
@@ -94,7 +108,7 @@ pnpm lp follow --config config/robinhood.json --duration 10m
 pnpm lp follow --config config/robinhood.json --duration 5m --db data/recorder.sqlite --max-rpc-calls 5000
 ```
 
-上面的高度仅说明参数格式。默认数据库为 `LP_DATA_DIR/recorder.sqlite`（未设置环境变量时为 `data/recorder.sqlite`），运行证据写入 `artifacts/p1/<runId>`。重启时复用同一数据库，先检查原游标 hash；观察名单改动产生独立 scope，先完成发现历史，再启用操作日志采集。可用 `--watchlist config/watchlist.amc.json` 指定观察名单。
+上面的高度仅说明参数格式。默认数据库为 `LP_DATA_DIR/recorder.sqlite`（未设置环境变量时为 `data/recorder.sqlite`），运行证据写入 `artifacts/p1/<runId>`。重启时复用同一数据库，先检查原游标 hash；观察名单改动产生独立 scope，先完成发现历史，再启用操作日志采集。可用 `--watchlist config/watchlist.stocks.json` 指定观察名单。
 
 历史池发现有独立覆盖游标，默认每段最多 1,000,000 块、超量自动拆分；操作范围默认最多 1000 块。地址及各 OR topic 维度默认按 `maxFilterValues=1000` 分片；供应商返回明确过滤项超限时继续拆分，保持原范围及完整分片覆盖。每个操作范围先发现两侧 RWA 新池，再抓扩大后的整段池操作，同块创建和首笔操作都在范围内。旧池保留，不因暂时冷却删除。
 
@@ -117,7 +131,7 @@ pnpm lp inspect-pool --config config/robinhood.json --db data/recorder.sqlite --
 
 本机验收副本可直接使用 `--db data/p2-acceptance.sqlite`；`--db data/monitor.sqlite` 同样支持，但须先由 P1 录制或从已有库备份获得该文件。P2 不自动创建空录制库，不需要 RH_RPC_HTTP。
 
-`--pool` 支持 V3 地址、V4 PoolId 或完整 `4663:v4:<manager>:<poolId>` / `4663:v3:<address>`。AMC/USDG 别名只接受唯一的已登记、已配置 V3 交易对；存在多个匹配时请指定地址。`--watchlist` 默认 `config/watchlist.amc.json`。
+`--pool` 支持 V3 地址、V4 PoolId 或完整 `4663:v4:<manager>:<poolId>` / `4663:v3:<address>`。AMC/USDG 别名只接受唯一的已登记、已配置 V3 交易对；存在多个匹配时请指定地址。`--watchlist` 默认 `config/watchlist.stocks.json`。
 
 `project` 从 active_logs 全量重建该 scope 的事件与观测，并在同一事务保存处理游标。未知 topic、非法 data、零侧或同号 Swap 保存错误原文，存在质量错误返回 4。原始旧日志保留。重新录制或 retime 后，旧投影会被识别为过期；重新 project 后再 inspect。
 

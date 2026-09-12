@@ -2,7 +2,7 @@
 
 ```powershell
 pnpm lp history --from-block 22500000 --to-block 22501000 --db data/recorder.sqlite --out artifacts/history
-# 可选：--config config/robinhood.json --watchlist config/watchlist.amc.json
+# 可选：--config config/robinhood.json --watchlist config/watchlist.stocks.json
 #       --metadata config/metric-metadata.json --max-rpc-calls 10000
 ```
 
@@ -24,3 +24,5 @@ pnpm lp history --from-block 22500000 --to-block 22501000 --db data/recorder.sql
 - metadata 仅从其 observation block 向后沿用，已知 hash 冲突会排除该条目；缺少有效 decimals 或报价保留 null。非 USDG 池只使用本区间内先发生、符合时效要求的 RWA/USDG 报价。不会从未来报价补值，也不会默默扩大区间抓取报价预热数据。
 - 区间边界可能落在分钟内部，不输出伪造的完整分钟窗口。任意 to-block 没有精确存储 anchor 时，顶层 `end` 为 null。为解码复用的 projection.end 可以是源库记录的 scope tip，只是投影元数据，不能用它当请求区间终点或分钟验收依据。时间无法解析仍显式保留 unresolved。
 - `sourceHash` 标识本次范围日志、时间映射、注册表和缺口，不代表对当前链或盈利能力的独立证明。
+
+股票共池按双方各自原始数量与前序报价计入各股票，池成交证据只保留一份。回顾副本读取已有 token_metadata 精度缓存；查询区块之前的成交仍不使用该精度。

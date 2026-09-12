@@ -312,7 +312,9 @@ function repairedFrom(
 }
 function presentationIndex(report: MetricsReport, input: MetricInput) {
   const annotations = new Map(report.annotations.map((a) => [a.poolId, a]));
-  const rwa = new Map(report.rwa.flatMap((r) => r.poolIds.map((id) => [id, r] as const)));
+  const rwa = new Map<string, string[]>();
+  for (const r of report.rwa)
+    for (const id of r.poolIds) rwa.set(id, [...(rwa.get(id) ?? []), r.asset.symbol]);
   const symbols = new Map(input.assets.assets.map((a) => [a.address, a.symbol]));
   const byPool = new Map<string, MetricsReport['valuations']>();
   const tokensByTx = new Map<string, Set<string>>();
@@ -342,7 +344,7 @@ function presentationIndex(report: MetricsReport, input: MetricInput) {
     const txs = [...new Set(local.map((v) => v.transactionHash))];
     return {
       presentation: {
-        rwaSymbol: rwa.get(poolId)?.asset.symbol ?? 'unknown',
+        rwaSymbol: rwa.get(poolId)?.join(' / ') ?? 'unknown',
         pairLabel: (a ? [a.pair.token0, a.pair.token1] : [])
           .map((t) => (t === input.usdg ? 'USDG' : (symbols.get(t) ?? t)))
           .join(' / '),

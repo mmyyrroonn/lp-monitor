@@ -15,6 +15,8 @@ test.each([false, true])('follow signals are explicit opt-in: %s', async (notify
     const code = await runCli(
       [
         'follow',
+        '--watchlist',
+        'config/watchlist.amc.json',
         '--duration',
         '1s',
         '--from-block',
@@ -66,6 +68,8 @@ test.each([
     const log = vi.spyOn(console, 'log').mockImplementation(() => {});
     const args = [
       'follow',
+      '--watchlist',
+      'config/watchlist.amc.json',
       '--duration',
       '1s',
       '--from-block',

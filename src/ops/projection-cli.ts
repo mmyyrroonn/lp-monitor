@@ -44,7 +44,7 @@ export function runProjectionCli(
   if (command === 'inspect-pool' && values.rebuild !== undefined)
     throw new ConfigError('rebuild requires project');
   const config = loadChainConfig(String(values.config ?? 'config/robinhood.json'));
-  const assets = loadAssetVersion(String(values.watchlist ?? 'config/watchlist.amc.json'));
+  const assets = loadAssetVersion(String(values.watchlist ?? 'config/watchlist.stocks.json'));
   const scopeId = computeWatchScopeId(assets, 'operations', config);
   const registryScopeId = computeWatchScopeId(assets, 'discovery-only', config);
   const dbValue = String(values.db ?? (environment.LP_DATA_DIR ?? 'data') + '/recorder.sqlite');

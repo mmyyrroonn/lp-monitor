@@ -255,7 +255,7 @@ test('RWA partial current is unavailable when the current accepted prefix is inc
 });
 
 test.each([true, false])(
-  'rejects a shared watched RWA pool before emitting metrics (has swaps: %s)',
+  'counts a shared watched RWA pool for both stocks but once per pool (has swaps: %s)',
   (hasSwaps) => {
     const { db, raw, projection } = setup();
     const record = batch('multi', [swap(4750)]);
@@ -269,7 +269,19 @@ test.each([true, false])(
       projection.rebuild('s', 's', 'c');
     }
     const multi = { ...input, assets: createAssetRegistry('multi', [rwa, addr(4)]) };
-    expect(() => buildMetricsReport(db, multi)).toThrow(/Multiple watched RWA assets.*unsupported/);
+    const report = buildMetricsReport(db, multi);
+    expect(report.rwa.map((r) => r.blockRangeActivity.swapCount)).toEqual(
+      hasSwaps ? [1, 1] : [0, 0],
+    );
+    expect(report.valuations).toHaveLength(hasSwaps ? 1 : 0);
+    expect(report.windows).toHaveLength(1);
+    if (hasSwaps) {
+      expect(report.rwa[0]!.blockRangeActivity.pools[0]!.nativeTotals).toEqual([[rwa, 1000000n]]);
+      expect(report.rwa[1]!.blockRangeActivity.pools[0]!.nativeTotals).toEqual([
+        [addr(4), 2000000n],
+      ]);
+      expect(report.rwa[1]!.blockRangeActivity.poolActivityUsdMicros).toBeNull();
+    }
     expect(db.prepare('select count(*) as n from metric_cursors').get()).toEqual({ n: 0 });
   },
 );
@@ -438,4 +450,73 @@ test('retained bounds still contain active swaps after whole accepted intervals 
     swapCount: 1,
   });
   expect(report.coverage.every((c) => !c.complete)).toBe(true);
+});
+
+test('shared pool values both stock sides independently with preceding quotes, including live cache', () => {
+  const { db, raw, projection } = setup();
+  const second = addr(4),
+    quotePool = addr(5),
+    sharedPool = addr(6);
+  const logs = [
+    swap(4741),
+    { ...swap(4742), address: quotePool },
+    { ...swap(4750), address: sharedPool },
+  ];
+  const record = batch('dual-quotes', logs);
+  record.manifest = {
+    ...record.manifest,
+    shards: record.manifest.shards.map((s) => ({
+      ...s,
+      request: { ...s.request, address: [pool, quotePool, sharedPool] },
+    })),
+  };
+  record.poolRegistrations = [
+    registration,
+    {
+      ...registration,
+      pool: { chainId: 4663, protocol: 'v3', address: quotePool },
+      token0: second,
+    },
+    {
+      ...registration,
+      pool: { chainId: 4663, protocol: 'v3', address: sharedPool },
+      token1: second,
+    },
+  ];
+  record.poolRegistrations = record.poolRegistrations!.map((p, i) => ({
+    ...p,
+    discoveredAt: logs[i]!,
+  }));
+  raw.acceptRange(record);
+  projection.rebuild('s', 's', 'c');
+  const multi = {
+    ...input,
+    assets: createAssetRegistry('dual', [rwa, second]),
+    metadata: {
+      ...input.metadata,
+      entries: [
+        ...input.metadata.entries,
+        { address: second, decimals: 6, observedAtBlock: '0', blockHash: hash(0) },
+      ],
+    },
+  };
+  for (const options of [
+    {},
+    { live: { historyMinutes: 180 } },
+    { live: { historyMinutes: 180 } },
+  ]) {
+    const report = buildMetricsReport(db, multi, options);
+    const poolId = '4663:v3:' + sharedPool;
+    const amounts = report.rwa.map(
+      (r) =>
+        r.blockRangeActivity.pools.find((p) => 'address' in p.pool && p.pool.address === sharedPool)
+          ?.usdMicros,
+    );
+    expect(amounts).toEqual([2000000n, 4000000n]);
+    expect(report.windows.filter((w) => w.poolId === poolId)).toHaveLength(1);
+    expect(
+      report.valuations.filter((v) => 'address' in v.pool && v.pool.address === sharedPool),
+    ).toHaveLength(1);
+    expect(report.valuations).toHaveLength(3);
+  }
 });

@@ -59,7 +59,7 @@ export function runMetricsCli(
   if (!['volume5mClosed', 'volumeMultiplier'].includes(sort))
     throw new ConfigError('Invalid rank sort');
   const config = loadChainConfig(String(values.config ?? 'config/robinhood.json'));
-  const assets = loadAssetVersion(String(values.watchlist ?? 'config/watchlist.amc.json'));
+  const assets = loadAssetVersion(String(values.watchlist ?? 'config/watchlist.stocks.json'));
   const selector = values.rwa === undefined ? null : String(values.rwa).toLowerCase();
   const selected =
     selector === null

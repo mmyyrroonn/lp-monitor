@@ -14,6 +14,8 @@ function setup() {
   const fixture = recorderFixture();
   const args = [
     'follow',
+    '--watchlist',
+    'config/watchlist.amc.json',
     '--duration',
     '1s',
     '--from-block',

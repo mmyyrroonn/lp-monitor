@@ -1,5 +1,19 @@
 # Robinhood RWA 短时 LP 机会监控：实施入口
 
+## 2026-09-12 全量股票监控目标
+
+默认名单为 `config/watchlist.stocks.json`：从 Robinhood 官方 `https://api.robinhood.com/rhj/assets` 当日接口纳入 chainId 4663 上全部 194 个 active 股票代币，按 symbol 排序、地址去重。原始响应保存在 `artifacts/watchlist/2026-09-12/stock-assets.json`，抓取时间和 SHA256 记录在名单中。这是静态快照，后续上新需刷新。
+
+`ingest`、`follow`、`history`、`project`、`inspect-pool`、`metrics`、`rank` 使用同一默认名单。名单变化会创建独立 scope，旧 AMC 游标和指标不会自动成为全量覆盖；第一次运行需完成新范围的池发现。旧样本使用 `--watchlist config/watchlist.amc.json`，该文件保持原样。
+
+股票共池现在分别计入两只股票：各自保留原始数量并使用本股票的前序 USDG 报价；池窗口和原始成交只计一次，提醒标签列出双方股票。股票聚合相加包含共池的双边参与量，不能当作去重后的全市场成交额。历史回顾沿用同样口径。
+
+2026-09-12 已在区块 `61051971` 核验 194 只股票均为 18 位精度、USDG 为 6 位，195/195 成功，已补齐配置。证据见 `artifacts/watchlist/2026-09-12/metadata-evidence.json`，AMC/USDG 原有较早核验锚点保留供历史数据使用。
+
+精度先复用 `config/metric-metadata.json` 及数据库 `token_metadata`。`follow` 启动时预取缺少的股票/USDG 精度；采集每批最多补查 16 个未知池代币，成功后按合约地址和区块/hash 缓存，失败保留 unknown 并至少等待 60 秒再试。未知精度不会阻断原始日志采集；RPC 总预算、截止时间和用户停止仍生效。重启检查已缓存区块，已知分叉会失效缓存。零地址原生币不调用 ERC20 decimals。
+
+缓存只用于观测区块及之后，不把当前精度回填为历史事实。缺少精度或有效前序报价时仍保留未计价；有股票登记也不等于有池、成交或完整覆盖。本次未启动长期采集和提醒服务，实链长时验收状态保持不变。
+
 ## 2026-09-12 实时增量修正与独立历史回顾
 
 实时 `follow --notify local` 已改用持久化增量协议投影、逐事件估值和分钟/五分钟贡献缓存。普通批次只解码新增或修订事件，未变时间桶复用已有结果；实时计算保留规则所需有界窗口（默认180分钟，包含60分钟基线，另读最多120秒报价上下文），过期贡献退出热路径，原始证据保留。
@@ -41,7 +55,7 @@ pnpm lp follow --config config/robinhood.json --duration 10m --notify local
 # 离线历史与合成验收，不连接RPC
 pnpm build
 node artifacts/p4/verify-acceptance.mjs
-pnpm lp metrics --db data/p4-acceptance.sqlite --rwa AMC --window 5m
+pnpm lp metrics --db data/p4-acceptance.sqlite --watchlist config/watchlist.amc.json --rwa AMC --window 5m
 ```
 
 JSONL写入数据库路径加.alerts.jsonl。配置见config/signals.initial.json，金额阈值以USDG估值的micro单位表达。每条规则有enabled/threshold/version；默认60个完整1m或12个完整5m基线；不足/零中位数保留null。自然5m、最近五个完整1m和当前partial分开。

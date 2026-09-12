@@ -94,7 +94,7 @@ export function recorderFixture() {
               result = encodeFunctionResult({
                 abi: erc20Abi,
                 functionName: 'decimals',
-                result: 18,
+                result: arg.to === config.tokens.USDG ? 6 : 18,
               });
             else if (arg.to === config.v3Factory)
               result = encodeFunctionResult({

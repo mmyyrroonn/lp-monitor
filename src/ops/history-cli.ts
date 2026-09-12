@@ -54,7 +54,7 @@ export async function runHistoryCli(
     fromBlock,
     toBlock,
     config: loadChainConfig(parsed.values.config ?? 'config/robinhood.json'),
-    assets: loadAssetVersion(parsed.values.watchlist ?? 'config/watchlist.amc.json'),
+    assets: loadAssetVersion(parsed.values.watchlist ?? 'config/watchlist.stocks.json'),
     metadata: loadMetricMetadata(parsed.values.metadata ?? 'config/metric-metadata.json'),
     ...options,
     ...(budget ? { maxCalls: Number(budget) } : {}),

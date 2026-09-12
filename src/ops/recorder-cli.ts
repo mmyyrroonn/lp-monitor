@@ -110,7 +110,7 @@ export async function runRecorderCli(
     ...notifications,
     config,
     env,
-    watchlistPath: String(values.watchlist ?? 'config/watchlist.amc.json'),
+    watchlistPath: String(values.watchlist ?? 'config/watchlist.stocks.json'),
     databasePath: resolve(String(values.db ?? env.dataDir + '/recorder.sqlite')),
     outputDirectory: resolve(String(values.out ?? 'artifacts/p1')),
     ...(fromBlock === undefined ? {} : { fromBlock }),

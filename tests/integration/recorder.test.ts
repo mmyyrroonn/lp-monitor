@@ -165,10 +165,14 @@ test('ingest persists actual orchestration, restarts idempotently and rebuilds a
     '--evidence',
     'off',
   ];
-  const scope = computeWatchScopeId(loadAssetVersion('config/watchlist.amc.json'), 'operations', {
-    v3Factory: config.v3Factory,
-    v4Manager: config.v4Manager,
-  });
+  const scope = computeWatchScopeId(
+    loadAssetVersion('config/watchlist.stocks.json'),
+    'operations',
+    {
+      v3Factory: config.v3Factory,
+      v4Manager: config.v4Manager,
+    },
+  );
   const inspect = () => {
     const db = openDatabase(join(dir, 'db.sqlite'));
     const s = new SqliteRangeStore(db);
