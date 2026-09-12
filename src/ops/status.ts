@@ -1,3 +1,4 @@
+import { readProjectionWatermark } from '../storage/live-projection.js';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
@@ -58,12 +59,7 @@ export function inspectDatabaseStatus(
         )
         .get(options.scopeId) as any,
     );
-    const projectionRow = db
-      .prepare(
-        'select block_number,block_hash,source_hash from projection_cursors where scope_id=?',
-      )
-      .get(options.scopeId) as
-      { block_number: number; block_hash: string; source_hash: string } | undefined;
+    const projectionRow = readProjectionWatermark(db, options.scopeId);
     const projected = point(projectionRow);
     const projectionCursorVerified =
       projected !== null &&

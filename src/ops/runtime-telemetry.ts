@@ -1,3 +1,4 @@
+import { readProjectionWatermark } from '../storage/live-projection.js';
 import { statSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type Database from 'better-sqlite3';
@@ -98,12 +99,7 @@ export class RuntimeTelemetry {
     this.freshProjection = null;
   }
   markProjectionFresh() {
-    const row = this.input.db
-      .prepare(
-        'select source_hash,block_number,block_hash from projection_cursors where scope_id=?',
-      )
-      .get(this.input.scopeId) as
-      { source_hash: string; block_number: number; block_hash: string } | undefined;
+    const row = readProjectionWatermark(this.input.db, this.input.scopeId);
     this.freshProjection = row
       ? { sourceHash: row.source_hash, block: BigInt(row.block_number), hash: row.block_hash }
       : null;
@@ -136,12 +132,7 @@ export class RuntimeTelemetry {
       )
       .get(scopeId) as
       { to_block: number; end_hash: string; end_timestamp_sec: number } | undefined;
-    const projection = db
-      .prepare(
-        'select source_hash,block_number,block_hash from projection_cursors where scope_id=?',
-      )
-      .get(scopeId) as
-      { source_hash: string; block_number: number; block_hash: string } | undefined;
+    const projection = readProjectionWatermark(db, scopeId);
     const fresh =
       this.freshProjection !== null &&
       projection !== undefined &&

@@ -82,7 +82,14 @@ export type PoolMetricWindows = {
   readonly unknownTimeBlockCounts: readonly UnknownTimeBlockCount[];
 };
 export type MetricWindow = PoolMetricWindows;
+export type MetricMemo = <T>(
+  key: string,
+  minuteStartSec: number,
+  input: unknown,
+  compute: () => T,
+) => T;
 export type BuildMinuteMetricOptions = {
+  readonly memo?: MetricMemo;
   readonly pools?: readonly {
     pool: PoolRef;
     discoveredAtBlock: bigint | null;
@@ -188,22 +195,43 @@ export function buildMinuteMetrics(
       const coverageByMinute = new Map(coverageForPool.map((item) => [item.minuteStartSec, item]));
       const minutes: MinuteMetric[] = [...starts]
         .sort((a, b) => a - b)
-        .map((start) =>
-          minuteMetric(
-            start,
-            currentMinute,
-            eventByMinute.get(start) ?? [],
-            coverageByMinute.get(start),
-            group.rawToken,
-            group.discoveredAtBlock,
-          ),
-        );
+        .map((start) => {
+          const events = eventByMinute.get(start) ?? [];
+          const covered = coverageByMinute.get(start);
+          const compute = () =>
+            minuteMetric(
+              start,
+              currentMinute,
+              events,
+              covered,
+              group.rawToken,
+              group.discoveredAtBlock,
+            );
+          // Cache unbaselined contributions. Baseline application creates new objects.
+          return options.memo && group.events.length > 0
+            ? options.memo(
+                'minute:' + poolId + ':' + start,
+                start,
+                {
+                  events,
+                  covered,
+                  current: start === currentMinute,
+                  rawToken: group.rawToken,
+                  birth: group.discoveredAtBlock,
+                },
+                compute,
+              )
+            : compute();
+        });
       applyMinuteBaselines(minutes, minuteMinimumSamples, oneMinuteLimit);
       const natural5mBuckets = buildNaturalBuckets(
         minutes,
         eventByMinute,
         fiveMinuteMinimumSamples,
         fiveMinuteLimit,
+        options.memo
+          ? (key, at, input, compute) => options.memo!(poolId + ':' + key, at, input, compute)
+          : undefined,
       );
       const closed = minutes.filter(
         (item) => item.status === 'closed' && item.minuteStartSec < currentMinute,
@@ -215,6 +243,9 @@ export function buildMinuteMetrics(
         currentMinute,
         fiveMinuteMinimumSamples,
         fiveMinuteLimit,
+        options.memo
+          ? (key, at, input, compute) => options.memo!(poolId + ':' + key, at, input, compute)
+          : undefined,
       );
       const naturalClosed5m =
         natural5mBuckets.filter((item) => item.endSec <= currentMinute).at(-1) ?? null;
@@ -407,6 +438,28 @@ function applyMinuteBaselines(minutes: MinuteMetric[], minimum: number, limit: n
   }
 }
 
+function memoAggregate(
+  selected: readonly MinuteMetric[],
+  events: ReadonlyMap<number, readonly MetricEvent[]>,
+  memo?: MetricMemo,
+): AggregateMetric {
+  const compute = () => aggregate(selected, events);
+  if (!memo) return compute();
+  // Exclude rolling baseline fields, which do not change this bucket's contribution.
+  const input = selected.map((m) => ({
+    minute: m.minuteStartSec,
+    status: m.status,
+    raw: m.rawNotional,
+    events: events.get(m.minuteStartSec) ?? [],
+  }));
+  return memo(
+    'aggregate:' + selected[0]!.minuteStartSec + ':' + selected.at(-1)!.minuteStartSec,
+    selected[0]!.minuteStartSec,
+    input,
+    compute,
+  );
+}
+
 function aggregate(
   selected: readonly MinuteMetric[],
   eventByMinute: ReadonlyMap<number, readonly MetricEvent[]>,
@@ -446,6 +499,7 @@ function buildNaturalBuckets(
   events: ReadonlyMap<number, readonly MetricEvent[]>,
   minimum: number,
   limit: number,
+  memo?: MetricMemo,
 ): AggregateMetric[] {
   const byStart = new Map(minutes.map((item) => [item.minuteStartSec, item]));
   const natural: AggregateMetric[] = [];
@@ -453,7 +507,8 @@ function buildNaturalBuckets(
   for (const start of starts) {
     const selected = Array.from({ length: 5 }, (_, i) => byStart.get(start + i * 60));
     if (selected.some((item) => item?.status !== 'closed')) continue;
-    let value = aggregate(selected as MinuteMetric[], events);
+    const selectedMinutes = selected as MinuteMetric[];
+    let value = memoAggregate(selectedMinutes, events, memo);
     const prior = natural
       .filter((item) => sameAggregateScale(value, item))
       .slice(-limit)
@@ -489,16 +544,17 @@ function recentFive(
   currentMinute: number,
   minimum: number,
   limit: number,
+  memo?: MetricMemo,
 ): AggregateMetric | null {
   const byStart = new Map(minutes.map((item) => [item.minuteStartSec, item]));
   const selected = Array.from({ length: 5 }, (_, i) => byStart.get(currentMinute - (5 - i) * 60));
   if (selected.some((item) => item?.status !== 'closed')) return null;
-  const aggregateValue = aggregate(selected as MinuteMetric[], events);
+  const aggregateValue = memoAggregate(selected as MinuteMetric[], events, memo);
   const prior: AggregateMetric[] = [];
   for (let end = currentMinute - 300; end >= currentMinute - limit * 300; end -= 300) {
     const priorSelected = Array.from({ length: 5 }, (_, i) => byStart.get(end - 300 + i * 60));
     if (priorSelected.some((item) => item?.status !== 'closed')) continue;
-    const priorAggregate = aggregate(priorSelected as MinuteMetric[], events);
+    const priorAggregate = memoAggregate(priorSelected as MinuteMetric[], events, memo);
     if (sameAggregateScale(aggregateValue, priorAggregate)) prior.unshift(priorAggregate);
   }
   const baseline = volumeBaseline(

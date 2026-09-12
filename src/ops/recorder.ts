@@ -3,7 +3,7 @@ import { ConfigError } from '../config/env.js';
 import type { SignalConfig } from '../signals/config.js';
 import type { MetricMetadata } from '../metrics/metadata.js';
 import { commitAcceptedSignalBatch, projectSignals, retractSignals } from '../signals/project.js';
-import { SqliteProjectionStore } from '../storage/projection-store.js';
+import { LiveProjectionStore } from '../storage/live-projection.js';
 import { AlertOutbox } from '../notify/outbox.js';
 import { createConsoleSink } from '../notify/console.js';
 import { createJsonlSink } from '../notify/jsonl.js';
@@ -410,11 +410,21 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         ) {
           signalStage('startup', () =>
             db.transaction(() => {
-              new SqliteProjectionStore(db).rebuild(scopeId, discoveryScope, config.version);
-              projectSignals(db, metricInput, options.signalConfig!, {
-                ...recoveryContext(),
-                captureMode: 'live',
-              });
+              const liveChanges = new LiveProjectionStore(db).sync(
+                scopeId,
+                discoveryScope,
+                config.version,
+              );
+              projectSignals(
+                db,
+                metricInput,
+                options.signalConfig!,
+                {
+                  ...recoveryContext(),
+                  captureMode: 'live',
+                },
+                liveChanges,
+              );
             })(),
           );
           telemetry.markProjectionFresh();
@@ -510,21 +520,24 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
             });
             shutdown.throwIfRequested();
           }
-          const priorTimes = store.logTimes(scopeId);
-          const unresolved = store
-            .activeLogs(scopeId)
-            .filter(
-              (log) =>
-                (!priorTimes.has(rawLogKey(log)) ||
-                  priorTimes.get(rawLogKey(log))?.source === 'unresolved') &&
-                log.blockNumber <= end.number,
-            );
+          const liveTimeHistoryMinutes = Math.min(
+            10080,
+            Math.max(
+              180,
+              (options.signalConfig?.candidate.samples ?? 0) + 10,
+              (options.signalConfig?.confirmRelative.samples ?? 0) * 5 + 10,
+              (options.signalConfig?.cooling.buckets ?? 0) * 5 + 10,
+            ) + 2,
+          );
+          const timeContext = store.liveTimeContext(scopeId, from, end, liveTimeHistoryMinutes);
           const allLogs = [
-            ...new Map([...unresolved, ...batch.logs].map((log) => [rawLogKey(log), log])).values(),
+            ...new Map(
+              [...timeContext.unresolved, ...batch.logs].map((log) => [rawLogKey(log), log]),
+            ).values(),
           ];
           const timeFrom = allLogs.reduce(
             (min, log) => (log.blockNumber < min ? log.blockNumber : min),
-            from,
+            timeContext.retryFromBlock,
           );
           let timed: RecordedRangeBatch = batch;
           let timingFailures: readonly unknown[] = [];
@@ -534,8 +547,8 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
               allLogs,
               timeFrom,
               end,
-              store.anchors(scopeId),
-              store.boundaries(scopeId),
+              timeContext.anchors,
+              timeContext.boundaries,
             );
             timingFailures = resolution.failures;
             result.timingFailures.push(

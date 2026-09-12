@@ -5,6 +5,8 @@ import { encodeJson } from '../domain/json.js';
 import type { BlockAnchor } from '../domain/types.js';
 import { poolRegistrationId } from '../registry/pools.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
+import { LiveProjectionStore, type LiveProjectionChanges } from '../storage/live-projection.js';
+import { StaleMetricProjectionError } from '../storage/metric-store.js';
 import { SqliteProjectionStore } from '../storage/projection-store.js';
 import {
   buildMetricsReport,
@@ -26,6 +28,7 @@ export interface SignalBatchContext {
   captureMode: CaptureMode;
 }
 type EvidenceItem = {
+  minuteStartSec?: number | null;
   block: bigint;
   poolIds?: string[];
   digest: string;
@@ -33,6 +36,9 @@ type EvidenceItem = {
   ordinaryCurrentPartial?: boolean;
 };
 type Evidence = {
+  sinceSec?: number;
+  sinceBlock?: bigint;
+  contextIncomplete?: boolean;
   branchRecovery?: boolean;
   events: Record<string, EvidenceItem>;
   closedCoverage: Record<string, EvidenceItem>;
@@ -174,7 +180,33 @@ export function retractSignals(
 }
 function readEvidence(db: Database.Database, input: MetricInput, report: MetricsReport): Evidence {
   const raw = new SqliteRangeStore(db);
-  const times = raw.logTimes(input.scopeId);
+  const bounds =
+    report.liveSinceSec === null ? undefined : { sinceSec: Math.max(0, report.liveSinceSec - 120) };
+  const boundary = bounds
+    ? (db
+        .prepare(
+          'select first_block from minute_boundaries where scope_id=? and timestamp_sec<=? and timestamp_sec>=? order by timestamp_sec desc limit 1',
+        )
+        .get(input.scopeId, bounds.sinceSec, Math.floor(bounds.sinceSec / 60) * 60) as
+        { first_block: number } | undefined)
+    : undefined;
+  const blockBounds = boundary ? { fromBlock: BigInt(boundary.first_block) } : undefined;
+  const times = bounds
+    ? new Map([
+        ...raw.logTimes(input.scopeId, bounds),
+        ...(blockBounds ? raw.logTimes(input.scopeId, blockBounds) : []),
+      ])
+    : raw.logTimes(input.scopeId);
+  const evidenceLogs = bounds
+    ? [
+        ...new Map(
+          [
+            ...raw.activeLogs(input.scopeId, bounds),
+            ...(blockBounds ? raw.activeLogs(input.scopeId, blockBounds) : []),
+          ].map((log) => [rawLogKey(log), log]),
+        ).values(),
+      ]
+    : raw.activeLogs(input.scopeId);
   const valuations = new Map(report.valuations.map((v) => [v.eventId, v]));
   const dependencies = new Map<string, Set<string>>();
   for (const v of report.valuations) {
@@ -188,9 +220,10 @@ function readEvidence(db: Database.Database, input: MetricInput, report: Metrics
     }
   }
   const events: Evidence['events'] = {};
-  for (const log of raw.activeLogs(input.scopeId))
+  for (const log of evidenceLogs)
     events[rawLogKey(log)] = {
       block: log.blockNumber,
+      minuteStartSec: times.get(rawLogKey(log))?.minuteStartSec ?? null,
       poolIds: [...(dependencies.get(rawLogKey(log)) ?? [])],
       digest: digest({
         log,
@@ -218,7 +251,15 @@ function readEvidence(db: Database.Database, input: MetricInput, report: Metrics
       digest: digest(p),
       poolIds: [poolRegistrationId(p)],
     };
-  return { events, closedCoverage, pools };
+  return {
+    events,
+    closedCoverage,
+    pools,
+    contextIncomplete: report.windowContextIncomplete,
+    ...(bounds
+      ? { sinceSec: bounds.sinceSec, ...(blockBounds ? { sinceBlock: blockBounds.fromBlock } : {}) }
+      : {}),
+  };
 }
 function repairedFrom(
   old: Evidence,
@@ -244,6 +285,17 @@ function repairedFrom(
       // Coverage evidence is bounded; expiry outside the retained window is
       // not a repair. Missing raw events/registrations still invalidate.
       if (group === 'closedCoverage' && !now) continue;
+      if (group === 'events' && !now && item.minuteStartSec == null && current.contextIncomplete)
+        continue;
+      if (
+        group === 'events' &&
+        !now &&
+        current.sinceSec !== undefined &&
+        (item.minuteStartSec != null
+          ? item.minuteStartSec < current.sinceSec
+          : current.sinceBlock !== undefined && item.block < current.sinceBlock)
+      )
+        continue;
       if (!now || now.digest !== item.digest)
         add(
           item.block,
@@ -309,10 +361,41 @@ export function projectSignals(
   input: MetricInput,
   config: SignalConfig,
   context: SignalBatchContext,
+  liveChanges?: LiveProjectionChanges,
 ): AlertRecord[] {
   return db
     .transaction(() => {
-      const report = buildMetricsReport(db, input); // Enforces fresh P2, never reads cached metric_windows.
+      if (
+        !liveChanges &&
+        db.prepare('select 1 from live_projection_cursors where scope_id=?').get(input.scopeId)
+      ) {
+        if (
+          db.prepare('select 1 from live_dirty_logs where scope_id=? limit 1').get(input.scopeId) &&
+          !new SqliteProjectionStore(db).read(
+            input.scopeId,
+            input.registryScopeId,
+            input.configVersion,
+          )
+        )
+          throw new StaleMetricProjectionError();
+        liveChanges = new LiveProjectionStore(db).sync(
+          input.scopeId,
+          input.registryScopeId,
+          input.configVersion,
+        );
+      }
+      // Retain the existing coverage horizon limit. Larger sample requirements
+      // remain insufficient evidence instead of crashing an accepted configuration.
+      const historyMinutes = Math.min(
+        10080,
+        Math.max(
+          180,
+          config.candidate.samples + 10,
+          config.confirmRelative.samples * 5 + 10,
+          config.cooling.buckets * 5 + 10,
+        ),
+      );
+      const report = buildMetricsReport(db, input, liveChanges ? { live: { historyMinutes } } : {});
       const configHash = digest({
         signal: signalConfigVersion(config),
         chain: input.configVersion,
@@ -325,11 +408,16 @@ export function projectSignals(
         input.scopeId,
       ) as Cursor | undefined;
       const oldEvidence = old ? decodeSignalState<Evidence>(old.evidence_json) : undefined;
+      const pendingRepair = statement(
+        db,
+        'select min_block from live_pending_signal_repairs where scope_id=?',
+      ).get(input.scopeId) as { min_block: number } | undefined;
       if (
         old &&
         !oldEvidence?.branchRecovery &&
         old.config_hash === configHash &&
-        old.source_hash === report.sourceHash
+        old.source_hash === report.sourceHash &&
+        !pendingRepair
       )
         return [];
       const evidence = readEvidence(db, input, report);
@@ -356,6 +444,18 @@ export function projectSignals(
             repair = repair === null || report.at.number < repair ? report.at.number : repair;
           }
         }
+      }
+      if (liveChanges?.repairFrom !== null && liveChanges?.repairFrom !== undefined) {
+        repair =
+          repair === null || liveChanges.repairFrom < repair ? liveChanges.repairFrom : repair;
+        // A revised quote can affect downstream pools; conservatively invalidate
+        // provisional dependencies from this block even after hot-window expiry.
+        affected.add('*');
+      }
+      if (pendingRepair) {
+        const block = BigInt(pendingRepair.min_block);
+        repair = repair === null || block < repair ? block : repair;
+        affected.add('*');
       }
       if (oldEvidence?.branchRecovery) {
         branchChanged = true;
@@ -490,6 +590,7 @@ export function projectSignals(
         report.at.hash,
         encodeSignalState(evidence),
       );
+      statement(db, 'delete from live_pending_signal_repairs where scope_id=?').run(input.scopeId);
       return records;
     })
     .immediate();
@@ -504,16 +605,22 @@ export function commitAcceptedSignalBatch(
   return db
     .transaction(() => {
       const changes = new SqliteRangeStore(db).acceptRange(batch);
-      new SqliteProjectionStore(db).rebuild(
+      const liveChanges = new LiveProjectionStore(db).sync(
         input.scopeId,
         input.registryScopeId,
         input.configVersion,
       );
-      const alerts = projectSignals(db, input, config, {
-        batchId: batch.id,
-        observedAtMs: batch.observedAtMs,
-        captureMode: batch.captureMode,
-      });
+      const alerts = projectSignals(
+        db,
+        input,
+        config,
+        {
+          batchId: batch.id,
+          observedAtMs: batch.observedAtMs,
+          captureMode: batch.captureMode,
+        },
+        liveChanges,
+      );
       return { changes, alerts };
     })
     .immediate();

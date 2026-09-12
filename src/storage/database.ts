@@ -15,7 +15,15 @@ function loadMigration(name: string): string {
   }
 }
 
-const migration = ['001-raw.sql', '002-projections.sql', '003-metrics.sql', '004-alerts.sql']
+const migration = [
+  '001-raw.sql',
+  '002-projections.sql',
+  '003-metrics.sql',
+  '004-alerts.sql',
+  '005-live.sql',
+  '006-live-indexes.sql',
+  '007-live-metrics.sql',
+]
   .map(loadMigration)
   .join('\n');
 

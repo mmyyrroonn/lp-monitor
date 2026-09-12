@@ -5,7 +5,8 @@ import { openDatabase } from '../../src/storage/database.js';
 import { SqliteRangeStore } from '../../src/storage/raw-store.js';
 import { acceptedMetricRanges, readMetricCoverage } from '../../src/metrics/coverage.js';
 import type { RecordedRangeBatch } from '../../src/storage/manifest.js';
-import type { MinuteBoundary } from '../../src/domain/types.js';
+import type { MinuteBoundary, RawLog } from '../../src/domain/types.js';
+import { rawLogKey } from '../../src/storage/manifest.js';
 
 const dbs: Database.Database[] = [];
 afterEach(() => {
@@ -361,5 +362,109 @@ test('sliding bounded windows release stale admissions and revalidate when revis
     expect(parse).not.toHaveBeenCalled();
   } finally {
     parse.mockRestore();
+  }
+});
+
+test('bounded live coverage catches claimed-time and block-time mismatches without full raw reads', () => {
+  const f = fixture();
+  const oldBlockRecentMinute: RawLog = {
+    blockNumber: 10n,
+    blockHash: hash(10),
+    transactionHash: hash(999),
+    transactionIndex: 0,
+    logIndex: 0,
+    address: toHex(9, { size: 20 }),
+    topics: [],
+    data: '0x',
+    rawBlockTimestamp: null,
+  };
+  const key = rawLogKey(oldBlockRecentMinute);
+  f.db
+    .prepare(
+      `insert into raw_logs(
+         raw_key,chain_id,block_hash,block_number,transaction_hash,transaction_index,
+         log_index,address,topics_json,data,raw_block_timestamp,payload_json
+       ) values (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    )
+    .run(
+      key,
+      4663,
+      oldBlockRecentMinute.blockHash,
+      10,
+      oldBlockRecentMinute.transactionHash,
+      0,
+      0,
+      oldBlockRecentMinute.address,
+      '[]',
+      '0x',
+      null,
+      '{}',
+    );
+  const rawId = f.db.prepare('select id from raw_logs where raw_key=?').pluck().get(key);
+  f.db.prepare('insert into active_logs values (?,?,?)').run('scope', 'operation-v3', rawId);
+  f.db
+    .prepare('insert into log_times values (?,?,?,?,?,?)')
+    .run('scope', rawId, 120, null, 'minute-boundary', 180);
+
+  const active = vi.spyOn(SqliteRangeStore.prototype, 'activeLogs');
+  const times = vi.spyOn(SqliteRangeStore.prototype, 'logTimes');
+  const boundaries = vi.spyOn(SqliteRangeStore.prototype, 'boundaries');
+  try {
+    const minute = readMetricCoverage(f.db, 'scope', [], f.end, 180, true).find(
+      (item) => item.minuteStartSec === 120,
+    );
+    expect(minute?.reasons).toContain('event-time-mismatch');
+    expect(active.mock.calls.every((call) => call.length > 1)).toBe(true);
+    expect(times.mock.calls.every((call) => call.length > 1)).toBe(true);
+    expect(boundaries.mock.calls.every((call) => call.length > 1)).toBe(true);
+  } finally {
+    active.mockRestore();
+    times.mockRestore();
+    boundaries.mockRestore();
+  }
+});
+
+test('actual bounded accepted-range query is driven by the overlap index', () => {
+  const f = fixture();
+  const prepare = f.db.prepare.bind(f.db);
+  let sql = '';
+  const spy = vi.spyOn(f.db, 'prepare').mockImplementation((value: string) => {
+    if (value.includes('accepted_ranges_scope_bounds')) sql = value;
+    return prepare(value);
+  });
+  acceptedMetricRanges(f.db, 'scope', { fromBlock: 110n, toBlock: 115n });
+  spy.mockRestore();
+
+  const plan = prepare('explain query plan ' + sql).all('scope', 110, 115, 'scope') as {
+    detail: string;
+  }[];
+  expect(plan.some((row) => row.detail.includes('accepted_ranges_scope_bounds'))).toBe(true);
+  expect(plan.some((row) => row.detail.includes('to_block>?'))).toBe(true);
+});
+
+test('legacy readonly snapshots remain readable without the new overlap index', async () => {
+  const { mkdtempSync, rmSync } = await import('node:fs');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const f = fixture();
+  const expected = readMetricCoverage(f.db, 'scope', [], f.end);
+  f.db.exec('drop index accepted_ranges_scope_bounds');
+  const directory = mkdtempSync(join(tmpdir(), 'lp-legacy-coverage-'));
+  try {
+    const path = join(directory, 'legacy.sqlite');
+    await f.db.backup(path);
+    const readonly = openDatabase(path, { readonly: true });
+    try {
+      expect(readMetricCoverage(readonly, 'scope', [], f.end)).toEqual(expected);
+      expect(
+        readonly
+          .prepare("select 1 from sqlite_master where name='accepted_ranges_scope_bounds'")
+          .get(),
+      ).toBeUndefined();
+    } finally {
+      readonly.close();
+    }
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
   }
 });

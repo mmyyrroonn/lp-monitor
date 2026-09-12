@@ -94,16 +94,28 @@ export function acceptedMetricRanges(
     bounds.fromBlock >= 0n &&
     bounds.toBlock >= bounds.fromBlock &&
     bounds.toBlock <= BigInt(Number.MAX_SAFE_INTEGER);
+  // Readonly legacy snapshots are deliberately not migrated. Preserve their
+  // offline read path; current writable/live databases have the range index.
+  const rangeIndex =
+    bounded &&
+    db
+      .prepare(
+        "select 1 from sqlite_master where type='index' and name='accepted_ranges_scope_bounds'",
+      )
+      .get();
   const rows = (
     bounded
       ? db
           .prepare(
-            'select batch_id,filter_id,from_block,to_block from accepted_ranges as accepted ' +
-              'where scope_id=? and exists (select 1 from accepted_ranges as candidate ' +
-              'where candidate.scope_id=accepted.scope_id and candidate.batch_id=accepted.batch_id ' +
-              'and candidate.from_block<=? and candidate.to_block>=?)',
+            `select accepted.batch_id,accepted.filter_id,accepted.from_block,accepted.to_block
+             from (
+               select distinct batch_id from accepted_ranges ${rangeIndex ? 'indexed by accepted_ranges_scope_bounds' : ''}
+               where scope_id=? and to_block>=? and from_block<=?
+             ) candidate
+             join accepted_ranges accepted
+               on accepted.scope_id=? and accepted.batch_id=candidate.batch_id`,
           )
-          .all(scopeId, Number(bounds.toBlock), Number(bounds.fromBlock))
+          .all(scopeId, Number(bounds.fromBlock), Number(bounds.toBlock), scopeId)
       : db
           .prepare(
             'select batch_id,filter_id,from_block,to_block from accepted_ranges where scope_id=?',
@@ -243,13 +255,15 @@ export function readMetricCoverage(
   errors: readonly ProjectionQualityError[],
   watermark: BlockAnchor,
   historyMinutes = 180,
+  bounded = false,
 ): MetricCoverage[] {
   if (!Number.isSafeInteger(historyMinutes) || historyMinutes < 65 || historyMinutes > 10080)
     throw new RangeError('Metric horizon must be 65..10080 minutes');
-  const raw = new SqliteRangeStore(db),
-    boundaries = raw.boundaries(scopeId);
+  const raw = new SqliteRangeStore(db);
   const current = Math.floor(watermark.timestampSec / 60) * 60;
-  const first = Math.max(boundaries[0]?.timestampSec ?? current, current - historyMinutes * 60);
+  const horizonStart = Math.max(0, current - historyMinutes * 60);
+  const boundaries = raw.boundaries(scopeId, bounded ? horizonStart : undefined);
+  const first = Math.max(boundaries[0]?.timestampSec ?? current, horizonStart);
   const map = new Map(boundaries.map((b) => [b.timestampSec, b]));
   // Match the exact intervals evaluated below, including current prefixes and
   // invalid boundaries. Empty intervals need no accepted blocks; missing bounds
@@ -268,9 +282,24 @@ export function readMetricCoverage(
             toBlock: to > bounds.toBlock ? to : bounds.toBlock,
           };
   }
-  const ranges = acceptedMetricRanges(db, scopeId, bounds);
-  const times = raw.logTimes(scopeId);
-  const logs = raw.activeLogs(scopeId);
+  const ranges = bounded && bounds === undefined ? [] : acceptedMetricRanges(db, scopeId, bounds);
+  const timeBounds = { sinceSec: first };
+  const times = bounded
+    ? new Map([
+        ...(bounds === undefined ? [] : raw.logTimes(scopeId, bounds)),
+        ...raw.logTimes(scopeId, timeBounds),
+      ])
+    : raw.logTimes(scopeId);
+  const logs = bounded
+    ? [
+        ...new Map(
+          [
+            ...(bounds === undefined ? [] : raw.activeLogs(scopeId, bounds)),
+            ...raw.activeLogs(scopeId, timeBounds),
+          ].map((log) => [rawLogKey(log), log]),
+        ).values(),
+      ]
+    : raw.activeLogs(scopeId);
   const result: MetricCoverage[] = [];
   for (let minute = first; minute <= current; minute += 60) {
     const left = map.get(minute),

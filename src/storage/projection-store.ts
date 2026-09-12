@@ -15,6 +15,8 @@ export class NoAcceptedScopeError extends Error {
 }
 
 export interface StoredProjection extends ProjectionResult {
+  /** Live window omitted unbounded unknown-time evidence; consumers must fail closed. */
+  windowContextIncomplete?: boolean;
   sourceHash: string;
   configVersion: string;
   registryScopeId: string;

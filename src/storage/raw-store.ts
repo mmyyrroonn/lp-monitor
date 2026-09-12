@@ -50,6 +50,22 @@ type BoundaryRow = {
   at_timestamp_sec: number;
 };
 
+export type RawReadBounds = {
+  fromBlock?: bigint;
+  toBlock?: bigint;
+  sinceSec?: number;
+};
+export type BoundaryReadBounds = {
+  sinceSec?: number;
+  untilSec?: number;
+  includeBrackets?: boolean;
+};
+export type BlockReadBounds = {
+  fromBlock: bigint;
+  toBlock: bigint;
+  includeBrackets?: boolean;
+};
+
 export class SqliteRangeStore {
   constructor(private readonly database: Database.Database) {}
 
@@ -82,8 +98,10 @@ export class SqliteRangeStore {
             throw new Error('Range gap would advance the accepted cursor');
         }
 
-        const before = this.activeMap(batch.scopeId);
-        const beforeTimes = this.activeTimeMap(batch.scopeId);
+        const bounds = { fromBlock: batch.fromBlock, toBlock: batch.toBlock };
+        const explicitRefs = (batch.logTimes ?? []).map((assignment) => assignment.ref);
+        const before = this.activeMap(batch.scopeId, bounds, explicitRefs);
+        const beforeTimes = this.activeTimeMap(batch.scopeId, bounds, explicitRefs);
         this.persistTransport(batch);
         this.reconcileActive(batch, shards);
         this.reconcilePools(batch, shards);
@@ -93,8 +111,8 @@ export class SqliteRangeStore {
         if (current === null || batch.end.number >= current.number)
           this.persistCursor(batch.scopeId, batch.end);
 
-        const after = this.activeMap(batch.scopeId);
-        const afterTimes = this.activeTimeMap(batch.scopeId);
+        const after = this.activeMap(batch.scopeId, bounds, explicitRefs);
+        const afterTimes = this.activeTimeMap(batch.scopeId, bounds, explicitRefs);
         return changeSet(before, after, beforeTimes, afterTimes, batch.fromBlock);
       })
       .immediate();
@@ -210,16 +228,63 @@ export class SqliteRangeStore {
       .immediate();
   }
 
-  activeLogs(scopeId: WatchScopeId): readonly RawLog[] {
+  activeLogs(scopeId: WatchScopeId, bounds: RawReadBounds = {}): readonly RawLog[] {
+    const clauses = ['a.scope_id = ?'];
+    const parameters: unknown[] = [scopeId];
+    if (bounds.fromBlock !== undefined) {
+      clauses.push('r.block_number >= ?');
+      parameters.push(checkedHeight(bounds.fromBlock));
+    }
+    if (bounds.toBlock !== undefined) {
+      clauses.push('r.block_number <= ?');
+      parameters.push(checkedHeight(bounds.toBlock));
+    }
+    let timeJoin = '';
+    if (bounds.sinceSec !== undefined) {
+      checkedTimestamp(bounds.sinceSec);
+      timeJoin = 'join log_times t on t.scope_id = a.scope_id and t.raw_log_id = a.raw_log_id';
+      clauses.push('(t.minute_start_sec >= ? or t.exact_timestamp_sec >= ?)');
+      parameters.push(bounds.sinceSec, bounds.sinceSec);
+    }
+    const blockBounded =
+      bounds.sinceSec === undefined &&
+      (bounds.fromBlock !== undefined || bounds.toBlock !== undefined);
+    if (blockBounded) {
+      const blockClauses: string[] = [];
+      const blockParameters: unknown[] = [];
+      if (bounds.fromBlock !== undefined) {
+        blockClauses.push('r.block_number >= ?');
+        blockParameters.push(checkedHeight(bounds.fromBlock));
+      }
+      if (bounds.toBlock !== undefined) {
+        blockClauses.push('r.block_number <= ?');
+        blockParameters.push(checkedHeight(bounds.toBlock));
+      }
+      blockParameters.push(scopeId);
+      return (
+        this.database
+          .prepare(
+            `select r.* from raw_logs r indexed by raw_logs_height
+             where ${blockClauses.join(' and ')}
+               and exists (
+                 select 1 from active_logs a indexed by active_logs_scope
+                 where a.scope_id = ? and a.raw_log_id = r.id
+               )
+             order by r.block_number, r.transaction_index, r.log_index`,
+          )
+          .all(...blockParameters) as RawRow[]
+      ).map(rawLogFromRow);
+    }
     return (
       this.database
         .prepare(
           `select distinct r.* from active_logs a
            join raw_logs r on r.id = a.raw_log_id
-           where a.scope_id = ?
+           ${timeJoin}
+           where ${clauses.join(' and ')}
            order by r.block_number, r.transaction_index, r.log_index`,
         )
-        .all(scopeId) as RawRow[]
+        .all(...parameters) as RawRow[]
     ).map(rawLogFromRow);
   }
 
@@ -235,46 +300,130 @@ export class SqliteRangeStore {
     ).map(anchorFromRow);
   }
 
-  anchors(scopeId: WatchScopeId): readonly BlockAnchor[] {
+  anchors(scopeId: WatchScopeId, bounds?: BlockReadBounds): readonly BlockAnchor[] {
+    if (bounds === undefined)
+      return (
+        this.database
+          .prepare(
+            `select block_number, block_hash, timestamp_sec from anchors
+             where scope_id = ? order by block_number, block_hash`,
+          )
+          .all(scopeId) as AnchorRow[]
+      ).map(anchorFromRow);
+    const from = checkedHeight(bounds.fromBlock);
+    const to = checkedHeight(bounds.toBlock);
+    if (to < from) throw new RangeError('Anchor bounds must be ordered');
+    const bracket = bounds.includeBrackets
+      ? (this.database
+          .prepare(
+            `select
+               (select max(block_number) from anchors where scope_id=? and block_number<?) before,
+               (select min(block_number) from anchors where scope_id=? and block_number>?) after`,
+          )
+          .get(scopeId, from, scopeId, to) as {
+          before: number | null;
+          after: number | null;
+        })
+      : { before: null, after: null };
     return (
       this.database
         .prepare(
           `select block_number, block_hash, timestamp_sec from anchors
-           where scope_id = ? order by block_number, block_hash`,
+           where scope_id = ? and block_number between ? and ?
+           order by block_number, block_hash`,
         )
-        .all(scopeId) as AnchorRow[]
+        .all(scopeId, bracket.before ?? from, bracket.after ?? to) as AnchorRow[]
     ).map(anchorFromRow);
   }
-
-  boundaries(scopeId: WatchScopeId): readonly MinuteBoundary[] {
+  boundaries(
+    scopeId: WatchScopeId,
+    bounds?: number | BoundaryReadBounds,
+  ): readonly MinuteBoundary[] {
+    if (bounds === undefined || typeof bounds === 'number') {
+      const sinceSec = bounds;
+      if (sinceSec !== undefined) checkedTimestamp(sinceSec);
+      return (
+        this.database
+          .prepare(
+            `select * from minute_boundaries where scope_id = ?
+             ${sinceSec === undefined ? '' : 'and timestamp_sec >= ?'} order by timestamp_sec`,
+          )
+          .all(...(sinceSec === undefined ? [scopeId] : [scopeId, sinceSec])) as BoundaryRow[]
+      ).map(boundaryFromRow);
+    }
+    const since = bounds.sinceSec ?? 0;
+    const until = bounds.untilSec ?? Number.MAX_SAFE_INTEGER;
+    checkedTimestamp(since);
+    checkedTimestamp(until);
+    if (until < since) throw new RangeError('Boundary bounds must be ordered');
+    const bracket = bounds.includeBrackets
+      ? (this.database
+          .prepare(
+            `select
+               (select max(timestamp_sec) from minute_boundaries where scope_id=? and timestamp_sec<?) before,
+               (select min(timestamp_sec) from minute_boundaries where scope_id=? and timestamp_sec>?) after`,
+          )
+          .get(scopeId, since, scopeId, until) as {
+          before: number | null;
+          after: number | null;
+        })
+      : { before: null, after: null };
     return (
       this.database
-        .prepare('select * from minute_boundaries where scope_id = ? order by timestamp_sec')
-        .all(scopeId) as BoundaryRow[]
-    ).map((row) => ({
-      timestampSec: row.timestamp_sec,
-      firstBlock: decodedHeight(row.first_block),
-      before: {
-        number: decodedHeight(row.before_number),
-        hash: row.before_hash as Hex,
-        timestampSec: row.before_timestamp_sec,
-      },
-      at: {
-        number: decodedHeight(row.at_number),
-        hash: row.at_hash as Hex,
-        timestampSec: row.at_timestamp_sec,
-      },
-    }));
+        .prepare(
+          `select * from minute_boundaries
+           where scope_id = ? and timestamp_sec between ? and ?
+           order by timestamp_sec`,
+        )
+        .all(scopeId, bracket.before ?? since, bracket.after ?? until) as BoundaryRow[]
+    ).map(boundaryFromRow);
   }
-
-  logTimes(scopeId: WatchScopeId): ReadonlyMap<string, LogTime> {
-    const rows = this.database
-      .prepare(
-        `select r.*, t.minute_start_sec, t.exact_timestamp_sec, t.source
-         from log_times t join raw_logs r on r.id = t.raw_log_id
-         where t.scope_id = ? order by r.block_number, r.transaction_index, r.log_index`,
-      )
-      .all(scopeId) as TimeRow[];
+  logTimes(scopeId: WatchScopeId, bounds: RawReadBounds = {}): ReadonlyMap<string, LogTime> {
+    const clauses = ['t.scope_id = ?'];
+    const parameters: unknown[] = [scopeId];
+    if (bounds.fromBlock !== undefined) {
+      clauses.push('r.block_number >= ?');
+      parameters.push(checkedHeight(bounds.fromBlock));
+    }
+    if (bounds.toBlock !== undefined) {
+      clauses.push('r.block_number <= ?');
+      parameters.push(checkedHeight(bounds.toBlock));
+    }
+    if (bounds.sinceSec !== undefined) {
+      checkedTimestamp(bounds.sinceSec);
+      clauses.push('(t.minute_start_sec >= ? or t.exact_timestamp_sec >= ?)');
+      parameters.push(bounds.sinceSec, bounds.sinceSec);
+    }
+    const blockBounded =
+      bounds.sinceSec === undefined &&
+      (bounds.fromBlock !== undefined || bounds.toBlock !== undefined);
+    const rows = blockBounded
+      ? (this.database
+          .prepare(
+            `select r.*, t.minute_start_sec, t.exact_timestamp_sec, t.source
+             from raw_logs r indexed by raw_logs_height
+             join log_times t on t.raw_log_id = r.id and t.scope_id = ?
+             where ${[
+               bounds.fromBlock === undefined ? null : 'r.block_number >= ?',
+               bounds.toBlock === undefined ? null : 'r.block_number <= ?',
+             ]
+               .filter((item): item is string => item !== null)
+               .join(' and ')}
+             order by r.block_number, r.transaction_index, r.log_index`,
+          )
+          .all(
+            scopeId,
+            ...(bounds.fromBlock === undefined ? [] : [checkedHeight(bounds.fromBlock)]),
+            ...(bounds.toBlock === undefined ? [] : [checkedHeight(bounds.toBlock)]),
+          ) as TimeRow[])
+      : (this.database
+          .prepare(
+            `select r.*, t.minute_start_sec, t.exact_timestamp_sec, t.source
+             from log_times t join raw_logs r on r.id = t.raw_log_id
+             where ${clauses.join(' and ')}
+             order by r.block_number, r.transaction_index, r.log_index`,
+          )
+          .all(...parameters) as TimeRow[]);
     return new Map(
       rows.map((row) => [
         rawLogKey(rawLogFromRow(row)),
@@ -287,6 +436,48 @@ export class SqliteRangeStore {
     );
   }
 
+  liveTimeContext(
+    scopeId: WatchScopeId,
+    batchFrom: bigint,
+    end: BlockAnchor,
+    historyMinutes = 180,
+  ): {
+    retryFromBlock: bigint;
+    unresolved: readonly RawLog[];
+    anchors: readonly BlockAnchor[];
+    boundaries: readonly MinuteBoundary[];
+  } {
+    if (!Number.isSafeInteger(historyMinutes) || historyMinutes < 1 || historyMinutes > 10080)
+      throw new RangeError('Live time horizon must be 1..10080 minutes');
+    const sinceSec = Math.max(0, end.timestampSec - historyMinutes * 60);
+    const proofMinute = Math.floor(sinceSec / 60) * 60;
+    const proof =
+      sinceSec === 0
+        ? undefined
+        : this.boundaries(scopeId, { sinceSec: proofMinute, untilSec: proofMinute })[0];
+    const retryFromBlock = sinceSec === 0 ? 0n : (proof?.firstBlock ?? batchFrom);
+    const boundedFrom = retryFromBlock > end.number ? batchFrom : retryFromBlock;
+    const readBounds = { fromBlock: boundedFrom, toBlock: end.number };
+    const priorTimes = this.logTimes(scopeId, readBounds);
+    const unresolved = this.activeLogs(scopeId, readBounds).filter((log) => {
+      const prior = priorTimes.get(rawLogKey(log));
+      return prior === undefined || prior.source === 'unresolved';
+    });
+    return {
+      retryFromBlock: boundedFrom,
+      unresolved,
+      anchors: this.anchors(scopeId, {
+        fromBlock: boundedFrom,
+        toBlock: end.number,
+        includeBrackets: true,
+      }),
+      boundaries: this.boundaries(scopeId, {
+        sinceSec: proofMinute,
+        untilSec: Math.floor(end.timestampSec / 60) * 60,
+        includeBrackets: true,
+      }),
+    };
+  }
   pools(scopeId: WatchScopeId): readonly PersistedPoolRegistration[] {
     const rows = this.database
       .prepare(
@@ -725,12 +916,58 @@ export class SqliteRangeStore {
     return row.id;
   }
 
-  private activeMap(scopeId: WatchScopeId): Map<string, RawLog> {
-    return new Map(this.activeLogs(scopeId).map((log) => [rawLogKey(log), log]));
+  private activeMap(
+    scopeId: WatchScopeId,
+    bounds: RawReadBounds = {},
+    explicitRefs: readonly LogRef[] = [],
+  ): Map<string, RawLog> {
+    const result = new Map(
+      this.activeLogs(scopeId, bounds).map((log) => [rawLogKey(log), log] as const),
+    );
+    if (explicitRefs.length > 0) {
+      const keysJson = losslessJson([...new Set(explicitRefs.map(rawLogKey))]);
+      const rows = this.database
+        .prepare(
+          `select distinct r.* from active_logs a join raw_logs r on r.id = a.raw_log_id
+           where a.scope_id = ? and r.raw_key in (select value from json_each(?))`,
+        )
+        .all(scopeId, keysJson) as RawRow[];
+      for (const row of rows) {
+        const log = rawLogFromRow(row);
+        result.set(rawLogKey(log), log);
+      }
+    }
+    return result;
   }
 
-  private activeTimeMap(scopeId: WatchScopeId): Map<string, string> {
-    return new Map([...this.logTimes(scopeId)].map(([key, time]) => [key, losslessJson(time)]));
+  private activeTimeMap(
+    scopeId: WatchScopeId,
+    bounds: RawReadBounds = {},
+    explicitRefs: readonly LogRef[] = [],
+  ): Map<string, string> {
+    const result = new Map(
+      [...this.logTimes(scopeId, bounds)].map(([key, time]) => [key, losslessJson(time)]),
+    );
+    const readExplicit = this.database.prepare(
+      `select t.minute_start_sec, t.exact_timestamp_sec, t.source
+       from log_times t join raw_logs r on r.id = t.raw_log_id
+       where t.scope_id = ? and r.raw_key = ?`,
+    );
+    for (const ref of explicitRefs) {
+      const key = rawLogKey(ref);
+      const row = readExplicit.get(scopeId, key) as
+        Pick<TimeRow, 'minute_start_sec' | 'exact_timestamp_sec' | 'source'> | undefined;
+      if (row !== undefined)
+        result.set(
+          key,
+          losslessJson({
+            minuteStartSec: row.minute_start_sec,
+            exactTimestampSec: row.exact_timestamp_sec,
+            source: row.source,
+          }),
+        );
+    }
+    return result;
   }
 }
 
@@ -845,6 +1082,23 @@ function anchorFromRow(row: AnchorRow): BlockAnchor {
     number: decodedHeight(row.block_number),
     hash: row.block_hash as Hex,
     timestampSec: row.timestamp_sec,
+  };
+}
+
+function boundaryFromRow(row: BoundaryRow): MinuteBoundary {
+  return {
+    timestampSec: row.timestamp_sec,
+    firstBlock: decodedHeight(row.first_block),
+    before: {
+      number: decodedHeight(row.before_number),
+      hash: row.before_hash as Hex,
+      timestampSec: row.before_timestamp_sec,
+    },
+    at: {
+      number: decodedHeight(row.at_number),
+      hash: row.at_hash as Hex,
+      timestampSec: row.at_timestamp_sec,
+    },
   };
 }
 

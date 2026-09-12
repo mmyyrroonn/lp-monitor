@@ -6,7 +6,9 @@ import type { Address } from 'viem';
 import type { AssetRegistry } from '../registry/assets.js';
 import { PoolRegistry, poolRegistrationId } from '../registry/pools.js';
 import { SqliteRangeStore } from './raw-store.js';
-import { SqliteProjectionStore } from './projection-store.js';
+import { SqliteProjectionStore, type StoredProjection } from './projection-store.js';
+import { LiveProjectionStore } from './live-projection.js';
+import { LiveMetricCache } from './live-metric-cache.js';
 import { encodeJson } from '../domain/json.js';
 import type { LiquidityChange, QuoteObservation } from '../domain/types.js';
 import { comparePosition } from '../state/observations.js';
@@ -14,7 +16,7 @@ import { rawLogKey } from './manifest.js';
 import { readMetricCoverage } from '../metrics/coverage.js';
 import { decimalsAt, reconcileMetricMetadata, type MetricMetadata } from '../metrics/metadata.js';
 import { valueSwap, type SwapValuationMetadata, type SwapValuation } from '../metrics/notional.js';
-import { quoteFromRwaUsdgSwap } from '../metrics/price.js';
+import { findPrecedingQuote, quoteFromRwaUsdgSwap } from '../metrics/price.js';
 import { aggregateRwa } from '../metrics/rwa-aggregate.js';
 import { buildMinuteMetrics, type MetricEvent } from '../metrics/windows.js';
 import { summarizeLiquidityActions, annotateLatestSwapLiquidity } from '../metrics/liquidity.js';
@@ -39,20 +41,71 @@ export type MetricsReport = ReturnType<typeof buildMetricsReport>;
 
 /** A single SQLite read snapshot covers freshness, decoded input, registration and
  * minute evidence. Consumers never read naked projected_events or cached metrics. */
-export function buildMetricsReport(db: Database.Database, input: MetricInput) {
+export interface MetricBuildOptions {
+  live?: { historyMinutes: number };
+  projection?: StoredProjection;
+}
+export function buildMetricsReport(
+  db: Database.Database,
+  input: MetricInput,
+  options: MetricBuildOptions = {},
+) {
   return db.transaction(() => {
-    const projection = new SqliteProjectionStore(db).read(
-      input.scopeId,
-      input.registryScopeId,
-      input.configVersion,
-    );
-    if (!projection) throw new StaleMetricProjectionError();
+    // Live recording has its own cursor. Legacy offline databases keep their strict
+    // explicit-project freshness contract; readonly CLI inspection never writes.
+    if (
+      !options.live &&
+      !options.projection &&
+      db
+        .prepare(
+          "select 1 from sqlite_master where type='table' and name='live_projection_cursors'",
+        )
+        .get() &&
+      db.prepare('select 1 from live_projection_cursors where scope_id=?').get(input.scopeId)
+    )
+      options = { ...options, live: { historyMinutes: 180 } };
     const raw = new SqliteRangeStore(db);
-    const metadataCheck = reconcileMetricMetadata(input.metadata, [
-      ...raw.anchors(input.scopeId),
-      ...raw.anchors(input.registryScopeId),
-      ...projection.events.map((e) => ({ number: e.ref.blockNumber, hash: e.ref.blockHash })),
-    ]);
+    const tip = raw.acceptedTip(input.scopeId);
+    const historyMinutes = options.live?.historyMinutes ?? 180;
+    if (!Number.isSafeInteger(historyMinutes) || historyMinutes < 65 || historyMinutes > 10080)
+      throw new RangeError('Metric horizon must be 65..10080 minutes');
+    const sinceSec =
+      options.live && tip ? Math.floor(tip.timestampSec / 60) * 60 - historyMinutes * 60 : null;
+    const liveStore = options.live ? new LiveProjectionStore(db) : null;
+    if (liveStore && !db.readonly)
+      liveStore.sync(input.scopeId, input.registryScopeId, input.configVersion);
+    const projection =
+      options.projection ??
+      (liveStore
+        ? liveStore.read(input.scopeId, input.registryScopeId, input.configVersion, sinceSec! - 120)
+        : new SqliteProjectionStore(db).read(
+            input.scopeId,
+            input.registryScopeId,
+            input.configVersion,
+          ));
+    if (!projection) throw new StaleMetricProjectionError();
+    const cache = options.live && !db.readonly ? new LiveMetricCache(db, input.scopeId) : null;
+    const metadataAnchors = options.live
+      ? input.metadata.entries.flatMap((entry) => {
+          const height = Number(entry.observedAtBlock);
+          if (!Number.isSafeInteger(height)) return [];
+          return (
+            db
+              .prepare(
+                'select block_number,block_hash from anchors where scope_id in (?,?) and block_number=? union select r.block_number,r.block_hash from raw_logs r where r.block_number=? and exists (select 1 from active_logs a where a.raw_log_id=r.id and a.scope_id=?)',
+              )
+              .all(input.scopeId, input.registryScopeId, height, height, input.scopeId) as {
+              block_number: number;
+              block_hash: string;
+            }[]
+          ).map((row) => ({ number: BigInt(row.block_number), hash: row.block_hash as Address }));
+        })
+      : [
+          ...raw.anchors(input.scopeId),
+          ...raw.anchors(input.registryScopeId),
+          ...projection.events.map((e) => ({ number: e.ref.blockNumber, hash: e.ref.blockHash })),
+        ];
+    const metadataCheck = reconcileMetricMetadata(input.metadata, metadataAnchors);
     const metricMetadata = metadataCheck.metadata;
     const registry = new PoolRegistry([
       ...raw.pools(input.registryScopeId),
@@ -71,25 +124,38 @@ export function buildMetricsReport(db: Database.Database, input: MetricInput) {
         );
     }
     const byId = new Map(registrations.map((r) => [poolRegistrationId(r), r]));
-    const retained = db
-      .prepare(
-        'select min(from_block) as fromBlock, max(to_block) as toBlock from accepted_ranges where scope_id=?',
-      )
-      .safeIntegers(true)
-      .get(input.scopeId) as { fromBlock: bigint | null; toBlock: bigint | null };
-    // Invalidation can remove a whole accepted interval while retaining earlier
-    // active events. Bounds describe the retained envelope, not proven coverage.
-    for (const event of projection.events) {
-      const block = event.ref.blockNumber;
-      if (retained.fromBlock === null || block < retained.fromBlock) retained.fromBlock = block;
-      if (retained.toBlock === null || block > retained.toBlock) retained.toBlock = block;
-    }
-    const coverage = readMetricCoverage(
+    const rawCoverage = readMetricCoverage(
       db,
       input.scopeId,
       projection.qualityErrors,
       projection.end,
+      historyMinutes,
+      !!options.live,
     );
+    const coverage = projection.windowContextIncomplete
+      ? rawCoverage.map((c) => ({
+          ...c,
+          complete: false,
+          reasons: [...c.reasons, 'unknown-time-window-boundary'],
+        }))
+      : rawCoverage;
+    const retained = options.live
+      ? {
+          fromBlock: coverage.find((c) => c.fromBlock !== null)?.fromBlock ?? null,
+          toBlock: projection.end.number,
+        }
+      : (db
+          .prepare(
+            'select min(from_block) as fromBlock,max(to_block) as toBlock from accepted_ranges where scope_id=?',
+          )
+          .safeIntegers(true)
+          .get(input.scopeId) as { fromBlock: bigint | null; toBlock: bigint | null });
+    if (!options.live)
+      for (const event of projection.events) {
+        const block = event.ref.blockNumber;
+        if (retained.fromBlock === null || block < retained.fromBlock) retained.fromBlock = block;
+        if (retained.toBlock === null || block > retained.toBlock) retained.toBlock = block;
+      }
     const quotes: QuoteObservation[] = [];
     const valuations: SwapValuation[] = [];
     const metricEvents: MetricEvent[] = [];
@@ -122,12 +188,30 @@ export function buildMetricsReport(db: Database.Database, input: MetricInput) {
             usdgDecimals: decimalsAt(metricMetadata, input.usdg, event.ref.blockNumber),
             maxQuoteAgeSec: 60,
           };
-          valuation = valueSwap(event, metadata, quotes);
-          valuations.push(valuation);
-          for (const asset of related) {
-            const group = valuedByRwa.get(asset.address) ?? [];
-            group.push(valuation);
-            valuedByRwa.set(asset.address, group);
+          const hasUsdg = registration.token0 === input.usdg || registration.token1 === input.usdg;
+          const preceding = hasUsdg
+            ? null
+            : findPrecedingQuote(event, metadata.rwa, metadata.usdg, quotes, 60);
+          const quoteContext = preceding ? [preceding] : [];
+          valuation = cache
+            ? cache.memo(
+                'valuation:' + rawLogKey(event.ref),
+                event.time.minuteStartSec ?? Math.floor(projection.end.timestampSec / 60) * 60,
+                { event, metadata, preceding },
+                () => valueSwap(event, metadata, quoteContext),
+              )
+            : valueSwap(event, metadata, quotes);
+          const inWindow =
+            sinceSec === null ||
+            event.time.minuteStartSec === null ||
+            event.time.minuteStartSec >= sinceSec;
+          if (inWindow) {
+            valuations.push(valuation);
+            for (const asset of related) {
+              const group = valuedByRwa.get(asset.address) ?? [];
+              group.push(valuation);
+              valuedByRwa.set(asset.address, group);
+            }
           }
           // Appending after valuation makes as-of order explicit even though the
           // price helper also enforces it. No source event is retimestamped.
@@ -145,16 +229,26 @@ export function buildMetricsReport(db: Database.Database, input: MetricInput) {
           : null,
       });
     }
-    const windows = buildMinuteMetrics(metricEvents, coverage, projection.end, {
-      pools: registrations.map((r) => ({
-        pool: r.pool,
-        discoveredAtBlock: r.source === 'seed-config' ? null : r.discoveredAt.blockNumber,
-        rawToken:
-          r.token0 === input.usdg || r.token1 === input.usdg
-            ? input.usdg
-            : (input.assets.addresses.find((a) => a === r.token0 || a === r.token1) ?? null),
-      })),
-    });
+    const windows = buildMinuteMetrics(
+      sinceSec === null
+        ? metricEvents
+        : metricEvents.filter(
+            (m) => m.event.time.minuteStartSec === null || m.event.time.minuteStartSec >= sinceSec,
+          ),
+      coverage,
+      projection.end,
+      {
+        memo: cache ? (key, at, value, compute) => cache.memo(key, at, value, compute) : undefined,
+        pools: registrations.map((r) => ({
+          pool: r.pool,
+          discoveredAtBlock: r.source === 'seed-config' ? null : r.discoveredAt.blockNumber,
+          rawToken:
+            r.token0 === input.usdg || r.token1 === input.usdg
+              ? input.usdg
+              : (input.assets.addresses.find((a) => a === r.token0 || a === r.token1) ?? null),
+        })),
+      },
+    );
     const current = Math.floor(projection.end.timestampSec / 60) * 60;
     const lastFive = coverage.filter(
       (c) => c.minuteStartSec >= current - 300 && c.minuteStartSec < current,
@@ -267,7 +361,10 @@ export function buildMetricsReport(db: Database.Database, input: MetricInput) {
         }),
       )
       .digest('hex');
+    if (cache && sinceSec !== null) cache.expireBefore(sinceSec - 120);
     return {
+      liveSinceSec: sinceSec,
+      windowContextIncomplete: projection.windowContextIncomplete === true,
       version: METRIC_VERSION,
       chainId: CHAIN_ID,
       scopeId: input.scopeId,
@@ -289,6 +386,12 @@ export function buildMetricsReport(db: Database.Database, input: MetricInput) {
       valuations,
       quotes,
       grossFees: projection.events
+        .filter(
+          (e) =>
+            sinceSec === null ||
+            e.time.minuteStartSec === null ||
+            e.time.minuteStartSec >= sinceSec,
+        )
         .filter((e) => e.kind === 'swap')
         .map((s) => ({
           eventId: rawLogKey(s.ref),
@@ -300,6 +403,11 @@ export function buildMetricsReport(db: Database.Database, input: MetricInput) {
           ),
         })),
       notes: [
+        ...(options.live
+          ? [
+              'Realtime report retains only the configured baseline horizon; blockRangeActivity describes this hot window, not lifetime activity.',
+            ]
+          : []),
         'USDG = USD is a display assumption, not a verified dollar peg.',
         'Cached decimals are carried forward from their recorded identity anchor; unknown tokens and earlier history remain unpriced.',
         'Pool activity sums count each pool Swap once; multi-hop activity is not unique-user volume.',

@@ -319,6 +319,14 @@ export async function replay(
           }
         }
       }
+      // Final historical evidence intentionally spans the requested archive,
+      // independently of the bounded live frames used by recorded-observed mode.
+      if (store.acceptedTip(input.scopeId))
+        new SqliteProjectionStore(db).rebuild(
+          input.scopeId,
+          input.registryScopeId,
+          input.configVersion,
+        );
       const projection = new SqliteProjectionStore(db).read(
         input.scopeId,
         input.registryScopeId,

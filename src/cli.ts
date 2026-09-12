@@ -12,6 +12,7 @@ import { CHAIN_ID } from './domain/chain.js';
 import { encodeJson } from './domain/json.js';
 
 const help = `Robinhood read-only P0/P1/P2/P3/P4/P5/P6 CLI
+  pnpm lp history --from-block N --to-block M --db data/recorder.sqlite [--out artifacts/history]
   pnpm lp status --db data/recorder.sqlite --scope SCOPE_ID
   pnpm lp backup --db data/recorder.sqlite --out data/backup.sqlite
   P6: follow writes <db>.health.json and per-run ops-report.json; SIGINT stops cooperatively.
@@ -28,7 +29,7 @@ const help = `Robinhood read-only P0/P1/P2/P3/P4/P5/P6 CLI
   pnpm lp follow --config config/robinhood.json --duration 10m
   P4: follow --notify local [--signals config/signals.initial.json] [--metadata PATH]
   Local alerts: console and <db>.alerts.jsonl; default follow only records.
-  Full-scope P2/P3 rebuild runs per accepted batch; 2s polling is not a latency guarantee.
+  Live follow incrementally projects changed logs and retains bounded metric windows; 2s polling is not a latency guarantee.
   P1: --db PATH --watchlist PATH --max-rpc-calls N (default 10000)
   P1: --evidence full|sampled|off (default sampled); bounded run only.
   pnpm lp probe --config config/robinhood.json --out artifacts/p0/capabilities.json
@@ -44,6 +45,10 @@ export async function runCli(
   args = process.argv.slice(2),
   options: { environment?: NodeJS.ProcessEnv; readerFactory?: typeof createChainReader } = {},
 ): Promise<number> {
+  if (args[0] === 'history' && !args.includes('--help') && !args.includes('-h')) {
+    const { runHistoryCli } = await import('./ops/history-cli.js');
+    return runHistoryCli(args, options);
+  }
   if (
     ['status', 'backup'].includes(args[0] ?? '') &&
     !args.includes('--help') &&
