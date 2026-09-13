@@ -91,6 +91,7 @@ export interface RecorderOptions {
 }
 export async function runRecorder(options: RecorderOptions): Promise<number> {
   const { config, env } = options;
+  const latestStart = options.command === 'follow' && options.fromBlock === undefined;
   if (
     options.notify !== undefined &&
     (options.notify !== 'local' ||
@@ -338,6 +339,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           },
           config,
           initial,
+          { verifyDeployments: !latestStart },
         ),
       )
       .catch((error: unknown) => {
@@ -426,10 +428,26 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       }
       return (store.acceptedTip(discoveryScope)?.number ?? -1n) >= head.number;
     };
-    telemetry.setPhase('backfill');
-    result.discoveryComplete = await reader.meter.withPurpose('backfill', () => bootstrap(initial));
+    telemetry.setPhase(latestStart ? 'steady' : 'backfill');
+    result.discoveryComplete = latestStart
+      ? false
+      : await reader.meter.withPurpose('backfill', () => bootstrap(initial));
+    Object.assign(result, {
+      startMode: latestStart ? 'latest' : 'historical',
+      liveStartBlock: latestStart ? initial.number : null,
+      registryCoverage: latestStart ? 'known-pools-only' : 'historical-discovery',
+    });
+    if (latestStart)
+      console.log(
+        encodeJson({
+          event: 'live-start',
+          block: initial.number,
+          registryCoverage: 'known-pools-only',
+          message: '从启动时最新块采集；复用本地池登记并发现新池，未登记老池覆盖未知，不补历史。',
+        }),
+      );
     shutdown.throwIfRequested();
-    if (!result.discoveryComplete) {
+    if (!latestStart && !result.discoveryComplete) {
       result.status = 'incomplete';
     } else {
       // Verify the operation checkpoint before delivering a persisted backlog.
@@ -470,12 +488,15 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       }
       const start =
         options.fromBlock ??
-        (store.acceptedTip(scopeId)?.number !== undefined
-          ? 0n
-          : await warmupStart(metered('warmupAnchors'), initial, floor, config.warmupMinutes));
+        (latestStart
+          ? initial.number
+          : store.acceptedTip(scopeId)?.number !== undefined
+            ? 0n
+            : await warmupStart(metered('warmupAnchors'), initial, floor, config.warmupMinutes));
       const followResult = await follow(endpointReader, followStore, stopAtMs, {
         scopeId,
         startBlock: start,
+        recoverAtHead: latestStart,
         ...(options.toBlock === undefined ? {} : { toBlock: options.toBlock }),
         oneShot: options.command === 'ingest',
         pollIntervalMs: config.pollIntervalMs,
@@ -499,6 +520,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         onChanges: recordChanges,
         onRecovery: async () => {
           await drain(true);
+          if (latestStart) return;
           // Revalidate historical registry evidence before applying a new branch.
           const head = await endpointReader.getAnchor('latest');
           telemetry.setPhase('backfill');
@@ -644,9 +666,11 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           const changes =
             metricInput && options.signalConfig
               ? signalStage('accepted-batch', () =>
-                  commitAcceptedSignalBatch(db, metricInput, options.signalConfig!, timed),
+                  commitAcceptedSignalBatch(db, metricInput, options.signalConfig!, timed, {
+                    startNewSegment: latestStart && from === start,
+                  }),
                 ).changes
-              : store.acceptRange(timed);
+              : store.acceptRange(timed, { startNewSegment: latestStart && from === start });
           const outboxDurableAtMs = metricInput ? Date.now() : null;
           const writeLatencyMs = rawWriteMs + Date.now() - commitAt;
           if (metricInput) telemetry.markProjectionFresh();

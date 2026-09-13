@@ -231,6 +231,7 @@ export function buildDashboardSnapshot(
       notes: [
         ...report.notes,
         '仅分类登记的 RWA；Meme 分类不可用。',
+        '统计范围仅包含本地已登记池；默认实时采集不补历史，未登记老池的覆盖未知。',
         '链上最终性为 provisional。窗口采用 (start, end]；历史分钟截止于该分钟最后一秒。',
       ],
     };

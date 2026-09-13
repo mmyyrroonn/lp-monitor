@@ -21,6 +21,8 @@ export interface FollowResult {
 export interface FollowOptions {
   scopeId: string;
   startBlock: bigint;
+  /** Latest mode never backfills history when a reorg has no matching checkpoint. */
+  recoverAtHead?: boolean;
   toBlock?: bigint;
   oneShot?: boolean;
   pollIntervalMs?: number;
@@ -128,12 +130,14 @@ export async function follow(
                 const changes = store.invalidateAfter(options.scopeId, match);
                 if (changes) options.onChanges?.(changes, 'reorg');
               } else {
-                const nextStart = await warmupStart(
-                  reader,
-                  head,
-                  options.deploymentFloor ?? 0n,
-                  options.warmupMinutes ?? 60,
-                );
+                const nextStart = options.recoverAtHead
+                  ? head.number
+                  : await warmupStart(
+                      reader,
+                      head,
+                      options.deploymentFloor ?? 0n,
+                      options.warmupMinutes ?? 60,
+                    );
                 const changes = store.resetForWarmup(options.scopeId);
                 if (changes) options.onChanges?.(changes, 'warmup');
                 start = nextStart;

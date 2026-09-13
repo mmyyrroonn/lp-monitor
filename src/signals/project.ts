@@ -615,11 +615,12 @@ export function commitAcceptedSignalBatch(
   input: MetricInput,
   config: SignalConfig,
   batch: RecordedRangeBatch,
+  options: { startNewSegment?: boolean } = {},
 ) {
   if (batch.scopeId !== input.scopeId) throw new Error('Signal batch scope mismatch');
   return db
     .transaction(() => {
-      const changes = new SqliteRangeStore(db).acceptRange(batch);
+      const changes = new SqliteRangeStore(db).acceptRange(batch, options);
       const liveChanges = new LiveProjectionStore(db).sync(
         input.scopeId,
         input.registryScopeId,

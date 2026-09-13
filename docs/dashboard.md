@@ -20,6 +20,8 @@ pnpm lp dashboard --db data/recorder.sqlite --port 8787
 
 默认观察名单是 `config/watchlist.stocks.json`。旧 AMC 数据必须显式指定 `--watchlist config/watchlist.amc.json`；跨名单的空状态不代表全链没有交易。首版分类仅来自登记的 RWA 股票；未知对手币展示合约地址，不推断 Meme 身份。
 
+默认 `follow` 从启动时最新块开始，重启不会追赶停机区间；无需删除原库。首批窗口会显示数据不足，随真实覆盖积累变为可用。统计仅包含本地已登记池及启动后新发现的池，未登记老池的覆盖未知。
+
 ## 实时数据与旧库
 
 普通模式要求存在新鲜的增量投影。当前带指标的采集入口为既有 `follow --notify local`；该选项同时启用已有本机提醒。运行方式与预算见 README，前端本身不替用户启用它。仅有原始日志或旧的 `project --rebuild` 游标时，普通模式会明确提示投影缺失或过期。

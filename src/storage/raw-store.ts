@@ -82,7 +82,10 @@ export class SqliteRangeStore {
     return row === undefined ? null : anchorFromRow(row);
   }
 
-  acceptRange(batch: RecordedRangeBatch): RangeChangeSet {
+  acceptRange(
+    batch: RecordedRangeBatch,
+    options: { startNewSegment?: boolean } = {},
+  ): RangeChangeSet {
     const shards = verifySuccessfulShardCoverage(batch);
     return this.database
       .transaction(() => {
@@ -94,7 +97,8 @@ export class SqliteRangeStore {
             normalizeHex(batch.previous.hash) !== normalizeHex(current.hash)
           )
             throw new Error('Stale range: previous anchor does not match accepted tip');
-          if (batch.fromBlock > current.number + 1n)
+          // A latest-start segment records only its actual bounds; the skipped interval stays uncovered.
+          if (batch.fromBlock > current.number + 1n && !options.startNewSegment)
             throw new Error('Range gap would advance the accepted cursor');
         }
 

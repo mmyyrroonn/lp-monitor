@@ -270,6 +270,7 @@ export async function verifyIdentity(
   reader: EvidenceReader,
   config: ChainConfig,
   anchor: BlockAnchor,
+  options: { verifyDeployments?: boolean } = {},
 ): Promise<IdentityReport> {
   let observedChainId: number | null = null;
   let chainReason: string | undefined;
@@ -393,18 +394,19 @@ export async function verifyIdentity(
   )
     ? 'verified'
     : 'unverified';
-  const deploymentFactory = await findDeployment(
-    reader,
-    config.v3Factory,
-    anchor.number,
-    candidateBlock,
-  );
-  const deploymentManager = await findDeployment(
-    reader,
-    config.v4Manager,
-    anchor.number,
-    candidateBlock,
-  );
+  const deployment = (address: Address): Promise<DeploymentIdentity> =>
+    options.verifyDeployments === false
+      ? Promise.resolve({
+          address,
+          status: 'unverified',
+          firstCodeBlock: null,
+          candidateBlock,
+          candidateChecked: false,
+          reason: 'skipped-live-start',
+        })
+      : findDeployment(reader, address, anchor.number, candidateBlock);
+  const deploymentFactory = await deployment(config.v3Factory);
+  const deploymentManager = await deployment(config.v4Manager);
   const status: IdentityStatus =
     currentIdentityStatus === 'verified' &&
     deploymentFactory.status === 'verified' &&
