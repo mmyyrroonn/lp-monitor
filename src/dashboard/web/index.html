@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <title>LP Monitor · 代币热度</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="/styles.css" />
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="rail" aria-label="主导航">
+        <a class="brand" href="/" aria-label="LP Monitor 首页"
+          ><span class="brand-mark">lp<span>•</span></span
+          ><span class="brand-name">MONITOR</span></a
+        >
+        <div class="rail-label">工作台 / WORKSPACE</div>
+        <nav>
+          <button class="nav-item active" data-page="overview"><span>◫</span>热度总览</button
+          ><button class="nav-item" data-page="favorites">
+            <span>☆</span>自选代币 <small id="favorite-count">0</small></button
+          ><button class="nav-item" data-page="health"><span>⌁</span>运行状态</button>
+        </nav>
+        <div class="rail-footer">
+          <span class="chain-dot"></span> Robinhood Chain<br /><small>CHAIN 4663 · 本机只读</small>
+          <div class="rail-caption">FOLLOW THE ACTIVITY.</div>
+        </div>
+      </aside>
+      <main>
+        <header class="topbar">
+          <div class="breadcrumb">监控工作台 <span>/</span> <b id="page-crumb">热度总览</b></div>
+          <div class="connection">
+            <span class="status-dot" id="status-dot"></span
+            ><span id="connection-text">正在连接本地数据</span
+            ><button id="refresh" class="icon-button" aria-label="立即刷新" title="立即刷新">
+              ↻
+            </button>
+          </div>
+        </header>
+        <div class="content">
+          <section class="heading">
+            <div>
+              <div class="eyebrow">ON-CHAIN ACTIVITY / 链上活跃度</div>
+              <h1 id="page-title">发现热度，<span>看见变化。</span></h1>
+              <p id="page-description">从每一分钟的交易里，找到正在升温的代币。</p>
+            </div>
+            <div class="heading-meta">
+              <span class="readonly">READ ONLY</span><span>本地数据 · Provisional 观察</span>
+            </div>
+          </section>
+          <div id="notice" class="notice" role="status">正在读取监控数据库…</div>
+          <section id="monitor-view">
+            <div class="controls">
+              <div class="scope-chips">
+                <span class="chip active">RWA / 股票</span
+                ><span class="muted" id="scope-label">监控名单加载中</span>
+              </div>
+              <div class="controls-right">
+                <label class="search"
+                  ><span>⌕</span
+                  ><input
+                    id="search"
+                    placeholder="搜索名称 / 合约地址"
+                    aria-label="搜索代币名称或合约地址"
+                    autocomplete="off"
+                /></label>
+                <div class="segmented" id="windows" aria-label="统计时间窗口">
+                  <button data-window="1m">1m</button
+                  ><button data-window="5m" class="active" aria-pressed="true">5m</button
+                  ><button data-window="15m">15m</button><button data-window="1h">1h</button>
+                </div>
+              </div>
+            </div>
+            <section id="stats" class="stats" aria-label="监控概览"></section>
+            <section class="panel ranking-panel">
+              <div class="panel-header">
+                <div>
+                  <span class="section-number">01</span>
+                  <h2>代币热度排行</h2>
+                  <span id="rank-count" class="count-label"></span>
+                </div>
+                <span class="subtle" id="rank-refresh">每 5 秒检查更新</span>
+              </div>
+              <div class="rank-toolbar">
+                <div id="sorts" class="tabs">
+                  <button data-sort="warming" class="active" aria-pressed="true">突然升温</button
+                  ><button data-sort="activity">交易最活跃</button
+                  ><button data-sort="sustained">持续热门</button
+                  ><button data-sort="cooling">正在降温</button>
+                </div>
+                <label class="sort-amount"
+                  ><input type="checkbox" id="amount-sort" /> 按估值排序</label
+                >
+              </div>
+              <p id="sort-explanation" class="table-note"></p>
+              <div id="rank-area" class="table-scroll">
+                <table>
+                  <thead>
+                    <tr>
+                      <th class="favorite-col"><span aria-label="自选">☆</span></th>
+                      <th># / 代币</th>
+                      <th>当前状态</th>
+                      <th class="numeric"><span id="count-heading">5m</span> 交易数</th>
+                      <th class="numeric">较前一窗口</th>
+                      <th class="numeric">USDG 等值量</th>
+                      <th>近 15m 交易趋势</th>
+                      <th class="numeric">池</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rank-body"></tbody>
+                </table>
+                <div id="rank-empty" class="empty-state" hidden>
+                  <span>⌁</span>
+                  <h3>等待第一份数据</h3>
+                  <p>连接已录制的数据库后，代币活跃情况会显示在这里。</p>
+                </div>
+              </div>
+              <div class="table-footer">
+                <span id="table-range">—</span
+                ><span>交易数按代币跨池去重 · 不等同于独立用户数</span>
+              </div>
+            </section>
+            <div class="lower-grid">
+              <section class="panel heat-panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="section-number">02</span>
+                    <h2>分钟热力图</h2>
+                  </div>
+                  <div class="segmented small" id="horizons">
+                    <button data-horizon="15">15m</button
+                    ><button data-horizon="30" class="active" aria-pressed="true">30m</button
+                    ><button data-horizon="60">60m</button>
+                  </div>
+                </div>
+                <div class="heat-controls">
+                  <div class="segmented small" id="scales">
+                    <button data-scale="absolute" class="active" aria-pressed="true">
+                      绝对活跃度</button
+                    ><button data-scale="relative">相对自身</button>
+                  </div>
+                  <span>点击分钟，回看当时排行</span>
+                </div>
+                <div id="heatmap" class="heatmap" aria-label="每分钟代币交易活跃度"></div>
+                <div class="heat-footer">
+                  <span id="heat-caption">每格 1 分钟 · 交易数</span>
+                  <div class="legend">
+                    <span>少</span><i class="h1"></i><i class="h2"></i><i class="h3"></i
+                    ><i class="h4"></i><span>多</span><i class="gap"></i><span>缺失</span
+                    ><i class="partial"></i><span>未完整</span>
+                  </div>
+                </div>
+              </section>
+              <section class="panel changes-panel">
+                <div class="panel-header">
+                  <div>
+                    <span class="section-number">03</span>
+                    <h2>最近变化</h2>
+                  </div>
+                  <span class="subtle">完整分钟</span>
+                </div>
+                <div id="changes" class="changes"></div>
+                <div class="change-foot">按分钟与前一分钟比较 · 描述性变化</div>
+              </section>
+            </div>
+            <p class="source-note" id="source-note">统计范围由观察名单与池发现覆盖决定。</p>
+          </section>
+          <section id="health-view" hidden></section>
+          <footer class="page-footer">
+            <span>LP MONITOR <b>/</b> 活跃度观察工作台</span
+            ><span id="data-time">链上数据时间 —</span>
+          </footer>
+        </div>
+      </main>
+    </div>
+    <dialog id="token-dialog" aria-labelledby="token-title">
+      <div class="drawer-top">
+        <span class="eyebrow">TOKEN / 代币详情</span
+        ><button id="close-dialog" class="icon-button" aria-label="关闭详情">×</button>
+      </div>
+      <div id="token-detail"></div>
+    </dialog>
+    <div id="toast" class="toast" role="status" hidden></div>
+  </body>
+</html>

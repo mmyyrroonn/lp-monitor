@@ -51,6 +51,8 @@ export type MetricsReport = ReturnType<typeof buildMetricsReport>;
 export interface MetricBuildOptions {
   /** Reproduce the explicitly selected legacy minute-close replay format. */
   legacyWindows?: boolean;
+  /** Read-model evidence for independent stock-side aggregation. */
+  includeAssetValuations?: boolean;
   live?: { historyMinutes: number };
   projection?: StoredProjection;
 }
@@ -251,6 +253,7 @@ export function buildMetricsReport(
       const swaps = valuedByRwa.get(asset.address) ?? [];
       return {
         asset,
+        valuations: options.includeAssetValuations ? swaps : undefined,
         poolIds: registrations
           .filter((r) => r.token0 === asset.address || r.token1 === asset.address)
           .map(poolRegistrationId),

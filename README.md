@@ -1,5 +1,9 @@
 # Robinhood RWA monitor
 
+## 2026-09-13 代币热度前端
+
+新增本机只读监控台：`pnpm dashboard --db data/recorder.sqlite`，打开 `http://127.0.0.1:8787`。支持热度排行、分钟热力图、历史分钟回看、代币/池详情、自选和运行状态。数据缺失或过期明确标注；不会自动启动采集。已有旧版数据库可显式使用 `--legacy-snapshot`，需要匹配原观察名单并通过来源核验。完整参数、统计口径和边界见[前端使用说明](docs/dashboard.md)。
+
 ## 2026-09-12 全量股票监控目标
 
 默认名单为 `config/watchlist.stocks.json`：从 Robinhood 官方 `https://api.robinhood.com/rhj/assets` 当日接口纳入 chainId 4663 上全部 194 个 active 股票代币，按 symbol 排序、地址去重。原始响应保存在 `artifacts/watchlist/2026-09-12/stock-assets.json`，抓取时间和 SHA256 记录在名单中。这是静态快照，后续上新需刷新。
