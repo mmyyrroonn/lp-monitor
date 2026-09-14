@@ -594,11 +594,12 @@ export async function runHistoryJob(options: HistoryJobRunOptions): Promise<Hist
       }
     }
     // The precheck shares the run budget and deadline; nothing further starts once
-    // either is spent, even if the precheck only returned after the deadline.
+    // either is spent, even if the precheck only returned after the deadline. The
+    // effective budget is the explicit option or the configured recorder budget.
     const remainingCalls =
-      options.maxRpcCalls === undefined ? undefined : options.maxRpcCalls - targetRunCalls;
+      (options.maxRpcCalls ?? input.config.recorderMaxRpcCalls) - targetRunCalls;
     const deadlinePassed = deadlineMs !== undefined && Date.now() >= deadlineMs;
-    if (deadlinePassed || (remainingCalls !== undefined && remainingCalls < 1)) {
+    if (deadlinePassed || remainingCalls < 1) {
       const budgetDb = openDatabase(databasePath);
       try {
         const current = readHistoryJobFromDatabase(budgetDb, options.jobId);

@@ -146,6 +146,41 @@ test('the baseline window gives a relative multiple for the forward result', () 
   expect(noBaseline.relativeMultiple).toBeNull();
 });
 
+test('minute events entirely outside a window never invalidate it', () => {
+  const baseline = metricEvent(0, 5_200, 5_160, 1_000);
+  const forward = metricEvent(1, 6_110, 6_060, 5_000);
+  const farAway = metricEvent(2, null, 18_000, 30_000);
+  const fifteen = windowAt(6_050, 0, [baseline, forward, farAway]).find(
+    (window) => window.horizonMinutes === 15,
+  )!;
+  expect(fifteen.status).toBe('complete');
+  expect(fifteen.usdMicros).toBe(5_000_000_000n);
+  expect(fifteen.baselineUsdMicros).toBe(1_000_000_000n);
+  expect(fifteen.relativeMultiple).toBe(5);
+  // A minute inside the forward window must not pollute the pre-trigger baseline.
+  const forwardMinute = metricEvent(3, null, 6_600, 2_000);
+  const mixed = windowAt(6_050, 0, [baseline, forward, forwardMinute]).find(
+    (window) => window.horizonMinutes === 15,
+  )!;
+  expect(mixed.status).toBe('complete');
+  expect(mixed.usdMicros).toBe(7_000_000_000n);
+  expect(mixed.baselineUsdMicros).toBe(1_000_000_000n);
+});
+
+test('the pre-trigger baseline does not follow the reaction delay', () => {
+  const before = metricEvent(0, 5_600, 5_580, 1_000);
+  const waiting = metricEvent(1, 6_070, 6_060, 9_000);
+  const forward = metricEvent(2, 6_500, 6_480, 5_000);
+  for (const delay of [1, 5] as const) {
+    const window = windowAt(6_050, delay, [before, waiting, forward]).find(
+      (item) => item.horizonMinutes === 15,
+    )!;
+    expect(window.usdMicros).toBe(5_000_000_000n);
+    expect(window.baselineUsdMicros).toBe(1_000_000_000n);
+    expect(window.relativeMultiple).toBe(5);
+  }
+});
+
 test('windows beyond the proven coverage stay censored with no totals', () => {
   const result = evaluateStudyOutcomeWindows(4_800, pool, 0, [], {
     minutes: coverage(0, 4_860),

@@ -225,7 +225,10 @@ function collectWindowEvidence(
     if (time.exactTimestampSec !== null) {
       if (time.exactTimestampSec < fromSec || time.exactTimestampSec >= toSec) continue;
     } else if (time.minuteStartSec !== null) {
+      // Fully outside on either side says nothing about this window; only a
+      // minute that actually straddles an edge is unprovable here.
       if (time.minuteStartSec + 60 <= fromSec) continue;
+      if (time.minuteStartSec >= toSec) continue;
       if (time.minuteStartSec < fromSec || time.minuteStartSec + 60 > toSec) {
         reasons.add('unresolved-event-time');
         continue;
@@ -296,9 +299,12 @@ export function evaluateStudyOutcomeWindows(
       run = active.has(minute) ? run + 1 : 0;
       longest = Math.max(longest, run);
     }
+    // The baseline is the window immediately before the trigger itself; only the
+    // forward window moves with the reaction delay.
+    const baselineFrom = triggerSec - horizonMinutes * 60;
     const baseline =
-      startSec - horizonMinutes * 60 >= 0
-        ? collectWindowEvidence(startSec - horizonMinutes * 60, startSec, candidates, coverage)
+      baselineFrom >= 0
+        ? collectWindowEvidence(baselineFrom, triggerSec, candidates, coverage)
         : null;
     const forwardUsd = complete ? usdTotal(events) : null;
     const baselineUsd = baseline && evaluable(baseline) ? usdTotal(baseline.events) : null;

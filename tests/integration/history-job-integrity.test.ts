@@ -1,4 +1,4 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect, test, vi } from 'vitest';
@@ -194,6 +194,36 @@ test('the target precheck shares the run RPC budget', async () => {
     expect(state.status).toBe('paused');
     expect(state.lastError ?? '').toMatch(/budget/i);
     expect(state.notes.join(' ')).toMatch(/budget consumed by target verification/);
+  } finally {
+    log.mockRestore();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 60000);
+
+test('the configured default RPC budget also pays for the target precheck', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lp-history-default-budget-'));
+  const fixture = recorderFixture();
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    expect(await seedSource(dir, fixture)).toBe(0);
+    const config = loadChainConfig('config/robinhood.json');
+    const configPath = join(dir, 'robinhood-limited.json');
+    writeFileSync(configPath, JSON.stringify({ ...config, recorderMaxRpcCalls: 1 }));
+    copyFileSync('config/metric-metadata.json', join(dir, 'metric-metadata.json'));
+    const spec = jobSpec(dir, { configPath, protocolVersion: config.version });
+    const prepared = await prepareHistoryJob(spec);
+    const state = await runHistoryJob({
+      studyDatabasePath: spec.studyDatabasePath,
+      jobId: prepared.id,
+      environment,
+      readerFactory: fixture.factory,
+      durationMs: 60_000,
+    });
+    // The configured default budget covers the precheck too: one request in total.
+    expect(state.currentRunRpcCalls).toBe(1);
+    expect(state.cumulativeRpcCalls).toBe(1);
+    expect(state.status).toBe('paused');
+    expect(state.lastError ?? '').toMatch(/budget/i);
   } finally {
     log.mockRestore();
     rmSync(dir, { recursive: true, force: true });
