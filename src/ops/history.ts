@@ -22,6 +22,7 @@ import { resolveLogTimes } from '../ingest/log-time.js';
 import { openDatabase } from '../storage/database.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
 import { rawLogKey, type RecordedRangeBatch } from '../storage/manifest.js';
+import { readBatch } from '../storage/payload-store.js';
 import { projectRange } from '../state/project-range.js';
 import { encodeJson } from '../domain/json.js';
 import { createChainReader } from '../rpc/client.js';
@@ -59,15 +60,7 @@ export function missingIntervals(
   if (cursor <= to) missing.push([cursor, to]);
   return missing;
 }
-function reviveBatch(text: string): RecordedRangeBatch {
-  return JSON.parse(text, (key, value: unknown) =>
-    ['fromBlock', 'toBlock', 'blockNumber', 'number'].includes(key) &&
-    typeof value === 'string' &&
-    /^\d+$/.test(value)
-      ? BigInt(value)
-      : value,
-  ) as RecordedRangeBatch;
-}
+
 /** Only accepted intervals backed by a complete, hash-checked shard manifest count. */
 function selectorKeys(id: string, filter: PlannedFilter['filter']): string[] {
   let selectors: (string | null)[][] = filter.address.map((address) => [address.toLowerCase()]);
@@ -122,13 +115,13 @@ function acceptedCoverage(
 ): BlockInterval[] {
   const batches = db
     .prepare(
-      'select distinct b.payload_json from ingest_batches b join accepted_ranges a on a.batch_id=b.id where a.scope_id=?',
+      'select distinct b.id from ingest_batches b join accepted_ranges a on a.batch_id=b.id where a.scope_id=?',
     )
-    .all(scope) as { payload_json: string }[];
+    .all(scope) as { id: string }[];
   const result: BlockInterval[] = [];
   for (const row of batches) {
     try {
-      const batch = reviveBatch(row.payload_json);
+      const batch = readBatch(db, row.id);
       const shards = verifySuccessfulShardCoverage(batch);
       if (digest(batch.manifest) !== batch.manifestHash) continue;
       const stored = db

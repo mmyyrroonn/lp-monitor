@@ -593,7 +593,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           throw error;
         }
         const rpcAttempts = reader.meter.summary().calls - callsBefore;
-        rawSaveStage('discovery', () => store.saveRaw(batch));
+        rawSaveStage('discovery', () => store.saveCompact(batch));
         const failureKinds = discoveryFailureKinds(batch);
         batchRecords.push({
           id: batch.id,
@@ -776,7 +776,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
               }),
           );
           const rawWriteAt = Date.now();
-          rawSaveStage('operations', () => store.saveRaw(batch));
+          rawSaveStage('operations', () => store.saveCompact(batch));
           const rawWriteMs = Date.now() - rawWriteAt;
           if (shutdown.requested) {
             saveJson(resolve(out, 'range-' + batch.id + '.json'), batch, out);

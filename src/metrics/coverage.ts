@@ -5,6 +5,7 @@ import type { ProjectionQualityError } from '../state/project-range.js';
 import { verifySuccessfulShardCoverage } from '../ingest/completeness.js';
 import { rawLogKey, type RecordedRangeBatch } from '../storage/manifest.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
+import { readBatch } from '../storage/payload-store.js';
 
 export interface MetricCoverage {
   scopeId: string;
@@ -66,20 +67,6 @@ function completePartitions(batch: RecordedRangeBatch): boolean {
     [...partitions.values()].every((ranges) => covers(ranges, batch.fromBlock, batch.toBlock))
   );
 }
-function decodeBatch(text: string): RecordedRangeBatch {
-  const b = JSON.parse(text) as RecordedRangeBatch;
-  b.fromBlock = BigInt(b.fromBlock);
-  b.toBlock = BigInt(b.toBlock);
-  b.end.number = BigInt(b.end.number);
-  if (b.previous) b.previous.number = BigInt(b.previous.number);
-  for (const log of b.logs) log.blockNumber = BigInt(log.blockNumber);
-  for (const shard of b.manifest.shards) {
-    shard.request.fromBlock = BigInt(shard.request.fromBlock);
-    shard.request.toBlock = BigInt(shard.request.toBlock);
-  }
-  return b;
-}
-
 /** Only current accepted ranges count. Failed raw attempts are historical evidence,
  * and cannot create either a complete minute or erase prior accepted coverage. */
 export function acceptedMetricRanges(
@@ -140,8 +127,8 @@ export function acceptedMetricRanges(
   const result: Interval[] = [];
   for (const [batchId, accepted] of groups) {
     const row = db
-      .prepare('select payload_json from ingest_batches where id=? and scope_id=?')
-      .get(batchId, scopeId) as { payload_json: string } | undefined;
+      .prepare('select id from ingest_batches where id=? and scope_id=?')
+      .get(batchId, scopeId) as { id: string } | undefined;
     if (!row) continue;
     const stored = db
       .prepare(
@@ -154,8 +141,12 @@ export function acceptedMetricRanges(
       log_count: number;
       error: string | null;
     }[];
+    const payloadSignature = db
+      .prepare('select payload_json from ingest_batches where id=? and scope_id=?')
+      .pluck()
+      .get(batchId, scopeId) as string;
     const signature = createHash('sha256')
-      .update(row.payload_json)
+      .update(payloadSignature)
       .update(JSON.stringify(stored))
       .digest('hex');
     const key = scopeId + '\0' + batchId;
@@ -163,7 +154,7 @@ export function acceptedMetricRanges(
     if (value === undefined) {
       value = null;
       try {
-        const decoded = decodeBatch(row.payload_json);
+        const decoded = readBatch(db, row.id);
         if (decoded.scopeId === scopeId) {
           verifySuccessfulShardCoverage(decoded);
           const complete =

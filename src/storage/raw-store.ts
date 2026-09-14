@@ -12,6 +12,7 @@ import type {
   WatchScopeId,
 } from '../domain/types.js';
 import { verifySuccessfulShardCoverage } from '../ingest/completeness.js';
+import { readBatch, writeCompactBatch } from './payload-store.js';
 import {
   rawLogKey,
   type FetchShardManifest,
@@ -71,6 +72,10 @@ export class SqliteRangeStore {
 
   saveRaw(batch: RecordedRangeBatch): void {
     this.database.transaction(() => this.persistTransport(batch)).immediate();
+  }
+
+  saveCompact(batch: RecordedRangeBatch): void {
+    writeCompactBatch(this.database, batch);
   }
 
   acceptedTip(scopeId: WatchScopeId): BlockAnchor | null {
@@ -606,8 +611,15 @@ export class SqliteRangeStore {
       .prepare('select payload_json from ingest_batches where id = ?')
       .get(batch.id) as { payload_json: string } | undefined;
     if (existing !== undefined) {
-      if (existing.payload_json !== payloadJson)
-        throw new Error('Ingest batch transport payload is immutable');
+      if (existing.payload_json !== payloadJson) {
+        let same = false;
+        try {
+          same = transportJson(readBatch(this.database, batch.id)) === payloadJson;
+        } catch {
+          same = false;
+        }
+        if (!same) throw new Error('Ingest batch transport payload is immutable');
+      }
     } else {
       this.database
         .prepare(
