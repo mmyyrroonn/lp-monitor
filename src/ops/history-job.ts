@@ -3,7 +3,7 @@ import { dirname, resolve } from 'node:path';
 import { createChainReader } from '../rpc/client.js';
 import type Database from 'better-sqlite3';
 import type { BlockAnchor } from '../domain/types.js';
-import { ConfigError } from '../config/env.js';
+import { ConfigError, loadEnv } from '../config/env.js';
 import { loadChainConfig, type ChainConfig } from '../config/chain.js';
 import { loadAssetVersion, type AssetRegistry } from '../registry/assets.js';
 import {
@@ -452,6 +452,57 @@ function isPause(message: string): boolean {
   return /budget|deadline|duration|stopped|paused/i.test(message);
 }
 
+/** The fixed target must still be the chain's block at that height. Local scopes
+ * agreeing with each other cannot prove that, and a stale target must not keep
+ * refetching coverage that will never match it. */
+async function verifyFixedTarget(
+  spec: HistoryJobSpec,
+  config: ChainConfig,
+  options: HistoryJobRunOptions,
+): Promise<{ ok: boolean; calls: number; reason: string | null }> {
+  const target = parseBlock(spec.toBlock);
+  const reader = (options.readerFactory ?? createChainReader)(
+    loadEnv(options.environment ?? process.env),
+    {
+      maxCalls: 1,
+      perSecond: config.rpcPerSecond,
+      timeoutMs: config.timeoutMs,
+      maxRetries: config.maxRetries,
+      evidenceMode: 'off',
+    },
+  );
+  try {
+    const anchor = await reader.getAnchor(target);
+    const calls = reader.meter.summary().calls;
+    if (anchor.number !== target || anchor.hash.toLowerCase() !== spec.targetHash.toLowerCase())
+      return {
+        ok: false,
+        calls,
+        reason:
+          'target-anchor-mismatch: block ' +
+          target +
+          ' is ' +
+          anchor.hash.toLowerCase() +
+          ' but the job fixed ' +
+          spec.targetHash.toLowerCase() +
+          '; prepare a new job for the current target',
+      };
+    return { ok: true, calls, reason: null };
+  } catch (error) {
+    return {
+      ok: false,
+      calls: reader.meter.summary().calls,
+      reason: 'target-verification-unavailable: ' + errorText(error),
+    };
+  } finally {
+    try {
+      await reader.close?.();
+    } catch {
+      /* Evidence close failures are reported by the review path. */
+    }
+  }
+}
+
 export async function runHistoryJob(options: HistoryJobRunOptions): Promise<HistoryJobState> {
   const databasePath = resolve(options.studyDatabasePath);
   // A missing study database must never be silently re-created from a live source.
@@ -501,10 +552,40 @@ export async function runHistoryJob(options: HistoryJobRunOptions): Promise<Hist
   const spec = state.spec;
   let report: Awaited<ReturnType<typeof reviewHistory>>;
   let branchNotes: string[] = [];
+  let targetRunCalls = 0;
   try {
     const input = safeLoadInputs(spec);
     if (!input)
       throw new ConfigError('History job config/watchlist/metadata snapshot is unavailable');
+    const targetCheck = await verifyFixedTarget(spec, input.config, options);
+    targetRunCalls = targetCheck.calls;
+    if (!targetCheck.ok) {
+      const stateDb = openDatabase(databasePath);
+      try {
+        const current = readHistoryJobFromDatabase(stateDb, options.jobId);
+        const resumable = (targetCheck.reason ?? '').startsWith('target-verification-unavailable');
+        const conflict = range(
+          parseBlock(spec.toBlock),
+          parseBlock(spec.toBlock),
+          'target-anchor-mismatch',
+        );
+        return patchHistoryJob(stateDb, current.id, {
+          status: resumable ? 'waiting-retry' : 'failed',
+          phase: 'catalogue',
+          registryMissing: resumable ? current.registryMissing : [conflict],
+          operationMissing: resumable ? current.operationMissing : [],
+          timeUnknown: resumable ? current.timeUnknown : [],
+          unpriced: resumable ? current.unpriced : [],
+          missing: resumable ? current.missing : [conflict],
+          currentRunRpcCalls: targetCheck.calls,
+          cumulativeRpcCalls: current.cumulativeRpcCalls + targetCheck.calls,
+          notes: [...current.notes, targetCheck.reason ?? 'target-unverified'],
+          lastError: targetCheck.reason,
+        });
+      } finally {
+        stateDb.close();
+      }
+    }
     const { scopeId, registryScopeId } = scopes(spec, input.config, input.assets);
     const reconcileDb = openDatabase(databasePath);
     try {
@@ -532,12 +613,16 @@ export async function runHistoryJob(options: HistoryJobRunOptions): Promise<Hist
       metadata,
       environment: options.environment,
       readerFactory: options.readerFactory,
-      maxCalls: options.maxRpcCalls,
+      maxCalls:
+        options.maxRpcCalls === undefined
+          ? undefined
+          : Math.max(1, options.maxRpcCalls - targetRunCalls),
       deadlineMs: options.durationMs === undefined ? undefined : Date.now() + options.durationMs,
       requiredContext: {
         startSec: spec.analysisStartSec - spec.warmupMinutes * 60,
         endSec: spec.analysisEndSec + spec.outcomeMinutes * 60,
       },
+      targetAnchor: { block: parseBlock(spec.toBlock), hash: spec.targetHash },
     });
   } catch (error) {
     const failedDb = openDatabase(databasePath);
@@ -546,6 +631,8 @@ export async function runHistoryJob(options: HistoryJobRunOptions): Promise<Hist
       patchHistoryJob(failedDb, current.id, {
         status: isPause(errorText(error)) ? 'paused' : 'failed',
         phase: current.phase,
+        currentRunRpcCalls: current.currentRunRpcCalls + targetRunCalls,
+        cumulativeRpcCalls: current.cumulativeRpcCalls + targetRunCalls,
         lastError: errorText(error),
       });
     } finally {
@@ -571,15 +658,15 @@ export async function runHistoryJob(options: HistoryJobRunOptions): Promise<Hist
       ...categories,
       status,
       phase: nextPhase(categories),
-      currentRunRpcCalls: calls,
-      cumulativeRpcCalls: current.cumulativeRpcCalls + calls,
+      currentRunRpcCalls: calls + targetRunCalls,
+      cumulativeRpcCalls: current.cumulativeRpcCalls + calls + targetRunCalls,
       rawEventsAdded: Math.max(0, after.events - before.events),
       rawBytesAdded: Math.max(0, after.bytes - before.bytes),
       completedCoverage:
         status === 'complete'
           ? [range(parseBlock(spec.fromBlock), parseBlock(spec.toBlock), 'accepted-complete')]
           : [],
-      notes: [...current.notes, ...branchNotes],
+      notes: [...current.notes, ...branchNotes, ...(report.reconciled ?? [])],
       lastError: incomplete ? unavailable || 'History evidence remains incomplete' : null,
     });
     return updated;

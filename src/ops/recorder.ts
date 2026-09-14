@@ -651,36 +651,41 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           endNumber,
           'anchor',
         );
-      const confirmTarget = async (): Promise<boolean> => {
+      /** A confirmation failure means the accepted catalogue no longer belongs to
+       * the fixed target branch. `reset` is required when the declared target block
+       * itself disappeared: an ancestor rewind could keep evidence fetched from a
+       * different branch, so the whole catalogue scope is invalidated instead. */
+      const invalidateStaleCatalogue = async (reset: boolean): Promise<void> => {
+        const match = reset
+          ? null
+          : await findMatchingCheckpoint(discoveryReader, store.checkpoints(discoveryScope));
+        if (match) recordChanges(recover(discoveryScope, match), 'discovery-reorg');
+        else recordChanges(recover(discoveryScope, null), 'discovery-rebuild');
+        // Invalidation is committed: withdrawals must survive provider outages.
+        await drain(true);
+      };
+      const confirmTargetOnce = async (): Promise<boolean> => {
         recomputeMissing();
         if (missingRanges.length > 0) return false;
         const accepted = store.acceptedTip(discoveryScope);
         if (!accepted || accepted.number < head.number) return false;
-        try {
-          const chainTarget = await discoveryReader.getAnchor(head.number);
-          if (!sameAnchor(chainTarget, head)) {
-            noteFailure('discovery:target-anchor-changed');
-            catalogueTargetConflict = 'target-anchor-changed';
-            return false;
-          }
-          const chainTip = await discoveryReader.getAnchor(accepted.number);
-          if (!sameAnchor(chainTip, accepted)) {
-            noteFailure('discovery:accepted-tip-changed');
-            return false;
-          }
-        } catch (error) {
-          if (error instanceof DiscoveryRecoveryStop) {
-            noteFailure('discovery:' + error.kind);
-            return false;
-          }
-          const failure = classifyRpcError(error);
-          noteFailure('discovery:' + failure.kind);
-          if (classifyDiscoveryFailures([failure.kind]) === 'retry') return false;
-          throw error;
+        const chainTarget = await discoveryReader.getAnchor(head.number);
+        if (!sameAnchor(chainTarget, head)) {
+          noteFailure('discovery:target-anchor-changed');
+          catalogueTargetConflict = 'target-anchor-changed';
+          await invalidateStaleCatalogue(true);
+          return false;
+        }
+        const chainTip = await discoveryReader.getAnchor(accepted.number);
+        if (!sameAnchor(chainTip, accepted)) {
+          noteFailure('discovery:accepted-tip-changed');
+          await invalidateStaleCatalogue(false);
+          return false;
         }
         if (accepted.number === head.number && !sameAnchor(accepted, head)) {
           noteFailure('discovery:target-anchor-conflict');
           catalogueTargetConflict = 'target-anchor-conflict';
+          await invalidateStaleCatalogue(true);
           return false;
         }
         return true;
@@ -726,10 +731,12 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         const end = await fetchEndAnchor(endNumber);
         if (end === null) return false;
         // The fixed target block must keep the hash it was declared with. A
-        // substitute branch at the same height cannot satisfy completion.
+        // substitute branch at the same height cannot satisfy completion and must
+        // not leave the withdrawn catalogue reusable either.
         if (end.number === head.number && !sameAnchor(end, head)) {
           noteFailure('discovery:target-anchor-changed');
           catalogueTargetConflict = 'target-anchor-changed';
+          await invalidateStaleCatalogue(true);
           return false;
         }
         const callsBefore = reader.meter.summary().calls;
@@ -804,7 +811,11 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         tip = end;
         from = end.number + 1n;
       }
-      return await confirmTarget();
+      // The final confirmation shares the same bounded, interruptible recovery as
+      // the rest of the discovery phase instead of turning a transient read into
+      // an unrecoverable end of the run.
+      const confirmed = await withRecovery(confirmTargetOnce, head.number, 'anchor');
+      return confirmed === true;
     };
     telemetry.setPhase(latestStart ? 'steady' : 'backfill');
     result.discoveryComplete = latestStart

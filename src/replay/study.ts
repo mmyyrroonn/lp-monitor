@@ -402,6 +402,8 @@ export interface StudyConfigReport {
   periods: StudyConfig['periods'];
   splitCounts: Record<'train' | 'validation' | 'test' | 'outside', number>;
   experiments: StudyExperimentReport;
+  validationRequirement: StudyConfig['validation'];
+  validationSatisfied: boolean;
   onlineRuleChanged: false;
   integrity: unknown;
   rolling: unknown;
@@ -459,6 +461,8 @@ export async function studyWithConfig(
         mode: config.mode,
         cadenceSec: config.cadenceSec,
         effectiveCadenceSec: null,
+        cadenceGapCount: 0,
+        cadenceGaps: [],
         evaluations: [],
         issues: ['no-evaluable-frames'],
       };
@@ -510,13 +514,27 @@ export async function studyWithConfig(
   const periodsWithoutEvaluations = (['train', 'validation', 'test'] as const).some(
     (segment) => splitCounts[segment] === 0,
   );
-  const validated = experiments.candidates.some(
+  // Triggering an alert is not evidence that the candidate standard holds: the
+  // declared requirement counts evaluable (non-censored, complete) outcome windows.
+  const requirement = config.validation;
+  const meetsRequirement = (candidate: StudyExperimentReport['candidates'][number]): boolean => {
+    const windows = candidate.splits.validation.outcomes.find(
+      (item) =>
+        item.horizonMinutes === requirement.primaryHorizonMinutes &&
+        item.reactionDelayMinutes === 1,
+    );
+    return (windows?.complete ?? 0) >= requirement.minimumCompleteOutcomeWindows;
+  };
+  const frozenCandidates = experiments.candidates.filter((candidate) => candidate.selectedOnTrain);
+  const validated = frozenCandidates.some(
     (candidate) =>
-      candidate.selectedOnTrain &&
       candidate.splits.validation.exposureComplete &&
       candidate.splits.validation.episodes > 0 &&
-      candidate.splits.test.exposureComplete,
+      candidate.splits.test.exposureComplete &&
+      meetsRequirement(candidate),
   );
+  if (replayReport && grid !== null && frozenCandidates.length > 0 && !validated)
+    issues.push('validation-requirement-not-met');
   const conclusion: StudyConfigReport['conclusion'] = !replayReport
     ? 'insufficient-data'
     : periodsWithoutEvaluations
@@ -546,6 +564,8 @@ export async function studyWithConfig(
     periods: config.periods,
     splitCounts,
     experiments,
+    validationRequirement: config.validation,
+    validationSatisfied: validated,
     onlineRuleChanged: false,
     integrity: replayReport?.integrity ?? { complete: false, issues },
     rolling,

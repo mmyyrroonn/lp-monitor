@@ -19,6 +19,7 @@ import { discoverPools as discoverV4 } from '../protocols/uniswap-v4/discover.js
 import { fetchRange } from '../ingest/record-range.js';
 import { verifySuccessfulShardCoverage } from '../ingest/completeness.js';
 import { resolveLogTimes } from '../ingest/log-time.js';
+import { findMatchingCheckpoint } from '../ingest/reorg.js';
 import { openDatabase } from '../storage/database.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
 import { rawLogKey, type RecordedRangeBatch } from '../storage/manifest.js';
@@ -37,10 +38,13 @@ import {
 import { valueSwap, type SwapValuation, type SwapValuationMetadata } from '../metrics/notional.js';
 import { quoteFromRwaUsdgSwap } from '../metrics/price.js';
 import { aggregateRwa } from '../metrics/rwa-aggregate.js';
-import type { QuoteObservation } from '../domain/types.js';
+import type { BlockAnchor, QuoteObservation } from '../domain/types.js';
 import type { Address } from 'viem';
 
 export type BlockInterval = [bigint, bigint];
+/** The declared fixed target no longer exists on this branch; reusing or
+ * refetching local coverage would silently mix two branches. */
+class FixedTargetStale extends Error {}
 const digest = (value: unknown) => createHash('sha256').update(encodeJson(value)).digest('hex');
 export function missingIntervals(
   from: bigint,
@@ -198,6 +202,8 @@ export interface HistoryOptions {
   metadata?: MetricMetadata;
   /** Chain-time window the fixed range must contain (analysis period plus context). */
   requiredContext?: { startSec: number; endSec: number };
+  /** Fixed target that the recorded prefix must still belong to. */
+  targetAnchor?: { block: bigint; hash: string };
 }
 
 /** Recorded anchors must prove both endpoints of the fixed range, otherwise the
@@ -332,18 +338,27 @@ export async function reviewHistory(options: HistoryOptions) {
         store.anchors(scopeId, { fromBlock: block, toBlock: block }).length === 0,
     );
   };
-  try {
-    const localMissing = missingIntervals(fromBlock, toBlock, operationCoverage());
-    const localRegistryMissing = readRegistry().missing;
-    const localTimeMissing = unresolvedTimeLogs().length > 0;
-    const localContextMissing = options.requiredContext
+  const localGaps = () => ({
+    operation: missingIntervals(fromBlock, toBlock, operationCoverage()),
+    registry: readRegistry().missing,
+    time: unresolvedTimeLogs().length > 0,
+    context: options.requiredContext
       ? contextUnproven(store, scopeId, fromBlock, toBlock, options.requiredContext)
-      : false;
+      : false,
+  });
+  const reconciledBranches: string[] = [];
+  let localMissing: BlockInterval[] = [];
+  let localRegistryMissing: BlockInterval[] = [];
+  try {
+    const initialGaps = localGaps();
+    localMissing = initialGaps.operation;
+    localRegistryMissing = initialGaps.registry;
     if (
-      localMissing.length > 0 ||
-      localRegistryMissing.length > 0 ||
-      localTimeMissing ||
-      localContextMissing
+      options.targetAnchor !== undefined ||
+      initialGaps.operation.length > 0 ||
+      initialGaps.registry.length > 0 ||
+      initialGaps.time ||
+      initialGaps.context
     ) {
       try {
         reader = (options.readerFactory ?? createChainReader)(
@@ -360,6 +375,23 @@ export async function reviewHistory(options: HistoryOptions) {
         );
         const head = await reader.getAnchor('latest');
         if (toBlock > head.number) throw new ConfigError('History range exceeds available head');
+        // Reusing a recorded prefix is only valid while the fixed target still
+        // exists on this branch. A stale target must not trigger a refetch loop.
+        if (options.targetAnchor) {
+          const chainTarget = await reader.getAnchor(options.targetAnchor.block);
+          if (
+            chainTarget.number !== options.targetAnchor.block ||
+            chainTarget.hash.toLowerCase() !== options.targetAnchor.hash.toLowerCase()
+          ) {
+            unavailable.push(
+              'target-anchor-mismatch: fixed target block ' +
+                options.targetAnchor.block +
+                ' is no longer ' +
+                options.targetAnchor.hash.toLowerCase(),
+            );
+            throw new FixedTargetStale();
+          }
+        }
         const identity = await verifyIdentity(reader, config, head);
         if (!identity.requiredPassed) throw new Error('identity-unverified');
         const deploymentsIdentity = [
@@ -380,6 +412,45 @@ export async function reviewHistory(options: HistoryOptions) {
           status: 'verified',
           payload: { configurationHash: digest(config), identity },
         });
+        /** Every recorded anchor is a possible common ancestor; checkpoints alone
+         * are too sparse to avoid discarding provable coverage below the fork. */
+        const branchCandidates = (scope: string, tip: BlockAnchor): BlockAnchor[] => {
+          const byNumber = new Map<string, BlockAnchor>();
+          for (const anchor of [
+            ...store.checkpoints(scope),
+            ...store.anchors(scope, { fromBlock: 0n, toBlock: tip.number }),
+          ]) {
+            if (anchor.number > tip.number) continue;
+            const key = anchor.number.toString();
+            const existing = byNumber.get(key);
+            if (!existing || anchor.timestampSec >= existing.timestampSec)
+              byNumber.set(key, anchor);
+          }
+          return [...byNumber.values()].sort((left, right) =>
+            left.number < right.number ? -1 : left.number > right.number ? 1 : 0,
+          );
+        };
+        /** Two local scopes can agree with each other and still hold a superseded
+         * branch. Verify each accepted tip against the chain and rewind stale
+         * evidence to its last matching ancestor before it is reused. */
+        for (const scope of [scopeId, registryScopeId]) {
+          const tip = store.acceptedTip(scope);
+          if (!tip) continue;
+          const current = await reader.getAnchor(tip.number);
+          if (
+            current.hash.toLowerCase() === tip.hash.toLowerCase() &&
+            current.timestampSec === tip.timestampSec
+          )
+            continue;
+          const match = await findMatchingCheckpoint(reader, branchCandidates(scope, tip));
+          if (match) {
+            store.invalidateAfter(scope, match);
+            reconciledBranches.push(`${scope} rewound after block ${match.number}`);
+          } else {
+            store.resetForWarmup(scope);
+            reconciledBranches.push(`${scope} reset without a matching checkpoint`);
+          }
+        }
         const acquire = async (mode: 'discovery-only' | 'operations', gaps: BlockInterval[]) => {
           const scope = mode === 'operations' ? scopeId : registryScopeId;
           const size = BigInt(
@@ -503,12 +574,14 @@ export async function reviewHistory(options: HistoryOptions) {
             'analysis-window-unproven: recorded anchors do not contain the analysis period and its context',
           );
       } catch (error) {
-        const classified = classifyRpcError(error);
-        unavailable.push(
-          error instanceof ConfigError
-            ? error.message
-            : 'Historical acquisition ' + classified.kind + '; see request evidence',
-        );
+        if (!(error instanceof FixedTargetStale)) {
+          const classified = classifyRpcError(error);
+          unavailable.push(
+            error instanceof ConfigError
+              ? error.message
+              : 'Historical acquisition ' + classified.kind + '; see request evidence',
+          );
+        }
       } finally {
         if (reader) rpcSummary = reader.meter.summary();
         try {
@@ -649,6 +722,7 @@ export async function reviewHistory(options: HistoryOptions) {
       missing,
       acquired,
       unavailable,
+      reconciled: reconciledBranches,
       rpc: rpcSummary,
       complete: missing.length === 0 && registryMissing.length === 0,
       requiredContext: options.requiredContext ?? null,

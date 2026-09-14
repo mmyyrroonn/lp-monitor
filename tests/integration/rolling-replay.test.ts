@@ -57,6 +57,26 @@ test('cadence is honoured from provable chain time and disclosed when it cannot 
   expect(proven.issues).toEqual([]);
 });
 
+test('sparse points report the uncovered evaluation intervals, not just the minimum spacing', () => {
+  const sparse = [600, 610, 1200].map((sec, index) => ({
+    number: BigInt(index),
+    hash: hash(index),
+    timestampSec: sec,
+  }));
+  const result = runRollingReplay({
+    events: [],
+    coverage: [],
+    watermarks: sparse,
+    cadenceSec: 10,
+  });
+  expect(result.effectiveCadenceSec).toBe(10);
+  expect(result.cadenceGapCount).toBe(1);
+  expect(result.cadenceGaps).toEqual([{ fromSec: 620, toSec: 1200 }]);
+  expect(result.issues.some((issue) => issue.startsWith('evaluation-cadence-unprovable'))).toBe(
+    true,
+  );
+});
+
 test('rolling replay never evaluates an event after the watermark', () => {
   const future = event(1_200, 1_200);
   const current = event(1_000, 960);

@@ -142,6 +142,12 @@ export function renderStudyConfigReport(report: StudyConfigReport): string {
       report.experiments.parameters +
       ' 组；训练冻结：' +
       (report.experiments.frozen.length ? report.experiments.frozen.join(', ') : 'none') +
+      '。验证标准：' +
+      report.validationRequirement.primaryHorizonMinutes +
+      ' 分钟完整结果窗 ≥ ' +
+      report.validationRequirement.minimumCompleteOutcomeWindows +
+      '；满足：' +
+      String(report.validationSatisfied) +
       '。',
     '',
     '| 候选 | 状态 | train episode | validation episode | test episode | 训练冻结 |',

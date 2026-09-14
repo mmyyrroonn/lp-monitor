@@ -5,8 +5,9 @@ import { evaluateSignal, initialSignalSnapshot } from '../signals/engine.js';
 import type { SignalConfig } from '../signals/config.js';
 import type { SignalSnapshot } from '../signals/types.js';
 import type { PoolRef } from '../domain/types.js';
+import { rawLogKey } from '../storage/manifest.js';
+import { poolRegistrationId } from '../registry/pools.js';
 import { generateGrid, gridSchema, type SignalGrid } from './experiments.js';
-import { evaluateOutcomes, type Outcome } from './outcomes.js';
 import type { RollingReplayEvaluation } from './rolling-replay.js';
 import { studySplitAt, type StudyPeriods } from './study-config.js';
 
@@ -136,19 +137,148 @@ function evaluateCandidate(
   return [...alerts.values()].sort((left, right) => left.logicalTimeSec - right.logicalTimeSec);
 }
 
+/** Study periods are arbitrary seconds while coverage is minute based, so every
+ * minute slot that intersects the period must have exactly one complete record. */
 function segmentCoverage(
   coverage: readonly MinuteCoverage[],
   scopeId: string,
   startSec: number,
   endSec: number,
 ): { requestedMinutes: number; coveredMinutes: number } {
-  const requestedMinutes = Math.max(0, (endSec - startSec) / 60);
+  let requestedMinutes = 0;
   let coveredMinutes = 0;
-  for (let sec = startSec; sec < endSec; sec += 60) {
+  for (let sec = Math.floor(startSec / 60) * 60; sec < endSec; sec += 60) {
+    requestedMinutes++;
     const rows = coverage.filter((item) => item.scopeId === scopeId && item.minuteStartSec === sec);
-    if (rows.length === 1 && rows[0]!.complete && sec + 60 <= endSec) coveredMinutes++;
+    if (rows.length === 1 && rows[0]!.complete) coveredMinutes++;
   }
   return { requestedMinutes, coveredMinutes };
+}
+
+export interface StudyOutcomeWindow {
+  horizonMinutes: 15 | 60 | 180;
+  startSec: number;
+  endSec: number;
+  status: 'complete' | 'incomplete' | 'censored';
+  incomplete: boolean;
+  censored: boolean;
+  reasons: string[];
+  coveredMinutes: number;
+  expectedMinutes: number;
+  usdMicros: bigint | null;
+  swapCount: number | null;
+  txCount: number | null;
+  activeMinutes: number | null;
+  longestActiveRunMinutes: number | null;
+  observedSwapCount: number;
+  observedTxCount: number;
+}
+
+/** Study outcome windows start at the actual trigger second plus the reaction
+ * delay. Events with only minute precision that straddle that second stay
+ * unknown instead of being counted as post-trigger activity. */
+export function evaluateStudyOutcomeWindows(
+  triggerSec: number,
+  pool: PoolRef,
+  reactionDelayMinutes: 0 | 1 | 5,
+  futureEvents: readonly MetricEvent[],
+  coverage: {
+    minutes: readonly MinuteCoverage[];
+    scopeId: string;
+    endSec: number;
+    integrityComplete: boolean;
+  },
+): StudyOutcomeWindow[] {
+  if (!Number.isSafeInteger(triggerSec) || triggerSec < 0)
+    throw new RangeError('Study outcome trigger must be a non-negative safe second');
+  const poolId = poolRegistrationId({ pool });
+  const startSec = triggerSec + reactionDelayMinutes * 60;
+  const candidates = futureEvents.filter(
+    (event) =>
+      event.event.kind === 'swap' &&
+      event.event.pool !== null &&
+      poolRegistrationId({ pool: event.event.pool }) === poolId &&
+      (event.scopeId === undefined || event.scopeId === coverage.scopeId),
+  );
+  return ([15, 60, 180] as const).map((horizonMinutes) => {
+    const endSec = startSec + horizonMinutes * 60;
+    const censored = endSec > coverage.endSec;
+    const boundEnd = Math.min(endSec, coverage.endSec);
+    const reasons = new Set<string>();
+    let expectedMinutes = 0;
+    let coveredMinutes = 0;
+    for (let minute = Math.floor(startSec / 60) * 60; minute < endSec; minute += 60) {
+      expectedMinutes++;
+      if (minute + 60 > coverage.endSec) continue;
+      const rows = coverage.minutes.filter(
+        (item) => item.scopeId === coverage.scopeId && item.minuteStartSec === minute,
+      );
+      if (rows.length === 1 && rows[0]!.complete) coveredMinutes++;
+      else
+        reasons.add(
+          rows.length === 0
+            ? 'missing-minute'
+            : rows.length > 1
+              ? 'duplicate-minute'
+              : 'incomplete-minute',
+        );
+    }
+    if (coverage.integrityComplete === false) reasons.add('input-integrity-incomplete');
+    const unique = new Map<string, MetricEvent>();
+    for (const event of candidates) {
+      const time = event.event.time;
+      if (time.exactTimestampSec !== null) {
+        if (time.exactTimestampSec < startSec || time.exactTimestampSec >= boundEnd) continue;
+      } else if (time.minuteStartSec !== null) {
+        if (time.minuteStartSec + 60 <= startSec) continue;
+        if (time.minuteStartSec < startSec) {
+          reasons.add('unresolved-event-time');
+          continue;
+        }
+        if (time.minuteStartSec >= boundEnd) continue;
+      } else {
+        reasons.add('unresolved-event-time');
+        continue;
+      }
+      const key = rawLogKey(event.event.ref);
+      const previous = unique.get(key);
+      if (previous && encodeJson(previous) !== encodeJson(event)) reasons.add('conflicting-event');
+      else unique.set(key, event);
+    }
+    const events = [...unique.values()];
+    const transactions = new Set(
+      events.map((event) => event.event.ref.transactionHash.toLowerCase()),
+    );
+    const active = new Set(events.flatMap((event) => event.event.time.minuteStartSec ?? []));
+    let longest = 0;
+    let run = 0;
+    for (let sec = startSec; sec < endSec; sec += 60) {
+      run = active.has(Math.floor(sec / 60) * 60) ? run + 1 : 0;
+      longest = Math.max(longest, run);
+    }
+    const incomplete = reasons.size > 0;
+    const complete = !incomplete && !censored;
+    const priced = events.every((event) => event.usdMicros !== null);
+    return {
+      horizonMinutes,
+      startSec,
+      endSec,
+      status: incomplete ? 'incomplete' : censored ? 'censored' : 'complete',
+      incomplete,
+      censored,
+      reasons: [...reasons, ...(censored ? ['right-censored'] : [])].sort(),
+      coveredMinutes,
+      expectedMinutes,
+      usdMicros:
+        complete && priced ? events.reduce((sum, event) => sum + event.usdMicros!, 0n) : null,
+      swapCount: complete ? events.length : null,
+      txCount: complete ? transactions.size : null,
+      activeMinutes: complete ? active.size : null,
+      longestActiveRunMinutes: complete ? longest : null,
+      observedSwapCount: events.length,
+      observedTxCount: transactions.size,
+    };
+  });
 }
 
 function summarizeOutcomes(
@@ -161,31 +291,26 @@ function summarizeOutcomes(
 ): StudyOutcomeSummary[] {
   const groups = new Map<
     string,
-    { horizon: 15 | 60 | 180; delay: 0 | 1 | 5; results: Outcome[] }
+    { horizon: 15 | 60 | 180; delay: 0 | 1 | 5; windows: StudyOutcomeWindow[] }
   >();
   for (const alert of alerts)
     for (const delay of [0, 1, 5] as const) {
-      const outcome = evaluateOutcomes(
-        {
-          pool: alert.pool,
-          triggerMinuteStartSec: Math.floor(alert.logicalTimeSec / 60) * 60 - 60,
-          reactionDelayMinutes: delay,
-        },
-        events,
-        { minutes: coverage, scopeId, endSec, integrityComplete },
-      );
-      for (const window of outcome.windows) {
+      const windows = evaluateStudyOutcomeWindows(alert.logicalTimeSec, alert.pool, delay, events, {
+        minutes: coverage,
+        scopeId,
+        endSec,
+        integrityComplete,
+      });
+      for (const window of windows) {
         const key = `${window.horizonMinutes}:${delay}`;
-        const group = groups.get(key) ?? { horizon: window.horizonMinutes, delay, results: [] };
-        group.results.push(outcome);
+        const group = groups.get(key) ?? { horizon: window.horizonMinutes, delay, windows: [] };
+        group.windows.push(window);
         groups.set(key, group);
       }
     }
   return [...groups.values()]
     .map((group) => {
-      const windows = group.results.flatMap((outcome) =>
-        outcome.windows.filter((window) => window.horizonMinutes === group.horizon),
-      );
+      const windows = group.windows;
       const completed = windows.filter((window) => window.status === 'complete');
       const usd = completed.flatMap((window) =>
         window.usdMicros === null ? [] : [window.usdMicros],

@@ -22,6 +22,8 @@ export function recorderFixture() {
   let limited = false;
   let head = 200n;
   const requests: string[] = [];
+  const logFilters: { fromBlock: string; address: string[] }[] = [];
+  const coldPools: { block: bigint; pool: Hex }[] = [];
   const rangeFailures = new Map<string, string[]>();
   const anchorFailures = new Map<string, string[]>();
   const rangeAttempts: { fromBlock: bigint; failure: string | null }[] = [];
@@ -39,20 +41,32 @@ export function recorderFixture() {
     }) as Hex[],
     data: encodeAbiParameters([{ type: 'int24' }, { type: 'address' }], [60, config.v3Pools[0]]),
   };
+  const coldCreation = (block: bigint, poolAddress: Hex) => ({
+    address: config.v3Factory,
+    topics: encodeEventTopics({
+      abi: v3FactoryAbi,
+      eventName: 'PoolCreated',
+      args: { token0: config.tokens.AMC, token1: config.tokens.USDG, fee: 500 },
+    }) as Hex[],
+    data: encodeAbiParameters([{ type: 'int24' }, { type: 'address' }], [60, poolAddress]),
+  });
   const logs = () =>
-    [creation, swap, swap].map((l, i) => {
-      const n = [90n, 120n, branch ? 185n : 180n][i]!;
-      return {
-        ...l,
-        blockNumber: toHex(n),
-        blockHash: hash(n),
-        transactionHash: toHex(1000 + i, { size: 32 }),
-        transactionIndex: '0x0',
-        logIndex: toHex(i),
-        blockTimestamp: '0x0',
-        removed: false,
-      };
-    });
+    [
+      ...[creation, swap, swap].map((l, i) => ({
+        log: l,
+        block: [90n, 120n, branch ? 185n : 180n][i]!,
+      })),
+      ...coldPools.map((cold) => ({ log: coldCreation(cold.block, cold.pool), block: cold.block })),
+    ].map((entry, i) => ({
+      ...entry.log,
+      blockNumber: toHex(entry.block),
+      blockHash: hash(entry.block),
+      transactionHash: toHex(1000 + i, { size: 32 }),
+      transactionIndex: '0x0',
+      logIndex: toHex(i),
+      blockTimestamp: '0x0',
+      removed: false,
+    }));
   const factory: typeof createChainReader = (env, options) =>
     createChainReader(env, {
       ...options,
@@ -90,6 +104,10 @@ export function recorderFixture() {
             result = BigInt(block) >= 90n ? '0x6000' : '0x';
             break;
           case 'eth_getLogs': {
+            logFilters.push({
+              fromBlock: String(arg.fromBlock),
+              address: ((arg.address ?? []) as string[]).map((value) => value.toLowerCase()),
+            });
             const fromBlock = BigInt(arg.fromBlock);
             const failures = rangeFailures.get(fromBlock.toString());
             const failure = failures?.shift();
@@ -162,7 +180,11 @@ export function recorderFixture() {
   return {
     factory,
     requests,
+    logFilters,
     rangeAttempts,
+    addColdPool: (block: bigint, pool: string) => {
+      coldPools.push({ block, pool: pool.toLowerCase() as Hex });
+    },
     failRange: (fromBlock: bigint, failures: readonly string[]) => {
       rangeFailures.set(fromBlock.toString(), [...failures]);
     },

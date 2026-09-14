@@ -262,6 +262,115 @@ test('an earlier catalogue target excludes pools created after it', async () => 
   }
 }, 60000);
 
+function discoveryScope(): string {
+  const config = loadChainConfig('config/robinhood.json');
+  return computeWatchScopeId(
+    loadAssetVersion('config/watchlist.stocks.json'),
+    'discovery-only',
+    deployments(config),
+  );
+}
+
+test('a reorg found at final confirmation invalidates the reusable catalogue', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'p1-catalogue-final-reorg-'));
+  const fixture = recorderFixture();
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const coldPool = '0x' + '77'.repeat(20);
+  try {
+    const first = await runCatalogue({
+      ...recorderOptions(dir, fixture),
+      durationMs: 60_000,
+      targetBlock: 149n,
+    });
+    expect(first.status).toBe('complete');
+    fixture.addColdPool(170n, coldPool);
+    fixture.flipAfterLog(150n);
+    const second = await runCatalogue({
+      ...recorderOptions(dir, fixture),
+      durationMs: 60_000,
+      targetBlock: 200n,
+    });
+    expect(second.status).toBe('incomplete');
+    expect(second.missing.map((item) => item.reason)).toContain('target-anchor-changed');
+    const scopeId = discoveryScope();
+    const db = openDatabase(join(dir, 'db.sqlite'), { readonly: true });
+    try {
+      const store = new SqliteRangeStore(db);
+      expect(
+        store
+          .pools(scopeId)
+          .some((pool) => pool.pool.protocol === 'v3' && pool.pool.address === coldPool),
+      ).toBe(false);
+      expect(store.acceptedTip(scopeId)?.number ?? 0n).toBeLessThan(200n);
+    } finally {
+      db.close();
+    }
+    // A later latest follow must not query operation logs for the withdrawn pool.
+    const before = fixture.logFilters.length;
+    const followCode = await runRecorder({
+      command: 'follow',
+      config: loadChainConfig('config/robinhood.json'),
+      env: environment(),
+      watchlistPath: 'config/watchlist.stocks.json',
+      databasePath: join(dir, 'db.sqlite'),
+      outputDirectory: join(dir, 'follow-runs'),
+      // The stock watchlist refresh runs before the follow loop.
+      durationMs: 8_000,
+      maxCalls: 10_000,
+      evidenceMode: 'off',
+      readerFactory: fixture.factory,
+    });
+    expect(followCode).toBe(0);
+    const filters = fixture.logFilters.slice(before);
+    expect(filters.length).toBeGreaterThan(0);
+    expect(filters.flatMap((entry) => entry.address)).not.toContain(coldPool);
+  } finally {
+    log.mockRestore();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 120_000);
+
+test('a transient final target confirmation enters discovery recovery', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'p1-catalogue-confirm-retry-'));
+  const fixture = recorderFixture();
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    const first = await runCatalogue({
+      ...recorderOptions(dir, fixture),
+      durationMs: 60_000,
+      targetBlock: 200n,
+    });
+    expect(first.status).toBe('complete');
+    // identity recheck, metadata anchor, checkpoint recheck, then the confirmation read.
+    const second = await runCatalogue({
+      ...recorderOptions(dir, fixture),
+      durationMs: 60_000,
+      targetBlock: 200n,
+      readerFactory: anchorFailingFactory(fixture, 200n, [new Error('request timed out')], 3),
+    });
+    expect(second.status).toBe('complete');
+    const retries = log.mock.calls
+      .map(([line]) => {
+        try {
+          return JSON.parse(String(line)) as Record<string, unknown>;
+        } catch {
+          return null;
+        }
+      })
+      .filter((event): event is Record<string, unknown> => event?.event === 'discovery-retry');
+    expect(
+      retries.some(
+        (event) =>
+          event.phase === 'anchor' &&
+          (event.failureKinds as string[]).includes('timeout-or-network'),
+      ),
+    ).toBe(true);
+  } finally {
+    log.mockRestore();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 120_000);
+
 test('bootstrap keeps recovery for a failing initial checkpoint recheck', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'p1-catalogue-checkpoint-'));
   const fixture = recorderFixture();

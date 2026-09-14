@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, expect, test } from 'vitest';
+import { toHex } from 'viem';
 import { batch, metricInput, swap } from '../helpers/alert-fixture.js';
 import { encodeJson } from '../../src/domain/json.js';
 import { studyWithConfig } from '../../src/replay/study.js';
@@ -15,7 +16,7 @@ afterEach(() => {
 });
 
 /** Spikes land inside train, validation and test so candidates can freeze. */
-function dataset(): { dir: string; path: string } {
+function dataset(options: { secondPool?: boolean } = {}): { dir: string; path: string } {
   const dir = mkdtempSync(join(tmpdir(), 'lp-study-exec-'));
   dirs.push(dir);
   const spike = (index: number) =>
@@ -23,7 +24,45 @@ function dataset(): { dir: string; path: string } {
   const logs: RawLog[] = Array.from({ length: 79 }, (_, index) =>
     swap(70 + index * 60, spike(index) ? 30_000 : 2_000),
   );
-  const raw = { ...batch('one', logs), previous: null, captureMode: 'live' as const };
+  const secondPool = ('0x' + '44'.repeat(20)) as `0x${string}`;
+  if (options.secondPool)
+    for (let index = 0; index < 79; index++) {
+      const block = 70 + index * 60;
+      const hot = index >= 20 && index <= 24;
+      logs.push({
+        ...swap(block, hot ? 30_000 : 2_000),
+        address: secondPool,
+        logIndex: 1,
+        transactionHash: toHex(20_000 + block, { size: 32 }),
+      });
+    }
+  const base = batch('one', logs);
+  const twoPool = options.secondPool
+    ? {
+        manifest: {
+          ...base.manifest,
+          shards: base.manifest.shards.map((shard) => ({
+            ...shard,
+            request: { ...shard.request, address: [...shard.request.address, secondPool] },
+          })),
+        },
+        poolRegistrations: [
+          base.poolRegistrations![0]!,
+          {
+            pool: { chainId: 4663 as const, protocol: 'v3' as const, address: secondPool },
+            token0: metricInput.assets.assets[0]!.address,
+            token1: metricInput.usdg,
+            feePips: 3000,
+            tickSpacing: 60,
+            hooks: ('0x' + '00'.repeat(20)) as `0x${string}`,
+            discoveredAt: logs.find((log) => log.address === secondPool)!,
+            assetVersion: 'test',
+            source: 'synthetic' as const,
+          },
+        ],
+      }
+    : {};
+  const raw = { ...base, ...twoPool, previous: null, captureMode: 'live' as const };
   const rawText = encodeJson(raw);
   writeFileSync(join(dir, 'range-one.json'), rawText);
   writeFileSync(
@@ -114,6 +153,41 @@ test('study runs the bounded grid over rolling frames and freezes training candi
   expect(frozen.splits.test.evaluations).toBeGreaterThan(0);
   expect(report.conclusion).not.toBe('insufficient-data');
 }, 60000);
+
+test('candidate support requires evaluable validation outcome windows', async () => {
+  const periods = {
+    train: { startSec: 300, endSec: 1_200 },
+    validation: { startSec: 1_300, endSec: 2_300 },
+    test: { startSec: 3_000, endSec: 4_000 },
+  };
+  const censoredFixture = dataset({ secondPool: true });
+  const censored = await studyWithConfig(
+    studyConfig(censoredFixture.dir, censoredFixture.path, { periods }),
+    join(censoredFixture.dir, 'out-censored'),
+  );
+  const frozen = censored.experiments.candidates.find((candidate) => candidate.selectedOnTrain)!;
+  expect(frozen.splits.validation.episodes).toBeGreaterThan(0);
+  // Every 60-minute validation window reaches past the recorded data end.
+  expect(
+    frozen.splits.validation.outcomes.find((item) => item.horizonMinutes === 60)?.complete ?? 0,
+  ).toBe(0);
+  expect(censored.validationSatisfied).toBe(false);
+  expect(censored.issues).toContain('validation-requirement-not-met');
+  expect(censored.conclusion).toBe('insufficient-evidence');
+  expect(censored.status).toBe('incomplete');
+
+  const evaluableFixture = dataset({ secondPool: true });
+  const evaluable = await studyWithConfig(
+    studyConfig(evaluableFixture.dir, evaluableFixture.path, {
+      periods,
+      validation: { primaryHorizonMinutes: 15, minimumCompleteOutcomeWindows: 1 },
+    }),
+    join(evaluableFixture.dir, 'out-evaluable'),
+  );
+  expect(evaluable.validationSatisfied).toBe(true);
+  expect(evaluable.conclusion).toBe('candidate-supported');
+  expect(evaluable.status).toBe('complete');
+}, 180_000);
 
 test('study periods outside the recorded window cannot report completion', async () => {
   const fixture = dataset();

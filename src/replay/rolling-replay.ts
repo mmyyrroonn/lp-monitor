@@ -58,15 +58,38 @@ export interface RollingReplayResult {
   mode: 'chain-time' | 'recorded-observed';
   cadenceSec: number;
   effectiveCadenceSec: number | null;
+  cadenceGapCount: number;
+  cadenceGaps: CadenceGap[];
   evaluations: RollingReplayEvaluation[];
   issues: string[];
+}
+
+export interface CadenceGap {
+  fromSec: number;
+  toSec: number;
 }
 
 export interface CadencePlan {
   points: BlockAnchor[];
   requestedCadenceSec: number;
   effectiveCadenceSec: number | null;
+  gaps: CadenceGap[];
   unprovable: boolean;
+}
+
+const MAX_REPORTED_CADENCE_GAPS = 32;
+
+/** A single interval at the requested spacing does not prove the plan; every
+ * consecutive pair must meet the cadence or the uncovered interval is reported. */
+function cadenceGaps(points: readonly BlockAnchor[], cadenceSec: number): CadenceGap[] {
+  const gaps: CadenceGap[] = [];
+  for (let index = 1; index < points.length; index++) {
+    const previous = points[index - 1]!;
+    const current = points[index]!;
+    if (current.timestampSec - previous.timestampSec > cadenceSec)
+      gaps.push({ fromSec: previous.timestampSec + cadenceSec, toSec: current.timestampSec });
+  }
+  return gaps;
 }
 
 function minimumSpacing(points: readonly BlockAnchor[]): number | null {
@@ -90,12 +113,13 @@ export function cadenceWatermarks(
   if (!Number.isSafeInteger(cadenceSec) || cadenceSec <= 0)
     throw new RangeError('Rolling replay cadence must be a positive safe integer');
   if (mode === 'recorded-observed') {
-    const effective = minimumSpacing(watermarks);
+    const gaps = cadenceGaps(watermarks, cadenceSec);
     return {
       points: [...watermarks],
       requestedCadenceSec: cadenceSec,
-      effectiveCadenceSec: effective,
-      unprovable: effective !== null && effective > cadenceSec,
+      effectiveCadenceSec: minimumSpacing(watermarks),
+      gaps,
+      unprovable: gaps.length > 0,
     };
   }
   const candidates: BlockAnchor[] = [...watermarks];
@@ -128,12 +152,13 @@ export function cadenceWatermarks(
     if (last && point.timestampSec - last.timestampSec < cadenceSec) continue;
     points.push(point);
   }
-  const effective = minimumSpacing(points);
+  const gaps = cadenceGaps(points, cadenceSec);
   return {
     points,
     requestedCadenceSec: cadenceSec,
-    effectiveCadenceSec: effective,
-    unprovable: effective !== null && effective > cadenceSec,
+    effectiveCadenceSec: minimumSpacing(points),
+    gaps,
+    unprovable: gaps.length > 0,
   };
 }
 
@@ -167,10 +192,13 @@ export function runRollingReplay(options: RollingReplayOptions): RollingReplayRe
   const watermarks = orderedWatermarks(plan.points, mode);
   const evaluations: RollingReplayEvaluation[] = [];
   const issues: string[] = [];
-  if (plan.unprovable)
+  const cadenceGapCount = plan.gaps.length;
+  if (plan.unprovable) {
+    const first = plan.gaps[0]!;
     issues.push(
-      `evaluation-cadence-unprovable: requested ${cadenceSec}s, proven minimum ${plan.effectiveCadenceSec}s`,
+      `evaluation-cadence-unprovable: requested ${cadenceSec}s, minimum spacing ${plan.effectiveCadenceSec ?? 'unknown'}s, ${cadenceGapCount} uncovered interval(s), first ${first.fromSec}-${first.toSec}`,
     );
+  }
   let previousAt = -Infinity;
   for (const watermark of watermarks) {
     if (watermark.timestampSec < previousAt) throw new Error('Rolling replay time moves backwards');
@@ -211,6 +239,8 @@ export function runRollingReplay(options: RollingReplayOptions): RollingReplayRe
     mode,
     cadenceSec,
     effectiveCadenceSec: plan.effectiveCadenceSec,
+    cadenceGapCount,
+    cadenceGaps: plan.gaps.slice(0, MAX_REPORTED_CADENCE_GAPS),
     evaluations,
     issues,
   };

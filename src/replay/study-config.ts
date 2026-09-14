@@ -13,6 +13,18 @@ export interface StudyPeriods {
   test: StudyPeriod;
 }
 
+/** Declared before training so the validation decision cannot be chosen after
+ * seeing the outcome windows. */
+export interface StudyValidationRequirement {
+  primaryHorizonMinutes: 15 | 60 | 180;
+  minimumCompleteOutcomeWindows: number;
+}
+
+export const DEFAULT_STUDY_VALIDATION: StudyValidationRequirement = {
+  primaryHorizonMinutes: 60,
+  minimumCompleteOutcomeWindows: 1,
+};
+
 export interface StudyConfig {
   version: 1;
   chainId: 4663;
@@ -25,6 +37,26 @@ export interface StudyConfig {
   cadenceSec: number;
   warmupMinutes: number;
   outcomeMinutes: number;
+  validation: StudyValidationRequirement;
+}
+
+function validationRequirement(value: unknown): StudyValidationRequirement {
+  if (value === undefined) return DEFAULT_STUDY_VALIDATION;
+  if (!value || typeof value !== 'object')
+    throw new ConfigError('Study validation requirement must be an object');
+  const item = value as Record<string, unknown>;
+  const primary = item.primaryHorizonMinutes;
+  const minimum = item.minimumCompleteOutcomeWindows;
+  if (![15, 60, 180].includes(primary as number))
+    throw new ConfigError('Study validation primaryHorizonMinutes is invalid');
+  if (!Number.isSafeInteger(minimum) || (minimum as number) < 1)
+    throw new ConfigError(
+      'Study validation minimumCompleteOutcomeWindows must be a positive integer',
+    );
+  return {
+    primaryHorizonMinutes: primary as 15 | 60 | 180,
+    minimumCompleteOutcomeWindows: minimum as number,
+  };
 }
 
 function period(value: unknown, field: string): StudyPeriod {
@@ -109,5 +141,6 @@ export function parseStudyConfig(path: string): StudyConfig {
     cadenceSec: value.cadenceSec as number,
     warmupMinutes: value.warmupMinutes as number,
     outcomeMinutes: value.outcomeMinutes as number,
+    validation: validationRequirement(value.validation),
   };
 }

@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { expect, test } from 'vitest';
+import { toHex } from 'viem';
 import { openDatabase } from '../../src/storage/database.js';
 import { loadChainConfig } from '../../src/config/chain.js';
 import { loadAssetVersion } from '../../src/registry/assets.js';
@@ -19,7 +20,8 @@ function spec(dir: string): HistoryJobSpec {
     protocolVersion: loadChainConfig(configPath).version,
     fromBlock: '120',
     toBlock: '200',
-    targetHash: '0x' + '1'.repeat(64),
+    // The run verifies the fixed target against the chain before reusing evidence.
+    targetHash: toHex(200n, { size: 32 }),
     analysisStartSec: 1_120,
     analysisEndSec: 1_200,
     sourceDatabasePath: join(dir, 'source.sqlite'),

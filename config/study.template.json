@@ -13,5 +13,9 @@
   "mode": "chain-time",
   "cadenceSec": 10,
   "warmupMinutes": 180,
-  "outcomeMinutes": 180
+  "outcomeMinutes": 180,
+  "validation": {
+    "primaryHorizonMinutes": 60,
+    "minimumCompleteOutcomeWindows": 1
+  }
 }
