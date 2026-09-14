@@ -23,7 +23,11 @@ export function recorderFixture() {
   let head = 200n;
   const requests: string[] = [];
   const rangeFailures = new Map<string, string[]>();
+  const anchorFailures = new Map<string, string[]>();
   const rangeAttempts: { fromBlock: bigint; failure: string | null }[] = [];
+  let flipAfterLogFrom: bigint | null = null;
+  let resetBranchAfterAnchor: bigint | null = null;
+  let anchorFailureArmed = false;
   const hash = (n: bigint) => toHex(n + (branch && n >= 150n ? 10000n : 0n), { size: 32 });
   const swap = archive.find((l) => l.address === config.v3Pools[0] && l.topics.length === 3)!;
   const creation: { address: string; topics: Hex[]; data: Hex } = {
@@ -67,7 +71,19 @@ export function recorderFixture() {
             break;
           case 'eth_getBlockByNumber': {
             const n = arg === 'latest' ? head : BigInt(arg);
+            const anchorFailure = anchorFailureArmed
+              ? anchorFailures.get(n.toString())?.shift()
+              : undefined;
+            if (anchorFailure === 'timeout') throw new Error('request timed out');
+            if (anchorFailure === 'rate-limit') return new Response('busy', { status: 429 });
+            if (anchorFailure === 'http-transient') return new Response('busy', { status: 503 });
+            if (anchorFailure !== undefined && anchorFailure !== 'ok')
+              throw new Error('unexpected configured anchor failure');
             result = { number: toHex(n), hash: hash(n), timestamp: toHex(1000n + n) };
+            if (resetBranchAfterAnchor === n && branch === 1) {
+              resetBranchAfterAnchor = null;
+              branch = 0;
+            }
             break;
           }
           case 'eth_getCode':
@@ -95,6 +111,11 @@ export function recorderFixture() {
                     t === null || (Array.isArray(t) ? t : [t]).includes(l.topics[i]!),
                 ),
             );
+            if (flipAfterLogFrom !== null && fromBlock === flipAfterLogFrom) {
+              flipAfterLogFrom = null;
+              anchorFailureArmed = true;
+              branch = 1;
+            }
             break;
           }
           case 'eth_call': {
@@ -144,6 +165,16 @@ export function recorderFixture() {
     rangeAttempts,
     failRange: (fromBlock: bigint, failures: readonly string[]) => {
       rangeFailures.set(fromBlock.toString(), [...failures]);
+    },
+    failAnchor: (block: bigint, failures: readonly string[]) => {
+      anchorFailures.set(block.toString(), [...failures]);
+    },
+    flipAfterLog: (fromBlock: bigint) => {
+      flipAfterLogFrom = fromBlock;
+      anchorFailureArmed = false;
+    },
+    resetBranchAfterAnchor: (block: bigint) => {
+      resetBranchAfterAnchor = block;
     },
     fork: () => {
       branch = 1;

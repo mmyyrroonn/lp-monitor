@@ -1,3 +1,9 @@
+export class DiscoveryRecoveryStop extends Error {
+  constructor(readonly kind: 'budget' | 'deadline') {
+    super('Discovery recovery stopped: ' + kind);
+  }
+}
+
 const retryableKinds = new Set([
   'timeout-or-network',
   'rate-limit',

@@ -2,7 +2,9 @@ import type { Hex } from 'viem';
 import type { ChainReader, RawLog } from '../domain/types.js';
 import { encodeJson } from '../domain/json.js';
 import { sha256 } from '../ops/files.js';
-import { classifyRpcError } from '../rpc/errors.js';
+import { classifyRpcError, RpcFailure } from '../rpc/errors.js';
+import { ShutdownRequested } from '../ops/shutdown.js';
+import { DiscoveryRecoveryStop } from './discovery-recovery.js';
 import { rawLogKey } from '../storage/manifest.js';
 
 type Filter = Parameters<ChainReader['getLogs']>[0];
@@ -213,6 +215,12 @@ export async function fetchBoundedLogs(
         reason: null,
       });
     } catch (error) {
+      if (error instanceof ShutdownRequested) throw error;
+      if (error instanceof DiscoveryRecoveryStop) {
+        if (!options.captureCriticalFailures) throw new RpcFailure(error.kind);
+        recordLeaf(current, 'failed', error.kind, error.kind);
+        return;
+      }
       const failure = classifyRpcError(error);
       if (
         failure.evidenceFailure ||

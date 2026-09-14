@@ -23,7 +23,11 @@ import { verifyIdentity } from '../registry/identity.js';
 import { loadAssetVersion } from '../registry/assets.js';
 import { PoolRegistry } from '../registry/pools.js';
 import { computeWatchScopeId } from '../ingest/filter-plan.js';
-import { classifyDiscoveryFailures, discoveryRetryDelayMs } from '../ingest/discovery-recovery.js';
+import {
+  classifyDiscoveryFailures,
+  discoveryRetryDelayMs,
+  DiscoveryRecoveryStop,
+} from '../ingest/discovery-recovery.js';
 import { fetchRange } from '../ingest/record-range.js';
 import { follow } from '../ingest/follow.js';
 import { warmupStart } from '../ingest/checkpoint.js';
@@ -307,6 +311,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     logs: number;
     accepted: boolean;
     failureKinds?: readonly string[];
+    rpcAttempts?: number;
   }[] = [];
   const revisions: unknown[] = [];
   const result: {
@@ -408,19 +413,47 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       const noteFailure = (failure: string) => {
         if (!result.failures.includes(failure)) result.failures.push(failure);
       };
+      const preflight = (): void => {
+        shutdown.throwIfRequested();
+        if (Date.now() >= stopAtMs) throw new DiscoveryRecoveryStop('deadline');
+        if (reader.meter.remainingCalls !== null && reader.meter.remainingCalls < 1)
+          throw new DiscoveryRecoveryStop('budget');
+      };
+      const preflightOrStop = (): boolean => {
+        try {
+          preflight();
+          return true;
+        } catch (error) {
+          if (error instanceof DiscoveryRecoveryStop) {
+            noteFailure('discovery:' + error.kind);
+            return false;
+          }
+          throw error;
+        }
+      };
+      const discoveryReader: ChainReader = {
+        getAnchor: async (block) => {
+          preflight();
+          return endpointReader.getAnchor(block);
+        },
+        getLogs: async (filter) => {
+          preflight();
+          return endpointReader.getLogs(filter);
+        },
+      };
       const recheckAcceptedTip = async (): Promise<void> => {
         const saved = store.acceptedTip(discoveryScope);
         if (!saved) {
           tip = null;
           return;
         }
-        const current = await endpointReader.getAnchor(saved.number);
+        const current = await discoveryReader.getAnchor(saved.number);
         if (sameAnchor(current, saved)) {
           tip = saved;
           return;
         }
         const match = await findMatchingCheckpoint(
-          endpointReader,
+          discoveryReader,
           store.checkpoints(discoveryScope),
         );
         if (match) recordChanges(recover(discoveryScope, match), 'discovery-reorg');
@@ -429,30 +462,122 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         await drain(true);
         tip = store.acceptedTip(discoveryScope);
       };
+      const waitForRetry = async (
+        failureKinds: readonly string[],
+        endNumber: bigint,
+        rpcAttempts = 0,
+        phase: 'batch' | 'anchor' = 'batch',
+      ) => {
+        if (retriesForRange >= DISCOVERY_MAX_RECOVERY_RETRIES) {
+          noteFailure('discovery:retry-exhausted');
+          return false;
+        }
+        retriesForRange++;
+        consecutiveFailures++;
+        if (!preflightOrStop()) return false;
+        const delayMs = discoveryRetryDelayMs(consecutiveFailures);
+        console.log(
+          encodeJson({
+            event: 'discovery-retry',
+            state: 'waiting-retry',
+            phase,
+            fromBlock: from,
+            toBlock: endNumber,
+            attempt: retriesForRange,
+            delayMs,
+            failureKinds,
+            rpcAttempts,
+          }),
+        );
+        telemetry.transition('waiting-retry');
+        const waitingAt = Date.now();
+        await shutdown.wait(Math.min(delayMs, Math.max(0, stopAtMs - Date.now())));
+        telemetry.addWait(Math.max(0, Date.now() - waitingAt));
+        return preflightOrStop();
+      };
+      const refreshRetryAnchor = async (end: BlockAnchor): Promise<boolean> => {
+        for (;;) {
+          if (!preflightOrStop()) return false;
+          const callsBefore = reader.meter.summary().calls;
+          try {
+            await recheckAcceptedTip();
+            from = tip ? tip.number + 1n : floor;
+            retryEnd = await discoveryReader.getAnchor(end.number);
+            return true;
+          } catch (error) {
+            if (error instanceof DiscoveryRecoveryStop) {
+              noteFailure('discovery:' + error.kind);
+              return false;
+            }
+            const failure = classifyRpcError(error);
+            const action = classifyDiscoveryFailures([failure.kind]);
+            if (action === 'retry') {
+              noteFailure('discovery:' + failure.kind);
+              const rpcAttempts = reader.meter.summary().calls - callsBefore;
+              if (!(await waitForRetry([failure.kind], end.number, rpcAttempts, 'anchor')))
+                return false;
+              continue;
+            }
+            if (action === 'stop') {
+              noteFailure('discovery:' + failure.kind);
+              return false;
+            }
+            throw error;
+          }
+        }
+      };
 
-      await recheckAcceptedTip();
+      try {
+        await recheckAcceptedTip();
+      } catch (error) {
+        if (error instanceof DiscoveryRecoveryStop) {
+          noteFailure('discovery:' + error.kind);
+          return false;
+        }
+        throw error;
+      }
       from = tip ? tip.number + 1n : floor;
-      while (from <= head.number && Date.now() < stopAtMs) {
-        shutdown.throwIfRequested();
+      while (from <= head.number) {
+        if (!preflightOrStop()) return false;
         const top = from + BigInt(config.discoveryMaxRangeBlocks) - 1n;
-        const end = retryEnd ?? (top < head.number ? await endpointReader.getAnchor(top) : head);
+        let end: BlockAnchor;
+        try {
+          end = retryEnd ?? (top < head.number ? await discoveryReader.getAnchor(top) : head);
+        } catch (error) {
+          if (error instanceof DiscoveryRecoveryStop) {
+            noteFailure('discovery:' + error.kind);
+            return false;
+          }
+          throw error;
+        }
         retryEnd = null;
-        const batch = await fetchRange(endpointReader, {
-          mode: 'discovery-only',
-          fromBlock: from,
-          toBlock: end.number,
-          end,
-          previous: tip,
-          assets,
-          pools: new PoolRegistry(store.pools(discoveryScope)),
-          ...deployments,
-          logResponseGuard: config.logResponseGuard,
-          maxLogsPerResponse: config.maxLogsPerResponse,
-          maxFilterValues: config.maxFilterValues,
-          discoveryMaxRangeBlocks: config.discoveryMaxRangeBlocks,
-          observedAtMs: Date.now(),
-          captureMode: 'backfill',
-        });
+        const callsBefore = reader.meter.summary().calls;
+        let batch: Awaited<ReturnType<typeof fetchRange>>;
+        try {
+          batch = await fetchRange(discoveryReader, {
+            mode: 'discovery-only',
+            fromBlock: from,
+            toBlock: end.number,
+            end,
+            previous: tip,
+            assets,
+            pools: new PoolRegistry(store.pools(discoveryScope)),
+            ...deployments,
+            logResponseGuard: config.logResponseGuard,
+            maxLogsPerResponse: config.maxLogsPerResponse,
+            maxFilterValues: config.maxFilterValues,
+            discoveryMaxRangeBlocks: config.discoveryMaxRangeBlocks,
+            observedAtMs: Date.now(),
+            captureMode: 'backfill',
+          });
+        } catch (error) {
+          if (error instanceof DiscoveryRecoveryStop) {
+            noteFailure('discovery:' + error.kind);
+            return false;
+          }
+          throw error;
+        }
+        const rpcAttempts = reader.meter.summary().calls - callsBefore;
         rawSaveStage('discovery', () => store.saveRaw(batch));
         const failureKinds = discoveryFailureKinds(batch);
         batchRecords.push({
@@ -465,69 +590,22 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           logs: batch.logs.length,
           accepted: false,
           failureKinds,
+          rpcAttempts,
         });
         saveJson(resolve(out, 'discovery-' + batch.id + '.json'), batch, out);
         if (batch.completeness !== 'complete') {
           for (const kind of failureKinds) noteFailure('discovery:' + kind);
           const action = classifyDiscoveryFailures(failureKinds);
-          if (action === 'retry' && retriesForRange < DISCOVERY_MAX_RECOVERY_RETRIES) {
-            retriesForRange++;
-            consecutiveFailures++;
-            shutdown.throwIfRequested();
-            if (Date.now() >= stopAtMs) {
-              noteFailure('discovery:deadline');
-              return false;
-            }
-            if (reader.meter.remainingCalls !== null && reader.meter.remainingCalls < 1) {
-              noteFailure('discovery:budget');
-              return false;
-            }
-            const delayMs = discoveryRetryDelayMs(consecutiveFailures);
-            console.log(
-              encodeJson({
-                event: 'discovery-retry',
-                state: 'waiting-retry',
-                fromBlock: from,
-                toBlock: end.number,
-                attempt: retriesForRange,
-                delayMs,
-                failureKinds,
-              }),
-            );
-            telemetry.transition('waiting-retry');
-            const waitingAt = Date.now();
-            await shutdown.wait(Math.min(delayMs, Math.max(0, stopAtMs - Date.now())));
-            telemetry.addWait(Math.max(0, Date.now() - waitingAt));
-            if (shutdown.requested) {
-              noteFailure('discovery:user-stop');
-              return false;
-            }
-            if (Date.now() >= stopAtMs) {
-              noteFailure('discovery:deadline');
-              return false;
-            }
-
-            if (
-              failureKinds.some((kind) => kind === 'anchor-changed' || kind === 'anchor-conflict')
-            ) {
-              await recheckAcceptedTip();
-              from = tip ? tip.number + 1n : floor;
-              try {
-                retryEnd = await endpointReader.getAnchor(end.number);
-              } catch (error) {
-                const failure = classifyRpcError(error);
-                if (failure.kind === 'budget' || failure.kind === 'deadline') {
-                  noteFailure('discovery:' + failure.kind);
-                  return false;
-                }
-                throw error;
-              }
-            }
-            continue;
-          }
           if (action === 'retry') {
-            noteFailure('discovery:retry-exhausted');
-            return false;
+            if (!(await waitForRetry(failureKinds, end.number, rpcAttempts))) return false;
+            if (
+              failureKinds.some(
+                (kind) => kind === 'anchor-changed' || kind === 'anchor-conflict',
+              ) &&
+              !(await refreshRetryAnchor(end))
+            )
+              return false;
+            continue;
           }
           if (action === 'stop') return false;
           throw new RpcFailure(failureKinds[0] ?? 'discovery-incomplete');

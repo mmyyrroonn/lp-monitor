@@ -15,7 +15,9 @@ import type { AssetRegistry } from '../registry/assets.js';
 import { PoolRegistry, type PoolRegistration } from '../registry/pools.js';
 import { discoverPools as discoverV3Pools } from '../protocols/uniswap-v3/discover.js';
 import { discoverPools as discoverV4Pools } from '../protocols/uniswap-v4/discover.js';
-import { classifyRpcError } from '../rpc/errors.js';
+import { classifyRpcError, RpcFailure } from '../rpc/errors.js';
+import { ShutdownRequested } from '../ops/shutdown.js';
+import { DiscoveryRecoveryStop } from './discovery-recovery.js';
 import {
   rawLogKey,
   type FetchManifest,
@@ -157,7 +159,11 @@ async function executePlan(
         captureCriticalFailures: true,
       });
     } catch (error) {
-      const failure = classifyRpcError(error);
+      if (error instanceof ShutdownRequested) throw error;
+      const failure =
+        error instanceof DiscoveryRecoveryStop
+          ? new RpcFailure(error.kind)
+          : classifyRpcError(error);
       result = failedResult(
         planned.filter,
         failure.kind,
@@ -298,9 +304,10 @@ export async function fetchRange(
       failureKinds.push(...operation.failureKinds);
     }
   } catch (error) {
+    if (error instanceof ShutdownRequested) throw error;
     complete = false;
     errors.push(`registry-plan:${error instanceof Error ? error.name : 'unknown'}`);
-    failureKinds.push('registry-plan');
+    failureKinds.push(error instanceof DiscoveryRecoveryStop ? error.kind : 'registry-plan');
   }
 
   const allLogs = deduplicateLogs([...discovery.logs, ...(operation?.logs ?? [])], errors);
@@ -331,8 +338,10 @@ export async function fetchRange(
       failureKinds.push('anchor-changed');
     }
   } catch (error) {
+    if (error instanceof ShutdownRequested) throw error;
     complete = false;
-    const failure = classifyRpcError(error);
+    const failure =
+      error instanceof DiscoveryRecoveryStop ? new RpcFailure(error.kind) : classifyRpcError(error);
     errors.push(`end-anchor:${failure.kind}`);
     failureKinds.push(failure.evidenceFailure?.kind ?? failure.kind);
   }
