@@ -53,14 +53,8 @@ export function buildStockSnapshot(raw: string, fetchedAtSec: number): StockSnap
   const records = normalizeRecords(
     parsed.assets.flatMap((item) => normalizeAsset(item as RawAsset)),
   );
-  const rwa = records
-    .filter((record) => record.status === 'active')
-    .map((record): AssetRegistration => ({
-      symbol: record.symbol,
-      address: record.address as Address,
-      identityStatus: 'official-registry-active',
-    }));
-  if (rwa.length === 0) throw new RangeError('At least one active chain-4663 asset is required');
+  if (records.length === 0) throw new RangeError('At least one chain-4663 asset is required');
+  const rwa = activeRegistrations(records);
   return {
     version: hashRecords(records),
     chainId: CHAIN_ID,
@@ -82,6 +76,9 @@ export function loadStockSnapshot(path: string): StockSnapshot {
   const records = normalizeRecords(parsed.records);
   if (parsed.version !== hashRecords(records))
     throw new RangeError('Snapshot version does not match normalized records');
+  const expectedRwa = activeRegistrations(records);
+  if (!sameRegistrations(parsed.rwa, expectedRwa))
+    throw new RangeError('Snapshot rwa does not match active records');
   const sourcePath = join(dirname(snapshotPath), 'source.json');
   if (existsSync(sourcePath)) {
     const sourceHash = createHash('sha256').update(readFileSync(sourcePath)).digest('hex');
@@ -104,6 +101,30 @@ export function diffStockSnapshots(before: StockSnapshot, after: StockSnapshot) 
       .map(([address]) => address)
       .sort(),
   };
+}
+
+function activeRegistrations(records: StockSnapshot['records']): AssetRegistration[] {
+  return records
+    .filter((record) => record.status === 'active')
+    .map((record): AssetRegistration => ({
+      symbol: record.symbol,
+      address: record.address as Address,
+      identityStatus: 'official-registry-active',
+    }));
+}
+
+function sameRegistrations(
+  actual: readonly AssetRegistration[],
+  expected: readonly AssetRegistration[],
+): boolean {
+  const canonical = (registrations: readonly AssetRegistration[]) =>
+    [...registrations]
+      .sort(
+        (left, right) =>
+          left.address.localeCompare(right.address) || left.symbol.localeCompare(right.symbol),
+      )
+      .map(({ symbol, address, identityStatus }) => ({ symbol, address, identityStatus }));
+  return JSON.stringify(canonical(actual)) === JSON.stringify(canonical(expected));
 }
 
 function normalizeRecords(records: StockSnapshot['records']): StockSnapshot['records'] {

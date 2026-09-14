@@ -74,9 +74,9 @@ test('rejects contradictory status for one chain-4663 address instead of last-re
   expect(() => buildStockSnapshot(raw, 1)).toThrow(/conflict/i);
 });
 
-test('rejects invalid responses, invalid addresses, and an empty active set', () => {
+test('rejects invalid responses, invalid addresses, and no chain-4663 records', () => {
   expect(() => buildStockSnapshot('{', 1)).toThrow();
-  expect(() => buildStockSnapshot(JSON.stringify({ assets: [] }), 1)).toThrow(/active/i);
+  expect(() => buildStockSnapshot(JSON.stringify({ assets: [] }), 1)).toThrow(/active|chain-4663/i);
   expect(() =>
     buildStockSnapshot(
       JSON.stringify({ assets: [asset('AAA', 'ASSET_STATUS_ACTIVE', 4663, 'bad')] }),
