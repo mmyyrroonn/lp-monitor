@@ -11,12 +11,14 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import * as rpc from '../../src/rpc/client.js';
+import { encodeJson } from '../../src/domain/json.js';
 import { loadChainConfig } from '../../src/config/chain.js';
 import { loadEnv } from '../../src/config/env.js';
 import { loadMetricMetadata } from '../../src/metrics/metadata.js';
 import { parseSignalConfig } from '../../src/signals/config.js';
 import { runRecorder } from '../../src/ops/recorder.js';
 import { openDatabase } from '../../src/storage/database.js';
+import { readBatch } from '../../src/storage/payload-store.js';
 import { recorderFixture } from '../helpers/recorder-fixture.js';
 
 const root = mkdtempSync(join(tmpdir(), 'p6-assessor-'));
@@ -262,7 +264,7 @@ async function failedAttempt(from = 110, to = 200, discovery = false, oldHash?: 
     const original = db
       .prepare('select * from ingest_batches where scope_id=? order by observed_at_ms limit 1')
       .get(scope) as Record<string, any>;
-    const payload = JSON.parse(original.payload_json);
+    const payload = readBatch(db, original.id) as any;
     payload.id = 'failed-attempt';
     payload.fromBlock = String(from);
     payload.toBlock = String(to);
@@ -289,7 +291,7 @@ async function failedAttempt(from = 110, to = 200, discovery = false, oldHash?: 
       original.filter_plan_hash,
       payload.manifestHash,
       'incomplete',
-      JSON.stringify(payload),
+      encodeJson(payload),
     );
     f.manifest.batches.unshift({
       id: payload.id,

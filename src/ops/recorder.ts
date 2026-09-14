@@ -108,6 +108,23 @@ function discoveryFailureKinds(batch: {
     ),
   ];
 }
+
+/** A cooperative cutoff can accompany a transient leaf without becoming a fatal provider error. */
+function isCooperativeDiscoveryStop(failureKinds: readonly string[]): boolean {
+  const retryable = new Set([
+    'timeout-or-network',
+    'rate-limit',
+    'http-transient',
+    'anchor-changed',
+    'anchor-conflict',
+  ]);
+  const stopping = new Set(['budget', 'deadline', 'user-stop', 'shutdown', 'sigint', 'sigterm']);
+  return (
+    failureKinds.some((kind) => stopping.has(kind)) &&
+    failureKinds.every((kind) => retryable.has(kind) || stopping.has(kind))
+  );
+}
+
 export interface RecorderOptions {
   command: 'ingest' | 'follow';
   notify?: 'local';
@@ -622,7 +639,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
               return false;
             continue;
           }
-          if (action === 'stop') return false;
+          if (action === 'stop' || isCooperativeDiscoveryStop(failureKinds)) return false;
           throw new RpcFailure(failureKinds[0] ?? 'discovery-incomplete');
         }
 

@@ -224,3 +224,21 @@ minute-close 每分钟仍全量投影和计价，长窗口性能尚未验收。�
 本次默认 study 没有产生告警、结局窗口或首告警对比记录，这些非空路径目前仅由合成 fixture 覆盖。
 
 结果见 [P5 报告](artifacts/p5/report.md) 与 [JSON](artifacts/p5/results.json)。每次实验另存独立 study-* 目录，根目录两份文件只表示最近一次运行。大体积可重建输出保留在本机并忽略 Git；[验收说明](docs/reviews/2026-09-10-p5-acceptance.md)记录本轮修复检查、未完成能力和真实历史限制。P5 代码实现不代表阈值有效、LP 净收益可行或 P6 实时运行已完成。
+
+## 2026-09-14 历史数据集与固定滚动研究
+
+H3 使用固定目标的独立 study DB：
+
+```powershell
+pnpm lp history-job prepare --spec config/history-job.json
+pnpm lp history-job status --db data/history-study.sqlite --job JOB_ID
+pnpm lp history-job resume --db data/history-study.sqlite --job JOB_ID --duration 10m --max-rpc-calls 1000
+```
+
+H4.1 从本地 SQLite accepted batches 生成可迁移的 v2 gzip segments；需要显式 `--snapshot` 才能把历史输入作为可回放快照，缺少快照或覆盖时退出 4：
+
+```powershell
+pnpm lp replay-export --db data/history-study.sqlite --scope SCOPE_ID --from-block N --to-block M --out artifacts/p5/dataset --mode chain-time --cohort-mode retrospective-cohort --snapshot artifacts/p5/input-snapshot.json
+```
+
+H4.2 使用 `--study-config config/study.template.json` 运行固定 train/validation/test 拆分。1m/5m/15m/1h 均为滚动 `(T-duration,T]`；边界未知不补零，研究不会写回实时阈值。真实 RPC 历史采集与资源基准属于 H5，需用户另行安排固定范围和预算。

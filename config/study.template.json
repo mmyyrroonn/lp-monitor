@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "chainId": 4663,
+  "datasetManifest": "../artifacts/history/dataset/manifest.json",
+  "periods": {
+    "train": { "startSec": 1788220800, "endSec": 1788393600 },
+    "validation": { "startSec": 1788393600, "endSec": 1788566400 },
+    "test": { "startSec": 1788566400, "endSec": 1788739200 }
+  },
+  "cohortMode": "retrospective-cohort",
+  "ruleVersion": "example-do-not-auto-apply",
+  "grid": "signals.grid.json",
+  "mode": "chain-time",
+  "cadenceSec": 10,
+  "warmupMinutes": 180,
+  "outcomeMinutes": 180
+}

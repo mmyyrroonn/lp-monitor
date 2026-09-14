@@ -1,4 +1,4 @@
-import type { StudyReport } from './study.js';
+import type { StudyConfigReport, StudyReport } from './study.js';
 function issueSummary(issues: unknown): string {
   const counts = new Map<string, number>();
   for (const issue of Array.isArray(issues) ? issues : []) {
@@ -93,6 +93,46 @@ export function renderStudyReport(report: StudyReport): string {
     '- GMGN 代币级成交与链上单池成交的统计范围、时间聚合和估值时点不同，不强行对齐研究数字。',
     '',
     '实验：' + report.studyRunId,
+    '',
+  ].join('\n');
+}
+
+export function renderStudyConfigReport(report: StudyConfigReport): string {
+  const p = report.periods;
+  return [
+    '# P5 固定时间滚动研究',
+    '',
+    '状态：**' + report.status + '**；结论：**' + report.conclusion + '**。',
+    '',
+    '数据集：`' +
+      report.datasetManifest +
+      '`；模式：`' +
+      report.mode +
+      '`；评价 cadence：' +
+      report.cadenceSec +
+      ' 秒。',
+    '',
+    '| 分段 | startSec | endSec | 评价点 |',
+    '|---|---:|---:|---:|',
+    '| train | ' +
+      p.train.startSec +
+      ' | ' +
+      p.train.endSec +
+      ' | ' +
+      report.splitCounts.train +
+      ' |',
+    '| validation | ' +
+      p.validation.startSec +
+      ' | ' +
+      p.validation.endSec +
+      ' | ' +
+      report.splitCounts.validation +
+      ' |',
+    '| test | ' + p.test.startSec + ' | ' + p.test.endSec + ' | ' + report.splitCounts.test + ' |',
+    '',
+    '完整性问题：' + (report.issues.length ? report.issues.join('; ') : 'none') + '。',
+    '',
+    'onlineRuleChanged：false。缺失覆盖、未知边界和未验证收益不会被填成零。',
     '',
   ].join('\n');
 }

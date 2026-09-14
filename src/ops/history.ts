@@ -26,6 +26,7 @@ import { readBatch } from '../storage/payload-store.js';
 import { projectRange } from '../state/project-range.js';
 import { encodeJson } from '../domain/json.js';
 import { createChainReader } from '../rpc/client.js';
+import { classifyRpcError } from '../rpc/errors.js';
 import { saveJson } from './files.js';
 import {
   loadMetricMetadata,
@@ -108,7 +109,7 @@ function recordedFloor(db: Database.Database, scopeId: string, config: ChainConf
   }
   return 0n;
 }
-function acceptedCoverage(
+export function acceptedCoverage(
   db: Database.Database,
   scope: string,
   plans?: (batch: RecordedRangeBatch) => readonly PlannedFilter[],
@@ -184,6 +185,7 @@ function acceptedCoverage(
 }
 export interface HistoryOptions {
   databasePath: string;
+  studyDatabasePath?: string;
   outputDirectory: string;
   fromBlock: bigint;
   toBlock: bigint;
@@ -192,6 +194,7 @@ export interface HistoryOptions {
   environment?: NodeJS.ProcessEnv;
   readerFactory?: typeof createChainReader;
   maxCalls?: number;
+  deadlineMs?: number;
   metadata?: MetricMetadata;
 }
 export async function reviewHistory(options: HistoryOptions) {
@@ -202,8 +205,13 @@ export async function reviewHistory(options: HistoryOptions) {
   const out = resolve(options.outputDirectory, 'history-' + randomUUID());
   mkdirSync(resolve(options.outputDirectory), { recursive: true });
   mkdirSync(out);
-  const databasePath = resolve(out, 'review.sqlite');
-  if (existsSync(options.databasePath)) {
+  const databasePath = options.studyDatabasePath
+    ? resolve(options.studyDatabasePath)
+    : resolve(out, 'review.sqlite');
+  if (
+    existsSync(options.databasePath) &&
+    (!options.studyDatabasePath || !existsSync(databasePath))
+  ) {
     const source = openDatabase(options.databasePath, { readonly: true });
     try {
       await source.backup(databasePath);
@@ -219,6 +227,8 @@ export async function reviewHistory(options: HistoryOptions) {
   const acquired: { mode: string; fromBlock: bigint; toBlock: bigint; complete: boolean }[] = [];
   const unavailable: string[] = [];
   let reader: ReturnType<typeof createChainReader> | undefined;
+  let rpcSummary: ReturnType<ReturnType<typeof createChainReader>['meter']['summary']> | null =
+    null;
   let floor = recordedFloor(db, scopeId, config);
   const discoveryCoverage = () =>
     acceptedCoverage(db, registryScopeId, (batch) =>
@@ -288,6 +298,7 @@ export async function reviewHistory(options: HistoryOptions) {
             perSecond: config.rpcPerSecond,
             timeoutMs: config.timeoutMs,
             maxRetries: config.maxRetries,
+            deadlineMs: options.deadlineMs,
             evidenceFile: resolve(out, 'requests.jsonl'),
             evidenceMode: 'full',
           },
@@ -340,7 +351,7 @@ export async function reviewHistory(options: HistoryOptions) {
                 observedAtMs: Date.now(),
                 captureMode: 'backfill',
               });
-              store.saveRaw(batch);
+              store.saveRaw(batch, { compact: true });
               const complete = batch.completeness === 'complete';
               acquired.push({ mode, fromBlock: from, toBlock: to, complete });
               if (!complete) continue;
@@ -370,12 +381,14 @@ export async function reviewHistory(options: HistoryOptions) {
             'discovery-incomplete: operation gaps were not fetched with an incomplete pool registry',
           );
       } catch (error) {
+        const classified = classifyRpcError(error);
         unavailable.push(
           error instanceof ConfigError
             ? error.message
-            : 'Historical acquisition unavailable or incomplete; see request evidence',
+            : 'Historical acquisition ' + classified.kind + '; see request evidence',
         );
       } finally {
+        if (reader) rpcSummary = reader.meter.summary();
         try {
           await reader?.close?.();
         } catch {
@@ -514,6 +527,7 @@ export async function reviewHistory(options: HistoryOptions) {
       missing,
       acquired,
       unavailable,
+      rpc: rpcSummary,
       complete: missing.length === 0 && registryMissing.length === 0,
       end,
       projection,

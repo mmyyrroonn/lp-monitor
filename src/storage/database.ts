@@ -25,6 +25,7 @@ const migration = [
   '007-live-metrics.sql',
   '008-token-metadata.sql',
   '009-payload-store.sql',
+  '010-history-jobs.sql',
 ]
   .map(loadMigration)
   .join('\n');

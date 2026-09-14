@@ -10,7 +10,9 @@ import type { MinuteCoverage } from '../metrics/windows.js';
 import { replay, type ReplayReport } from './runner.js';
 import { buildCohort } from './cohort.js';
 import { compareExperiments, gridSchema, type ExperimentDataset } from './experiments.js';
-import { renderStudyReport } from './report.js';
+import { renderStudyReport, renderStudyConfigReport } from './report.js';
+import { parseStudyConfig, type StudyConfig } from './study-config.js';
+import { runRollingReplay } from './rolling-replay.js';
 const address = z
   .string()
   .regex(/^0x[0-9a-fA-F]{40}$/)
@@ -383,3 +385,113 @@ export async function study(casesPath: string, gridPath: string, outDirectory: s
   return result;
 }
 export type StudyReport = Awaited<ReturnType<typeof study>>;
+
+export interface StudyConfigReport {
+  version: 'p5-study-v2';
+  studyRunId: string;
+  chainId: 4663;
+  status: 'complete' | 'incomplete';
+  conclusion: 'candidate-supported' | 'insufficient-evidence' | 'insufficient-data';
+  outputDirectory: string;
+  studyConfigPath: string;
+  datasetManifest: string;
+  mode: StudyConfig['mode'];
+  cadenceSec: number;
+  periods: StudyConfig['periods'];
+  splitCounts: Record<'train' | 'validation' | 'test' | 'outside', number>;
+  onlineRuleChanged: false;
+  integrity: unknown;
+  rolling: unknown;
+  issues: string[];
+  provenance: { configHash: string; gridHash: string; datasetManifest: string };
+}
+
+export async function studyWithConfig(
+  configPath: string,
+  outDirectory: string,
+): Promise<StudyConfigReport> {
+  const resolvedConfigPath = resolve(configPath);
+  const config = parseStudyConfig(resolvedConfigPath);
+  const studyConfigText = readFileSync(resolvedConfigPath, 'utf8');
+  const issues: string[] = [];
+  let gridHash = '';
+  try {
+    const gridText = readFileSync(config.grid, 'utf8');
+    JSON.parse(gridText);
+    gridHash = createHash('sha256').update(gridText).digest('hex');
+  } catch {
+    issues.push('study-grid-unavailable');
+  }
+  let replayReport: ReplayReport | null = null;
+  try {
+    replayReport = await replay(
+      config.datasetManifest,
+      initialSignalConfig,
+      config.mode === 'recorded-observed' ? 'recorded-observed' : 'minute-close',
+    );
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') issues.push('dataset-manifest-missing');
+    else throw error;
+  }
+  if (replayReport) {
+    issues.push(...replayReport.integrity.issues.map((issue) => issue.code));
+    if (config.ruleVersion !== initialSignalConfig.version) issues.push('rule-version-mismatch');
+    if (replayReport.provenance.cohortMode !== config.cohortMode)
+      issues.push('cohort-mode-mismatch');
+  }
+  const rolling = replayReport
+    ? runRollingReplay({
+        events: replayReport.metricEvents,
+        coverage: replayReport.coverage,
+        watermarks: replayReport.frames.map((frame) => frame.metrics.at),
+        mode: config.mode,
+        cadenceSec: config.cadenceSec,
+        periods: config.periods,
+      })
+    : {
+        version: 1 as const,
+        mode: config.mode,
+        cadenceSec: config.cadenceSec,
+        evaluations: [],
+        issues: ['no-evaluable-frames'],
+      };
+  issues.push(...rolling.issues);
+  const splitCounts = { train: 0, validation: 0, test: 0, outside: 0 };
+  for (const evaluation of rolling.evaluations) splitCounts[evaluation.split ?? 'outside']++;
+  const status =
+    replayReport && replayReport.status === 'complete' && issues.length === 0
+      ? ('complete' as const)
+      : ('incomplete' as const);
+  const studyRunId = 'study-' + randomUUID();
+  const outputDirectory = resolve(outDirectory, studyRunId);
+  mkdirSync(outputDirectory, { recursive: true });
+  const result: StudyConfigReport = {
+    version: 'p5-study-v2',
+    studyRunId,
+    chainId: 4663,
+    status,
+    conclusion:
+      replayReport && replayReport.frames.length ? 'insufficient-evidence' : 'insufficient-data',
+    outputDirectory,
+    studyConfigPath: resolvedConfigPath,
+    datasetManifest: config.datasetManifest,
+    mode: config.mode,
+    cadenceSec: config.cadenceSec,
+    periods: config.periods,
+    splitCounts,
+    onlineRuleChanged: false,
+    integrity: replayReport?.integrity ?? { complete: false, issues },
+    rolling,
+    issues: [...new Set(issues)],
+    provenance: {
+      configHash: createHash('sha256').update(studyConfigText).digest('hex'),
+      gridHash,
+      datasetManifest: config.datasetManifest,
+    },
+  };
+  writeFileSync(join(outputDirectory, 'results.json'), encodeJson(result), { flag: 'wx' });
+  writeFileSync(join(outputDirectory, 'report.md'), renderStudyConfigReport(result), {
+    flag: 'wx',
+  });
+  return result;
+}

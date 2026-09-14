@@ -14,6 +14,9 @@ import { encodeJson } from './domain/json.js';
 const help = `Robinhood read-only P0/P1/P2/P3/P4/P5/P6 CLI
   pnpm lp dashboard --db data/recorder.sqlite --port 8787 [--legacy-snapshot]
   pnpm lp history --from-block N --to-block M --db data/recorder.sqlite [--out artifacts/history]
+  pnpm lp history-job prepare --spec config/history-job.json
+  pnpm lp history-job status --db data/history-study.sqlite --job JOB_ID
+  pnpm lp history-job run --db data/history-study.sqlite --job JOB_ID --duration 10m [--max-rpc-calls N]
   pnpm lp catalogue --duration 10m --db data/recorder.sqlite --out artifacts/catalogue [--to-block N]
   pnpm lp storage audit --db data/recorder.sqlite [--artifacts artifacts/p1]
   pnpm lp storage compact --source data/recorder.sqlite --out data/recorder-compact.sqlite
@@ -21,6 +24,7 @@ const help = `Robinhood read-only P0/P1/P2/P3/P4/P5/P6 CLI
   pnpm lp backup --db data/recorder.sqlite --out data/backup.sqlite
   P6: follow writes <db>.health.json and per-run ops-report.json; SIGINT stops cooperatively.
   pnpm lp replay --manifest PATH --rules PATH --mode minute-close|recorded-observed --out PATH
+  pnpm lp replay-export --db PATH --scope ID --from-block N --to-block N --out DIR --mode chain-time|recorded-observed --cohort-mode as-of|retrospective-cohort [--snapshot PATH]
   pnpm lp study --cases config/history.cases.json --grid config/signals.grid.json --out artifacts/p5
   pnpm lp stocks refresh --input PATH [--before PRIOR_WATCHLIST] --out DIR
   P5: offline, uses existing raw only; insufficient history exits 4.
@@ -72,6 +76,10 @@ export async function runCli(
     const { runHistoryCli } = await import('./ops/history-cli.js');
     return runHistoryCli(args, options);
   }
+  if (args[0] === 'history-job' && !args.includes('--help') && !args.includes('-h')) {
+    const { runHistoryJobCli } = await import('./ops/history-job-cli.js');
+    return runHistoryJobCli(args, options);
+  }
   if (
     ['status', 'backup'].includes(args[0] ?? '') &&
     !args.includes('--help') &&
@@ -107,6 +115,10 @@ export async function runCli(
   if (args[0] === 'replay' && !args.includes('--help')) {
     const { runReplayCli } = await import('./replay/cli.js');
     return runReplayCli(args);
+  }
+  if (args[0] === 'replay-export' && !args.includes('--help') && !args.includes('-h')) {
+    const { runReplayExportCli } = await import('./replay/export-cli.js');
+    return runReplayExportCli(args);
   }
   if (args[0] === 'study' && !args.includes('--help') && !args.includes('-h')) {
     const { runStudyCli } = await import('./replay/study-cli.js');

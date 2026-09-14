@@ -7,6 +7,7 @@ import { saveJson, sha256 } from '../../dist/ops/files.js';
 import { encodeJson } from '../../dist/domain/json.js';
 import { decodeSignalState } from '../../dist/signals/codec.js';
 import { acceptedMetricRanges } from '../../dist/metrics/coverage.js';
+import { readBatch } from '../../dist/storage/payload-store.js';
 
 const { values } = parseArgs({ options: {
   manifest: { type: 'string' }, db: { type: 'string' }, out: { type: 'string' },
@@ -26,6 +27,7 @@ catch { issue('operations-report-unreadable'); }
 const integer = value => Number.isSafeInteger(value) && value >= 0;
 const finite = value => typeof value === 'number' && Number.isFinite(value) && value >= 0;
 const block = value => {
+  if (typeof value === 'bigint') return value >= 0n ? value.toString() : null;
   if (typeof value === 'number') return integer(value) ? String(value) : null;
   if (typeof value === 'string' && /^(0|[1-9]\d*)$/.test(value)) return value;
   return null;
@@ -103,7 +105,7 @@ try {
     ids.add(batch.id);
     const stored = db.prepare('select * from ingest_batches where id=?').get(batch.id);
     let payload;
-    try { payload = stored && JSON.parse(stored.payload_json); } catch { /* Missing binding below. */ }
+    try { payload = stored ? readBatch(db, batch.id) : null; } catch { /* Missing binding below. */ }
     if (!stored || stored.scope_id !== batch.scopeId || stored.chain_id !== manifest.chainId
         || !sameBlock(stored.from_block, batch.fromBlock) || !sameBlock(stored.to_block, batch.toBlock)
         || stored.manifest_hash !== batch.manifestHash || stored.completeness !== batch.completeness

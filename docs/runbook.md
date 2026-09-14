@@ -22,6 +22,18 @@ pnpm lp follow --config config/runtime.local.json --watchlist config/watchlist.s
 
 `catalogue` 不记录 operation ranges，也不自动进入 follow；`--to-block` 省略时锁定启动时的最新块。运行目录内的 `catalogue-report.json` 是审阅入口，检查 `status`、`targetAnchor`、`acceptedTip`、`missing`、`poolCount`、股票-池归属、`sourceHash`、协议版本和供应商完整性假设。目录不完整时退出 4；不可把已接受前缀或部分池登记当作完整名单。默认 follow 只从启动时最新块开始并复用本地登记，未登记旧池仍未知；需要补采历史时显式使用 `ingest` 或 `history`。
 
+## H3 固定历史作业
+
+历史补采使用独立 study DB，先写固定 spec，再通过可恢复 job 续跑；prepare/status 不访问 RPC：
+
+```powershell
+pnpm lp history-job prepare --spec config/history-job.json
+pnpm lp history-job status --db data/history-study.sqlite --job JOB_ID
+pnpm lp history-job run --db data/history-study.sqlite --job JOB_ID --duration 10m --max-rpc-calls 1000
+pnpm lp history-job resume --db data/history-study.sqlite --job JOB_ID --duration 10m --max-rpc-calls 1000
+```
+
+job 固定目标区块、target hash、分析区间、输入版本与文件 hash；registry、operation、time、metadata/pricing 缺口分别记录，缺口不转成零。预算/时限进入 `paused`，可重试故障进入 `waiting-retry`，输入或本地证据损坏进入 `failed`。源实时库、signal 配置和 outbox 保持不变。详见[历史 review 合同](history-review.md)。
 ## H2 存储审计与 compact 副本
 
 `storage audit` 是只读统计，不访问 RPC，也不执行迁移；它分别报告数据库文件、WAL、SQLite 表、inline payload、compressed objects 和 artifacts：

@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 import { dirname, resolve, relative, isAbsolute } from 'node:path';
 import type { Address } from 'viem';
 import { CHAIN_ID } from '../domain/chain.js';
@@ -10,6 +11,7 @@ import type { RecordedRangeBatch } from '../storage/manifest.js';
 import type { ReplayIssue } from './integrity.js';
 export const contentHash = (value: unknown) =>
   createHash('sha256').update(encodeJson(value)).digest('hex');
+const normalise = (value: string) => value.replace(/\\/g, '/');
 export interface ReplayInputSnapshot {
   configVersion: string;
   usdg: Address;
@@ -18,28 +20,62 @@ export interface ReplayInputSnapshot {
   availableAtSec: number;
   cohortMode: 'as-of' | 'retrospective-cohort';
 }
-export interface ReplayManifest {
+export interface ReplayBatchReference {
+  id: string;
+  scopeId: string;
+  accepted: boolean;
+  path?: string;
+  sha256?: string;
+  compressedSha256?: string;
+  manifestHash?: string;
+  logs?: number;
+  fromBlock?: string | bigint;
+  toBlock?: string | bigint;
+  completeness?: string;
+}
+export interface ReplayManifestV1 {
   version: 1;
   chainId: number;
   scopeId: string;
   discoveryScope: string;
   configVersion?: string;
   assetVersion?: string;
-  batches: {
-    id: string;
-    scopeId: string;
-    accepted: boolean;
-    path?: string;
-    sha256?: string;
-    manifestHash?: string;
-    logs?: number;
-    fromBlock?: string | bigint;
-    toBlock?: string | bigint;
-    completeness?: string;
-  }[];
+  batches: ReplayBatchReference[];
   revisions?: unknown[];
   replay?: { version: 1; input: ReplayInputSnapshot; abiHash?: string; codeHash?: string };
 }
+export interface ReplayManifestV2 {
+  version: 2;
+  chainId: number;
+  scopeId: string;
+  discoveryScope: string;
+  configVersion?: string;
+  assetVersion?: string;
+  batches: ReplayBatchReference[];
+  segments: {
+    path: string;
+    compressedSha256: string;
+    logicalSha256: string;
+    bytes: { logical: number; compressed: number };
+    batchIds: string[];
+  }[];
+  revisions?: unknown[];
+  replay?: { version: 1; input: ReplayInputSnapshot; abiHash?: string; codeHash?: string };
+  export: {
+    version: 2;
+    mode: 'chain-time' | 'recorded-observed';
+    cohortMode: 'as-of' | 'retrospective-cohort';
+    fromBlock: string;
+    toBlock: string;
+    inputSnapshot: unknown;
+    sourceHash: string;
+    coverage: unknown;
+    timeQuality: unknown;
+    provenance: string;
+    excluded: string[];
+  };
+}
+export type ReplayManifest = ReplayManifestV1 | ReplayManifestV2;
 export function assetRegistry(snapshot: ReplayInputSnapshot): AssetRegistry {
   const assets = snapshot.assets.rwa;
   return {
@@ -54,13 +90,38 @@ export function readReplayManifest(path: string) {
   const directory = realpathSync(dirname(resolve(path)));
   const manifestText = readFileSync(path, 'utf8');
   const manifest = JSON.parse(manifestText) as ReplayManifest;
-  if (manifest.version !== 1 || manifest.chainId !== CHAIN_ID || !Array.isArray(manifest.batches))
+  if (
+    (manifest.version !== 1 && manifest.version !== 2) ||
+    manifest.chainId !== CHAIN_ID ||
+    !Array.isArray(manifest.batches) ||
+    (manifest.version === 2 && !Array.isArray(manifest.segments))
+  )
     throw new Error('Invalid replay manifest');
   const issues: ReplayIssue[] = [];
   const batches: RecordedRangeBatch[] = [];
-  const files: { path: string; sha256: string }[] = [];
+  const files: { path: string; sha256: string; compressedSha256?: string }[] = [];
   const artifacts: { id: string; text: string; sha256: string }[] = [];
   const ids = new Set<string>();
+  const segments =
+    manifest.version === 2
+      ? (() => {
+          const found = new Map<string, ReplayManifestV2['segments'][number]>();
+          for (const segment of manifest.segments) {
+            const segmentPath = resolve(directory, segment.path);
+            const localSegment = relative(directory, segmentPath);
+            if (
+              isAbsolute(localSegment) ||
+              localSegment === '..' ||
+              localSegment.startsWith('..\\') ||
+              localSegment.startsWith('../')
+            )
+              throw new Error('Replay segment escapes manifest directory');
+            if (found.has(normalise(segment.path))) throw new Error('Duplicate replay segment');
+            found.set(normalise(segment.path), segment);
+          }
+          return found;
+        })()
+      : new Map<string, ReplayManifestV2['segments'][number]>();
   for (const ref of manifest.batches) {
     if (ids.has(ref.id)) {
       issues.push({ code: 'duplicate-batch', batchId: ref.id, detail: 'Batch ID is repeated' });
@@ -79,9 +140,41 @@ export function readReplayManifest(path: string) {
       const rel = relative(directory, actual);
       if (isAbsolute(rel) || rel === '..' || rel.startsWith('..\\') || rel.startsWith('../'))
         throw new Error('Artifact symlink escapes manifest directory');
-      const text = readFileSync(file, 'utf8');
+      const compressed = readFileSync(file);
+      const compressedSha256 = createHash('sha256').update(compressed).digest('hex');
+      const segment = segments.get(normalise(name));
+      if (segment && segment.compressedSha256 !== compressedSha256)
+        issues.push({
+          code: 'compressed-artifact-hash-mismatch',
+          batchId: ref.id,
+          detail: 'Saved compressed hash differs from segment bytes',
+        });
+      if (ref.compressedSha256 && ref.compressedSha256 !== compressedSha256)
+        issues.push({
+          code: 'compressed-artifact-hash-mismatch',
+          batchId: ref.id,
+          detail: 'Saved compressed hash differs from artifact bytes',
+        });
+      const text =
+        manifest.version === 2 || name.toLowerCase().endsWith('.gz')
+          ? gunzipSync(compressed).toString('utf8')
+          : compressed.toString('utf8');
       const sha256 = createHash('sha256').update(text).digest('hex');
-      files.push({ path: name, sha256 });
+      if (segment && segment.logicalSha256 !== sha256)
+        issues.push({
+          code: 'logical-artifact-hash-mismatch',
+          batchId: ref.id,
+          detail: 'Saved logical hash differs from decompressed content',
+        });
+      if (segment && segment.bytes.logical !== Buffer.byteLength(text, 'utf8'))
+        issues.push({
+          code: 'logical-artifact-size-mismatch',
+          batchId: ref.id,
+          detail: 'Saved logical byte count differs from decompressed content',
+        });
+      files.push(
+        manifest.version === 2 ? { path: name, sha256, compressedSha256 } : { path: name, sha256 },
+      );
       artifacts.push({ id: ref.id, text, sha256 });
       if (!ref.sha256)
         issues.push({
