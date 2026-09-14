@@ -19,6 +19,7 @@ const help = `Robinhood read-only P0/P1/P2/P3/P4/P5/P6 CLI
   P6: follow writes <db>.health.json and per-run ops-report.json; SIGINT stops cooperatively.
   pnpm lp replay --manifest PATH --rules PATH --mode minute-close|recorded-observed --out PATH
   pnpm lp study --cases config/history.cases.json --grid config/signals.grid.json --out artifacts/p5
+  pnpm lp stocks refresh --input PATH [--before PRIOR_WATCHLIST] --out DIR
   P5: offline, uses existing raw only; insufficient history exits 4.
   pnpm lp metrics --db data/recorder.sqlite --rwa AMC --window 15m
   pnpm lp rank --db data/recorder.sqlite --sort volume5m
@@ -48,7 +49,7 @@ export async function runCli(
   args = process.argv.slice(2),
   options: { environment?: NodeJS.ProcessEnv; readerFactory?: typeof createChainReader } = {},
 ): Promise<number> {
-  if (args[0] === 'stocks' && !args.includes('--help') && !args.includes('-h')) {
+  if (args[0] === 'stocks') {
     const { runStocksCli } = await import('./ops/stocks-cli.js');
     return runStocksCli(args);
   }

@@ -1,7 +1,13 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { z } from 'zod';
 import type { Address } from 'viem';
 import { CHAIN_ID } from '../domain/chain.js';
-import type { AssetRegistration } from './assets.js';
+import {
+  assetRegistrationSchema,
+  stockSnapshotRecordSchema,
+  type AssetRegistration,
+} from './assets.js';
 
 const sourceUrl = 'https://api.robinhood.com/rhj/assets' as const;
 const addressPattern = /^0x[0-9a-fA-F]{40}$/;
@@ -17,6 +23,16 @@ export interface StockSnapshot {
 }
 
 type RawAsset = { tokenSymbol?: unknown; status?: unknown; deployments?: unknown };
+
+const storedSnapshotSchema = z.object({
+  version: z.string().min(1),
+  chainId: z.literal(CHAIN_ID),
+  fetchedAtSec: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+  sourceUrl: z.literal(sourceUrl),
+  sourceHash: z.string().regex(/^[0-9a-f]{64}$/),
+  rwa: z.array(assetRegistrationSchema).min(1),
+  records: z.array(stockSnapshotRecordSchema),
+});
 
 /**
  * `sourceHash` identifies the exact UTF-8 response text kept as evidence. `version` identifies
@@ -63,6 +79,10 @@ export function buildStockSnapshot(raw: string, fetchedAtSec: number): StockSnap
     rwa,
     records,
   };
+}
+
+export function loadStockSnapshot(path: string): StockSnapshot {
+  return storedSnapshotSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
 }
 
 export function diffStockSnapshots(before: StockSnapshot, after: StockSnapshot) {

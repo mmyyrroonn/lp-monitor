@@ -5,11 +5,11 @@
 股票名单只能由显式命令刷新，不会在 `follow` 启动时访问 Robinhood 资产 API，也不会改写 `config/watchlist.stocks.json`。离线重建使用保存的官方原始响应：
 
 ```powershell
-pnpm lp stocks refresh --input saved-assets.json --out artifacts/stocks/snapshot-A
+pnpm lp stocks refresh --input saved-assets.json --before artifacts/stocks/snapshot-A/watchlist.json --out artifacts/stocks/snapshot-B
 pnpm lp follow --watchlist artifacts/stocks/snapshot-A/watchlist.json --config config/runtime.local.json --db data/p6.sqlite --duration 30m
 ```
 
-输出目录必须是新目录，成功时含 `source.json`（原始响应）、`watchlist.json`（规范化名单及完整状态记录）和 `diff.json`。`sourceHash` 是实际保存原始 UTF-8 响应的 hash；`version` 是规范化 chain-4663 状态记录的 hash，二者不能互换。新增或状态改变的地址会在命令输出中列为需要重新核验覆盖，旧目录的 complete 不能自动复用。
+--before 必须指向此前不可变快照的 watchlist.json；省略时本次作为初始基线，所有当前地址记为新增。输出目录必须是新目录，成功时含 `source.json`（原始响应）、`watchlist.json`（规范化名单及完整状态记录）和 `diff.json`。`sourceHash` 是实际保存原始 UTF-8 响应的 hash；`version` 是规范化 chain-4663 状态记录的 hash，二者不能互换。新增或状态改变的地址会在命令输出中列为需要重新核验覆盖，旧目录的 complete 不能自动复用。
 
 ## 2026-09-12 实时增量修正与独立历史回顾
 

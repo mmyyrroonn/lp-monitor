@@ -6,6 +6,7 @@ import { encodeJson } from '../domain/json.js';
 import {
   buildStockSnapshot,
   diffStockSnapshots,
+  loadStockSnapshot,
   type StockSnapshot,
 } from '../registry/stock-snapshot.js';
 
@@ -21,10 +22,19 @@ export async function runStocksCli(
       args,
       allowPositionals: true,
       strict: true,
-      options: { input: { type: 'string' }, out: { type: 'string' } },
+      options: {
+        input: { type: 'string' },
+        before: { type: 'string' },
+        out: { type: 'string' },
+        help: { type: 'boolean', short: 'h' },
+      },
     });
   } catch {
     throw new ConfigError('Invalid stocks option');
+  }
+  if (parsed.values.help) {
+    console.log('stocks refresh --input PATH [--before PRIOR_WATCHLIST] --out DIR');
+    return 0;
   }
   if (
     parsed.positionals.length !== 2 ||
@@ -37,6 +47,9 @@ export async function runStocksCli(
   const inputArgument = parsed.values.input;
   if (inputArgument !== undefined && typeof inputArgument !== 'string')
     throw new ConfigError('Invalid stocks input');
+  const beforeArgument = parsed.values.before;
+  if (beforeArgument !== undefined && typeof beforeArgument !== 'string')
+    throw new ConfigError('Invalid stocks before snapshot');
   const output = resolve(outputArgument);
   const raw = inputArgument
     ? readFileSync(resolve(inputArgument), 'utf8')
@@ -45,7 +58,10 @@ export async function runStocksCli(
     raw,
     (options.nowSec ?? (() => Math.floor(Date.now() / 1000)))(),
   );
-  const diff = diffStockSnapshots(emptySnapshot(snapshot), snapshot);
+  const diff = diffStockSnapshots(
+    beforeArgument ? loadStockSnapshot(resolve(beforeArgument)) : emptySnapshot(snapshot),
+    snapshot,
+  );
   writeSnapshot(output, raw, snapshot, diff);
   console.log(
     encodeJson({

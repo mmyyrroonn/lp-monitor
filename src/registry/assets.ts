@@ -7,18 +7,25 @@ const addressSchema = z
   .string()
   .regex(/^0x[0-9a-fA-F]{40}$/)
   .transform((value) => value.toLowerCase() as Address);
-const assetSchema = z.strictObject({
+export const assetRegistrationSchema = z.strictObject({
   symbol: z.string().min(1),
   address: addressSchema,
   identityStatus: z.string().min(1),
 });
+export const stockSnapshotRecordSchema = z.strictObject({
+  symbol: z.string().min(1),
+  address: addressSchema,
+  status: z.enum(['active', 'inactive']),
+});
 const watchlistSchema = z.object({
   version: z.string().min(1),
   chainId: z.literal(CHAIN_ID),
-  rwa: z.array(assetSchema).min(1),
+  rwa: z.array(assetRegistrationSchema).min(1),
+  records: z.array(stockSnapshotRecordSchema).optional(),
 });
 
-export type AssetRegistration = z.infer<typeof assetSchema>;
+export type AssetRegistration = z.infer<typeof assetRegistrationSchema>;
+export type StockSnapshotRecord = z.infer<typeof stockSnapshotRecordSchema>;
 export interface AssetRegistry {
   readonly chainId: typeof CHAIN_ID;
   readonly version: string;
