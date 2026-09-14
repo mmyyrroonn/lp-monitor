@@ -18,6 +18,8 @@ export interface FetchResult {
   logs: RawLog[];
   complete: boolean;
   failures: { fromBlock: bigint; toBlock: bigint; reason: string }[];
+  /** Stable classified failure kinds; never contains provider messages or credentials. */
+  failureKinds: string[];
   ranges: { fromBlock: bigint; toBlock: bigint; count: number }[];
   fragments: FetchFragment[];
 }
@@ -109,18 +111,25 @@ export async function fetchBoundedLogs(
     logs: [],
     complete: true,
     failures: [],
+    failureKinds: [],
     ranges: [],
     fragments: [],
   };
   const fingerprints = new Map<string, string>();
 
-  const recordLeaf = (current: Filter, status: 'failed' | 'truncated', reason: string) => {
+  const recordLeaf = (
+    current: Filter,
+    status: 'failed' | 'truncated',
+    reason: string,
+    kind = reason,
+  ) => {
     result.complete = false;
     result.failures.push({
       fromBlock: current.fromBlock,
       toBlock: current.toBlock,
       reason,
     });
+    result.failureKinds.push(kind);
     result.fragments.push({
       filter: current,
       status,
@@ -181,6 +190,7 @@ export async function fetchBoundedLogs(
           toBlock: current.toBlock,
           reason: 'conflicting-log-identity',
         });
+        result.failureKinds.push('conflicting-log-identity');
         result.fragments.push({
           filter: current,
           status: 'failed',
@@ -214,7 +224,7 @@ export async function fetchBoundedLogs(
         const reason = failure.evidenceFailure
           ? `${failure.kind}:evidence-${failure.evidenceFailure.kind}`
           : failure.kind;
-        recordLeaf(current, 'failed', reason);
+        recordLeaf(current, 'failed', reason, failure.evidenceFailure?.kind ?? failure.kind);
         return;
       }
       if (failure.kind === 'filter-limit') {

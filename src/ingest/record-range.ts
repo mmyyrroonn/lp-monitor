@@ -42,6 +42,8 @@ export interface FetchRangeOptions extends ProtocolDeployments {
 
 export interface RangeRecordingBatch extends RecordedRangeBatch {
   readonly recordingErrors: readonly string[];
+  /** Stable failure categories used by resumable discovery; messages remain in recordingErrors. */
+  readonly recordingFailureKinds?: readonly string[];
 }
 
 const digest = (value: unknown): string =>
@@ -77,10 +79,11 @@ function deduplicateLogs(logs: readonly RawLog[], errors: string[]): RawLog[] {
   );
 }
 
-function failedResult(filter: PlannedFilter['filter'], reason: string): FetchResult {
+function failedResult(filter: PlannedFilter['filter'], reason: string, kind = reason): FetchResult {
   return {
     logs: [],
     complete: false,
+    failureKinds: [kind],
     failures: [
       {
         fromBlock: filter.fromBlock,
@@ -138,11 +141,13 @@ async function executePlan(
   readonly shards: readonly FetchShardManifest[];
   readonly nextSequence: number;
   readonly errors: readonly string[];
+  readonly failureKinds: readonly string[];
 }> {
   const logs: RawLog[] = [];
   const logsByFamily = new Map<string, RawLog[]>();
   const shards: FetchShardManifest[] = [];
   const errors: string[] = [];
+  const failureKinds: string[] = [];
   let complete = true;
   let sequence = sequenceStart;
   for (const planned of plan) {
@@ -153,10 +158,15 @@ async function executePlan(
       });
     } catch (error) {
       const failure = classifyRpcError(error);
-      result = failedResult(planned.filter, failure.kind);
+      result = failedResult(
+        planned.filter,
+        failure.kind,
+        failure.evidenceFailure?.kind ?? failure.kind,
+      );
     }
     complete &&= result.complete;
     for (const failure of result.failures) errors.push(failure.reason);
+    failureKinds.push(...result.failureKinds);
     logs.push(...result.logs);
     const familyLogs = logsByFamily.get(planned.family) ?? [];
     familyLogs.push(...result.logs);
@@ -172,6 +182,7 @@ async function executePlan(
     shards,
     nextSequence: sequence,
     errors,
+    failureKinds,
   };
 }
 
@@ -228,6 +239,7 @@ export async function fetchRange(
       ? positiveBlocks(options.discoveryMaxRangeBlocks, span)
       : positiveBlocks(options.maxRangeBlocks, 1_000n);
   const errors: string[] = [];
+  const failureKinds: string[] = [];
   const maxFilterValues = options.maxFilterValues ?? 1_000;
   const discoveryPlan = buildDiscoveryFilterPlan(
     options.assets,
@@ -238,6 +250,7 @@ export async function fetchRange(
   );
   const discovery = await executePlan(reader, discoveryPlan, guard, blockLimit, 0);
   errors.push(...discovery.errors);
+  failureKinds.push(...discovery.failureKinds);
 
   let staged: readonly PoolRegistration[] = [];
   try {
@@ -252,6 +265,7 @@ export async function fetchRange(
     );
   } catch (error) {
     errors.push(`discovery-decode:${error instanceof Error ? error.name : 'unknown'}`);
+    failureKinds.push('discovery-decode');
   }
 
   let complete =
@@ -281,10 +295,12 @@ export async function fetchRange(
       );
       complete &&= operation.complete;
       errors.push(...operation.errors);
+      failureKinds.push(...operation.failureKinds);
     }
   } catch (error) {
     complete = false;
     errors.push(`registry-plan:${error instanceof Error ? error.name : 'unknown'}`);
+    failureKinds.push('registry-plan');
   }
 
   const allLogs = deduplicateLogs([...discovery.logs, ...(operation?.logs ?? [])], errors);
@@ -295,11 +311,13 @@ export async function fetchRange(
     if (prior !== undefined && prior !== hash) {
       complete = false;
       errors.push(`mixed-block-hash:${log.blockNumber}`);
+      failureKinds.push('conflicting-log-identity');
     }
     blockHashes.set(log.blockNumber, hash);
     if (log.blockNumber === options.end.number && hash !== options.end.hash.toLowerCase()) {
       complete = false;
       errors.push('end-block-log-hash-mismatch');
+      failureKinds.push('anchor-conflict');
     }
   }
   try {
@@ -310,12 +328,17 @@ export async function fetchRange(
     ) {
       complete = false;
       errors.push('end-anchor-changed');
+      failureKinds.push('anchor-changed');
     }
   } catch (error) {
     complete = false;
-    errors.push(`end-anchor:${classifyRpcError(error).kind}`);
+    const failure = classifyRpcError(error);
+    errors.push(`end-anchor:${failure.kind}`);
+    failureKinds.push(failure.evidenceFailure?.kind ?? failure.kind);
   }
   if (errors.some((error) => error.startsWith('conflicting-log:'))) complete = false;
+  if (errors.some((error) => error.startsWith('conflicting-log:')))
+    failureKinds.push('conflicting-log-identity');
 
   const allPlans = [...discoveryPlan, ...operationPlan];
   const filterPlanHash = digest({
@@ -361,5 +384,6 @@ export async function fetchRange(
     manifest,
     poolRegistrations: complete ? candidateRegistrations : [],
     recordingErrors: [...new Set(errors)],
+    recordingFailureKinds: [...new Set(failureKinds)],
   };
 }

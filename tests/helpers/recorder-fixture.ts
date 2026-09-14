@@ -22,6 +22,8 @@ export function recorderFixture() {
   let limited = false;
   let head = 200n;
   const requests: string[] = [];
+  const rangeFailures = new Map<string, string[]>();
+  const rangeAttempts: { fromBlock: bigint; failure: string | null }[] = [];
   const hash = (n: bigint) => toHex(n + (branch && n >= 150n ? 10000n : 0n), { size: 32 });
   const swap = archive.find((l) => l.address === config.v3Pools[0] && l.topics.length === 3)!;
   const creation: { address: string; topics: Hex[]; data: Hex } = {
@@ -71,7 +73,18 @@ export function recorderFixture() {
           case 'eth_getCode':
             result = BigInt(block) >= 90n ? '0x6000' : '0x';
             break;
-          case 'eth_getLogs':
+          case 'eth_getLogs': {
+            const fromBlock = BigInt(arg.fromBlock);
+            const failures = rangeFailures.get(fromBlock.toString());
+            const failure = failures?.shift();
+            if (failure !== undefined) {
+              rangeAttempts.push({ fromBlock, failure });
+              if (failure === 'timeout') throw new Error('request timed out');
+              if (failure === 'rate-limit') return new Response('busy', { status: 429 });
+              if (failure === 'http-transient') return new Response('busy', { status: 503 });
+              throw new Error('unexpected configured fixture failure');
+            }
+            rangeAttempts.push({ fromBlock, failure: null });
             result = logs().filter(
               (l) =>
                 BigInt(l.blockNumber) >= BigInt(arg.fromBlock) &&
@@ -83,6 +96,7 @@ export function recorderFixture() {
                 ),
             );
             break;
+          }
           case 'eth_call': {
             if (arg.to === config.stateView)
               result = encodeFunctionResult({
@@ -127,6 +141,10 @@ export function recorderFixture() {
   return {
     factory,
     requests,
+    rangeAttempts,
+    failRange: (fromBlock: bigint, failures: readonly string[]) => {
+      rangeFailures.set(fromBlock.toString(), [...failures]);
+    },
     fork: () => {
       branch = 1;
     },

@@ -23,6 +23,7 @@ import { verifyIdentity } from '../registry/identity.js';
 import { loadAssetVersion } from '../registry/assets.js';
 import { PoolRegistry } from '../registry/pools.js';
 import { computeWatchScopeId } from '../ingest/filter-plan.js';
+import { classifyDiscoveryFailures, discoveryRetryDelayMs } from '../ingest/discovery-recovery.js';
 import { fetchRange } from '../ingest/record-range.js';
 import { follow } from '../ingest/follow.js';
 import { warmupStart } from '../ingest/checkpoint.js';
@@ -70,6 +71,38 @@ function signalStage<T>(phase: SignalEvaluationFailure['phase'], action: () => T
   } catch (cause) {
     throw new SignalEvaluationFailure(phase, cause);
   }
+}
+
+const DISCOVERY_MAX_RECOVERY_RETRIES = 3;
+
+function sameAnchor(left: BlockAnchor, right: BlockAnchor): boolean {
+  return (
+    left.number === right.number &&
+    left.hash.toLowerCase() === right.hash.toLowerCase() &&
+    left.timestampSec === right.timestampSec
+  );
+}
+
+/** Convert persisted safe reasons to the small closed set understood by discovery recovery. */
+function discoveryFailureKinds(batch: {
+  recordingErrors: readonly string[];
+  recordingFailureKinds?: readonly string[];
+}): readonly string[] {
+  if (batch.recordingFailureKinds !== undefined) return [...new Set(batch.recordingFailureKinds)];
+  return [
+    ...new Set(
+      batch.recordingErrors.map((error) => {
+        if (error === 'end-anchor-changed') return 'anchor-changed';
+        if (error === 'end-block-log-hash-mismatch') return 'anchor-conflict';
+        if (error.startsWith('end-anchor:')) return error.slice('end-anchor:'.length);
+        if (error.startsWith('conflicting-log:')) return 'conflicting-log-identity';
+        if (error.startsWith('mixed-block-hash:')) return 'conflicting-log-identity';
+        if (error.startsWith('discovery-decode:')) return 'discovery-decode';
+        if (error.startsWith('registry-plan:')) return 'registry-plan';
+        return error;
+      }),
+    ),
+  ];
 }
 export interface RecorderOptions {
   command: 'ingest' | 'follow';
@@ -273,6 +306,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     completeness: string;
     logs: number;
     accepted: boolean;
+    failureKinds?: readonly string[];
   }[] = [];
   const revisions: unknown[] = [];
   const result: {
@@ -367,28 +401,42 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       : 0n;
     const bootstrap = async (head: BlockAnchor): Promise<boolean> => {
       let tip = store.acceptedTip(discoveryScope);
-      if (tip) {
-        const current = await endpointReader.getAnchor(tip.number);
-        if (
-          current.hash.toLowerCase() !== tip.hash.toLowerCase() ||
-          current.timestampSec !== tip.timestampSec
-        ) {
-          const match = await findMatchingCheckpoint(
-            endpointReader,
-            store.checkpoints(discoveryScope),
-          );
-          if (match) recordChanges(recover(discoveryScope, match), 'discovery-reorg');
-          else recordChanges(recover(discoveryScope, null), 'discovery-rebuild');
-          // Invalidation is committed: withdrawals must survive registry outages.
-          await drain(true);
-          tip = store.acceptedTip(discoveryScope);
-        }
-      }
       let from = tip ? tip.number + 1n : floor;
+      let retryEnd: BlockAnchor | null = null;
+      let consecutiveFailures = 0;
+      let retriesForRange = 0;
+      const noteFailure = (failure: string) => {
+        if (!result.failures.includes(failure)) result.failures.push(failure);
+      };
+      const recheckAcceptedTip = async (): Promise<void> => {
+        const saved = store.acceptedTip(discoveryScope);
+        if (!saved) {
+          tip = null;
+          return;
+        }
+        const current = await endpointReader.getAnchor(saved.number);
+        if (sameAnchor(current, saved)) {
+          tip = saved;
+          return;
+        }
+        const match = await findMatchingCheckpoint(
+          endpointReader,
+          store.checkpoints(discoveryScope),
+        );
+        if (match) recordChanges(recover(discoveryScope, match), 'discovery-reorg');
+        else recordChanges(recover(discoveryScope, null), 'discovery-rebuild');
+        // Invalidation is committed: withdrawals must survive registry outages.
+        await drain(true);
+        tip = store.acceptedTip(discoveryScope);
+      };
+
+      await recheckAcceptedTip();
+      from = tip ? tip.number + 1n : floor;
       while (from <= head.number && Date.now() < stopAtMs) {
         shutdown.throwIfRequested();
         const top = from + BigInt(config.discoveryMaxRangeBlocks) - 1n;
-        const end = top < head.number ? await endpointReader.getAnchor(top) : head;
+        const end = retryEnd ?? (top < head.number ? await endpointReader.getAnchor(top) : head);
+        retryEnd = null;
         const batch = await fetchRange(endpointReader, {
           mode: 'discovery-only',
           fromBlock: from,
@@ -406,6 +454,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           captureMode: 'backfill',
         });
         rawSaveStage('discovery', () => store.saveRaw(batch));
+        const failureKinds = discoveryFailureKinds(batch);
         batchRecords.push({
           id: batch.id,
           scopeId: batch.scopeId,
@@ -415,9 +464,77 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           completeness: batch.completeness,
           logs: batch.logs.length,
           accepted: false,
+          failureKinds,
         });
         saveJson(resolve(out, 'discovery-' + batch.id + '.json'), batch, out);
-        if (batch.completeness !== 'complete') return false;
+        if (batch.completeness !== 'complete') {
+          for (const kind of failureKinds) noteFailure('discovery:' + kind);
+          const action = classifyDiscoveryFailures(failureKinds);
+          if (action === 'retry' && retriesForRange < DISCOVERY_MAX_RECOVERY_RETRIES) {
+            retriesForRange++;
+            consecutiveFailures++;
+            shutdown.throwIfRequested();
+            if (Date.now() >= stopAtMs) {
+              noteFailure('discovery:deadline');
+              return false;
+            }
+            if (reader.meter.remainingCalls !== null && reader.meter.remainingCalls < 1) {
+              noteFailure('discovery:budget');
+              return false;
+            }
+            const delayMs = discoveryRetryDelayMs(consecutiveFailures);
+            console.log(
+              encodeJson({
+                event: 'discovery-retry',
+                state: 'waiting-retry',
+                fromBlock: from,
+                toBlock: end.number,
+                attempt: retriesForRange,
+                delayMs,
+                failureKinds,
+              }),
+            );
+            telemetry.transition('waiting-retry');
+            const waitingAt = Date.now();
+            await shutdown.wait(Math.min(delayMs, Math.max(0, stopAtMs - Date.now())));
+            telemetry.addWait(Math.max(0, Date.now() - waitingAt));
+            if (shutdown.requested) {
+              noteFailure('discovery:user-stop');
+              return false;
+            }
+            if (Date.now() >= stopAtMs) {
+              noteFailure('discovery:deadline');
+              return false;
+            }
+
+            if (
+              failureKinds.some((kind) => kind === 'anchor-changed' || kind === 'anchor-conflict')
+            ) {
+              await recheckAcceptedTip();
+              from = tip ? tip.number + 1n : floor;
+              try {
+                retryEnd = await endpointReader.getAnchor(end.number);
+              } catch (error) {
+                const failure = classifyRpcError(error);
+                if (failure.kind === 'budget' || failure.kind === 'deadline') {
+                  noteFailure('discovery:' + failure.kind);
+                  return false;
+                }
+                throw error;
+              }
+            }
+            continue;
+          }
+          if (action === 'retry') {
+            noteFailure('discovery:retry-exhausted');
+            return false;
+          }
+          if (action === 'stop') return false;
+          throw new RpcFailure(failureKinds[0] ?? 'discovery-incomplete');
+        }
+
+        consecutiveFailures = 0;
+        retriesForRange = 0;
         await reader.flush?.();
         shutdown.throwIfRequested();
         store.acceptRange(batch);
