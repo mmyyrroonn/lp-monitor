@@ -172,6 +172,73 @@ test('a target on a newer branch rewinds both accepted prefixes before refetchin
   }
 }, 120_000);
 
+test('the target precheck shares the run RPC budget', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lp-history-target-budget-'));
+  const fixture = recorderFixture();
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  try {
+    expect(await seedSource(dir, fixture)).toBe(0);
+    const spec = jobSpec(dir);
+    const prepared = await prepareHistoryJob(spec);
+    const state = await runHistoryJob({
+      studyDatabasePath: spec.studyDatabasePath,
+      jobId: prepared.id,
+      environment,
+      readerFactory: fixture.factory,
+      maxRpcCalls: 1,
+      durationMs: 60_000,
+    });
+    // The precheck spent the only call; no acquisition may start afterwards.
+    expect(state.currentRunRpcCalls).toBe(1);
+    expect(state.cumulativeRpcCalls).toBe(1);
+    expect(state.status).toBe('paused');
+    expect(state.lastError ?? '').toMatch(/budget/i);
+    expect(state.notes.join(' ')).toMatch(/budget consumed by target verification/);
+  } finally {
+    log.mockRestore();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 60000);
+
+test('the target precheck shares the run deadline instead of extending it', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lp-history-target-deadline-'));
+  const fixture = recorderFixture();
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const deadlines: (number | undefined)[] = [];
+  const slowFactory: typeof fixture.factory = (env, options) => {
+    deadlines.push(options?.deadlineMs);
+    const reader = fixture.factory(env, options);
+    return {
+      ...reader,
+      getAnchor: async (target: bigint | 'latest') => {
+        if (target === 200n) await new Promise((resolve) => setTimeout(resolve, 120));
+        return reader.getAnchor(target);
+      },
+    };
+  };
+  try {
+    expect(await seedSource(dir, fixture)).toBe(0);
+    const spec = jobSpec(dir);
+    const prepared = await prepareHistoryJob(spec);
+    const state = await runHistoryJob({
+      studyDatabasePath: spec.studyDatabasePath,
+      jobId: prepared.id,
+      environment,
+      readerFactory: slowFactory,
+      maxRpcCalls: 500,
+      durationMs: 25,
+    });
+    // The slow precheck already exceeded the absolute deadline: no review reader is created.
+    expect(deadlines.length).toBe(1);
+    expect(typeof deadlines[0]).toBe('number');
+    expect(['paused', 'waiting-retry']).toContain(state.status);
+    expect(`${state.lastError ?? ''} ${state.notes.join(' ')}`).toMatch(/deadline/i);
+  } finally {
+    log.mockRestore();
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 60000);
+
 test('a stale fixed target fails explicitly instead of refetching the same range', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'lp-history-stale-target-'));
   const fixture = recorderFixture();

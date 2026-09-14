@@ -514,24 +514,37 @@ export async function studyWithConfig(
   const periodsWithoutEvaluations = (['train', 'validation', 'test'] as const).some(
     (segment) => splitCounts[segment] === 0,
   );
-  // Triggering an alert is not evidence that the candidate standard holds: the
-  // declared requirement counts evaluable (non-censored, complete) outcome windows.
+  // Triggering an alert is not evidence that the candidate standard holds.
+  // Evaluable sample thresholds and the declared forward-effect criteria are
+  // separate: a complete window with no forward activity must not pass.
   const requirement = config.validation;
-  const meetsRequirement = (candidate: StudyExperimentReport['candidates'][number]): boolean => {
-    const windows = candidate.splits.validation.outcomes.find(
+  const meetsRequirement = (
+    segment: StudyExperimentReport['candidates'][number]['splits']['train'],
+  ) => {
+    const outcome = segment.outcomes.find(
       (item) =>
         item.horizonMinutes === requirement.primaryHorizonMinutes &&
         item.reactionDelayMinutes === 1,
     );
-    return (windows?.complete ?? 0) >= requirement.minimumCompleteOutcomeWindows;
+    if ((outcome?.complete ?? 0) < requirement.minimumCompleteOutcomeWindows) return false;
+    if ((outcome?.minimumSwapCount ?? 0) < requirement.minimumForwardSwapCount) return false;
+    if (BigInt(outcome?.minimumUsdMicros ?? '0') < BigInt(requirement.minimumForwardUsdMicros))
+      return false;
+    if (
+      requirement.minimumRelativeMultiple !== null &&
+      (outcome?.minimumRelativeMultiple ?? 0) < requirement.minimumRelativeMultiple
+    )
+      return false;
+    return true;
   };
   const frozenCandidates = experiments.candidates.filter((candidate) => candidate.selectedOnTrain);
   const validated = frozenCandidates.some(
     (candidate) =>
       candidate.splits.validation.exposureComplete &&
       candidate.splits.validation.episodes > 0 &&
+      meetsRequirement(candidate.splits.validation) &&
       candidate.splits.test.exposureComplete &&
-      meetsRequirement(candidate),
+      (candidate.splits.test.episodes === 0 || meetsRequirement(candidate.splits.test)),
   );
   if (replayReport && grid !== null && frozenCandidates.length > 0 && !validated)
     issues.push('validation-requirement-not-met');

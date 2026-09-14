@@ -16,6 +16,9 @@
   "outcomeMinutes": 180,
   "validation": {
     "primaryHorizonMinutes": 60,
-    "minimumCompleteOutcomeWindows": 1
+    "minimumCompleteOutcomeWindows": 1,
+    "minimumForwardSwapCount": 1,
+    "minimumForwardUsdMicros": "0",
+    "minimumRelativeMultiple": null
   }
 }

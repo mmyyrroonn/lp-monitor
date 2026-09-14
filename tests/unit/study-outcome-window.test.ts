@@ -93,6 +93,59 @@ test('minute-only events that straddle the trigger stay unknown', () => {
   expect(clean.swapCount).toBe(0);
 });
 
+test('minute-only events that straddle the right edge stay unknown', () => {
+  // The 6900 minute overlaps the [6050,6950) end; the trade could be after 6950.
+  const straddling = metricEvent(0, null, 6_900, 5_000);
+  const result = windowAt(6_050, 0, [straddling]);
+  const fifteen = result.find((window) => window.horizonMinutes === 15)!;
+  expect(fifteen.status).toBe('incomplete');
+  expect(fifteen.reasons).toContain('unresolved-event-time');
+  expect(fifteen.swapCount).toBeNull();
+  expect(fifteen.usdMicros).toBeNull();
+  const beforeEdge = windowAt(6_050, 0, [metricEvent(1, null, 6_840, 5_000)]);
+  const clean = beforeEdge.find((window) => window.horizonMinutes === 15)!;
+  expect(clean.status).toBe('complete');
+  expect(clean.swapCount).toBe(1);
+});
+
+test('a window without its last intersecting minute is not a complete zero', () => {
+  const minutes = coverage(0, 6_960).filter((item) => item.minuteStartSec !== 6_900);
+  const result = evaluateStudyOutcomeWindows(6_050, pool, 0, [], {
+    minutes,
+    scopeId: 's',
+    endSec: 6_950,
+    integrityComplete: true,
+  });
+  const fifteen = result.find((window) => window.horizonMinutes === 15)!;
+  expect(fifteen.status).toBe('incomplete');
+  expect(fifteen.expectedMinutes).toBe(16);
+  expect(fifteen.coveredMinutes).toBe(15);
+  expect(fifteen.reasons).toContain('missing-minute');
+  expect(fifteen.swapCount).toBeNull();
+  expect(fifteen.usdMicros).toBeNull();
+});
+
+test('active run statistics include the last intersecting minute', () => {
+  const event = metricEvent(0, 6_920, 6_900, 5_000);
+  const result = windowAt(6_050, 0, [event]);
+  const fifteen = result.find((window) => window.horizonMinutes === 15)!;
+  expect(fifteen.activeMinutes).toBe(1);
+  expect(fifteen.longestActiveRunMinutes).toBe(1);
+});
+
+test('the baseline window gives a relative multiple for the forward result', () => {
+  const baseline = metricEvent(0, 5_200, 5_160, 1_000);
+  const forward = metricEvent(1, 6_100, 6_060, 5_000);
+  const result = windowAt(6_050, 0, [baseline, forward]);
+  const fifteen = result.find((window) => window.horizonMinutes === 15)!;
+  expect(fifteen.usdMicros).toBe(5_000_000_000n);
+  expect(fifteen.baselineUsdMicros).toBe(1_000_000_000n);
+  expect(fifteen.relativeMultiple).toBe(5);
+  const noBaseline = windowAt(6_050, 0, [forward]).find((window) => window.horizonMinutes === 15)!;
+  expect(noBaseline.baselineUsdMicros).toBe(0n);
+  expect(noBaseline.relativeMultiple).toBeNull();
+});
+
 test('windows beyond the proven coverage stay censored with no totals', () => {
   const result = evaluateStudyOutcomeWindows(4_800, pool, 0, [], {
     minutes: coverage(0, 4_860),

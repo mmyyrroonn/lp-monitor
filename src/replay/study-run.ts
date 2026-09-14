@@ -23,6 +23,10 @@ export interface StudyOutcomeSummary {
   censored: number;
   usdMicrosTotal: string | null;
   swapCountTotal: number | null;
+  /** Weakest complete window, used by the declared forward-effect criteria. */
+  minimumUsdMicros: string | null;
+  minimumSwapCount: number | null;
+  minimumRelativeMultiple: number | null;
 }
 
 export interface StudySegmentReport {
@@ -172,6 +176,70 @@ export interface StudyOutcomeWindow {
   longestActiveRunMinutes: number | null;
   observedSwapCount: number;
   observedTxCount: number;
+  /** Same-duration window immediately before the trigger, when evaluable. */
+  baselineUsdMicros: bigint | null;
+  relativeMultiple: number | null;
+}
+
+interface WindowEvidence {
+  reasons: Set<string>;
+  expectedMinutes: number;
+  coveredMinutes: number;
+  events: MetricEvent[];
+}
+
+/** Neither edge of a window can rely on a minute that only partially overlaps
+ * it; such events stay unknown instead of being counted as inside. */
+function collectWindowEvidence(
+  fromSec: number,
+  toSec: number,
+  candidates: readonly MetricEvent[],
+  coverage: {
+    minutes: readonly MinuteCoverage[];
+    scopeId: string;
+    endSec: number;
+  },
+): WindowEvidence {
+  const reasons = new Set<string>();
+  let expectedMinutes = 0;
+  let coveredMinutes = 0;
+  const verifiedEnd = Math.min(toSec, coverage.endSec);
+  for (let minute = Math.floor(fromSec / 60) * 60; minute < verifiedEnd; minute += 60) {
+    expectedMinutes++;
+    const rows = coverage.minutes.filter(
+      (item) => item.scopeId === coverage.scopeId && item.minuteStartSec === minute,
+    );
+    if (rows.length === 1 && rows[0]!.complete) coveredMinutes++;
+    else
+      reasons.add(
+        rows.length === 0
+          ? 'missing-minute'
+          : rows.length > 1
+            ? 'duplicate-minute'
+            : 'incomplete-minute',
+      );
+  }
+  const unique = new Map<string, MetricEvent>();
+  for (const event of candidates) {
+    const time = event.event.time;
+    if (time.exactTimestampSec !== null) {
+      if (time.exactTimestampSec < fromSec || time.exactTimestampSec >= toSec) continue;
+    } else if (time.minuteStartSec !== null) {
+      if (time.minuteStartSec + 60 <= fromSec) continue;
+      if (time.minuteStartSec < fromSec || time.minuteStartSec + 60 > toSec) {
+        reasons.add('unresolved-event-time');
+        continue;
+      }
+    } else {
+      reasons.add('unresolved-event-time');
+      continue;
+    }
+    const key = rawLogKey(event.event.ref);
+    const previous = unique.get(key);
+    if (previous && encodeJson(previous) !== encodeJson(event)) reasons.add('conflicting-event');
+    else unique.set(key, event);
+  }
+  return { reasons, expectedMinutes, coveredMinutes, events: [...unique.values()] };
 }
 
 /** Study outcome windows start at the actual trigger second plus the reaction
@@ -200,65 +268,40 @@ export function evaluateStudyOutcomeWindows(
       poolRegistrationId({ pool: event.event.pool }) === poolId &&
       (event.scopeId === undefined || event.scopeId === coverage.scopeId),
   );
+  const usdTotal = (events: readonly MetricEvent[]): bigint | null =>
+    events.every((event) => event.usdMicros !== null)
+      ? events.reduce((sum, event) => sum + event.usdMicros!, 0n)
+      : null;
+  const evaluable = (evidence: WindowEvidence): boolean =>
+    evidence.reasons.size === 0 && evidence.coveredMinutes === evidence.expectedMinutes;
   return ([15, 60, 180] as const).map((horizonMinutes) => {
     const endSec = startSec + horizonMinutes * 60;
     const censored = endSec > coverage.endSec;
     const boundEnd = Math.min(endSec, coverage.endSec);
-    const reasons = new Set<string>();
-    let expectedMinutes = 0;
-    let coveredMinutes = 0;
-    for (let minute = Math.floor(startSec / 60) * 60; minute < endSec; minute += 60) {
-      expectedMinutes++;
-      if (minute + 60 > coverage.endSec) continue;
-      const rows = coverage.minutes.filter(
-        (item) => item.scopeId === coverage.scopeId && item.minuteStartSec === minute,
-      );
-      if (rows.length === 1 && rows[0]!.complete) coveredMinutes++;
-      else
-        reasons.add(
-          rows.length === 0
-            ? 'missing-minute'
-            : rows.length > 1
-              ? 'duplicate-minute'
-              : 'incomplete-minute',
-        );
-    }
+    const forward = collectWindowEvidence(startSec, boundEnd, candidates, coverage);
+    const reasons = new Set(forward.reasons);
     if (coverage.integrityComplete === false) reasons.add('input-integrity-incomplete');
-    const unique = new Map<string, MetricEvent>();
-    for (const event of candidates) {
-      const time = event.event.time;
-      if (time.exactTimestampSec !== null) {
-        if (time.exactTimestampSec < startSec || time.exactTimestampSec >= boundEnd) continue;
-      } else if (time.minuteStartSec !== null) {
-        if (time.minuteStartSec + 60 <= startSec) continue;
-        if (time.minuteStartSec < startSec) {
-          reasons.add('unresolved-event-time');
-          continue;
-        }
-        if (time.minuteStartSec >= boundEnd) continue;
-      } else {
-        reasons.add('unresolved-event-time');
-        continue;
-      }
-      const key = rawLogKey(event.event.ref);
-      const previous = unique.get(key);
-      if (previous && encodeJson(previous) !== encodeJson(event)) reasons.add('conflicting-event');
-      else unique.set(key, event);
-    }
-    const events = [...unique.values()];
+    const incomplete = reasons.size > 0;
+    const complete = !incomplete && !censored && forward.coveredMinutes === forward.expectedMinutes;
+    const events = forward.events;
     const transactions = new Set(
       events.map((event) => event.event.ref.transactionHash.toLowerCase()),
     );
     const active = new Set(events.flatMap((event) => event.event.time.minuteStartSec ?? []));
+    // Iterate the same minute slots as the coverage check so the last
+    // intersecting minute is never dropped from the persistence statistics.
     let longest = 0;
     let run = 0;
-    for (let sec = startSec; sec < endSec; sec += 60) {
-      run = active.has(Math.floor(sec / 60) * 60) ? run + 1 : 0;
+    for (let minute = Math.floor(startSec / 60) * 60; minute < boundEnd; minute += 60) {
+      run = active.has(minute) ? run + 1 : 0;
       longest = Math.max(longest, run);
     }
-    const incomplete = reasons.size > 0;
-    const complete = !incomplete && !censored;
-    const priced = events.every((event) => event.usdMicros !== null);
+    const baseline =
+      startSec - horizonMinutes * 60 >= 0
+        ? collectWindowEvidence(startSec - horizonMinutes * 60, startSec, candidates, coverage)
+        : null;
+    const forwardUsd = complete ? usdTotal(events) : null;
+    const baselineUsd = baseline && evaluable(baseline) ? usdTotal(baseline.events) : null;
     return {
       horizonMinutes,
       startSec,
@@ -267,16 +310,20 @@ export function evaluateStudyOutcomeWindows(
       incomplete,
       censored,
       reasons: [...reasons, ...(censored ? ['right-censored'] : [])].sort(),
-      coveredMinutes,
-      expectedMinutes,
-      usdMicros:
-        complete && priced ? events.reduce((sum, event) => sum + event.usdMicros!, 0n) : null,
+      coveredMinutes: forward.coveredMinutes,
+      expectedMinutes: forward.expectedMinutes,
+      usdMicros: forwardUsd,
       swapCount: complete ? events.length : null,
       txCount: complete ? transactions.size : null,
       activeMinutes: complete ? active.size : null,
       longestActiveRunMinutes: complete ? longest : null,
       observedSwapCount: events.length,
       observedTxCount: transactions.size,
+      baselineUsdMicros: baselineUsd,
+      relativeMultiple:
+        forwardUsd !== null && baselineUsd !== null && baselineUsd > 0n
+          ? Number(forwardUsd) / Number(baselineUsd)
+          : null,
     };
   });
 }
@@ -318,14 +365,17 @@ function summarizeOutcomes(
       const swaps = completed.flatMap((window) =>
         window.swapCount === null ? [] : [window.swapCount],
       );
+      const multiples = completed.flatMap((window) =>
+        window.relativeMultiple === null ? [] : [window.relativeMultiple],
+      );
       return {
         horizonMinutes: group.horizon,
         reactionDelayMinutes: group.delay,
-        observations: windows.length,
-        windows: windows.length,
+        observations: group.windows.length,
+        windows: group.windows.length,
         complete: completed.length,
-        incomplete: windows.filter((window) => window.status === 'incomplete').length,
-        censored: windows.filter((window) => window.censored).length,
+        incomplete: group.windows.filter((window) => window.status === 'incomplete').length,
+        censored: group.windows.filter((window) => window.censored).length,
         usdMicrosTotal:
           completed.length > 0 && usd.length === completed.length
             ? usd.reduce((sum, value) => sum + value, 0n).toString()
@@ -333,6 +383,18 @@ function summarizeOutcomes(
         swapCountTotal:
           completed.length > 0 && swaps.length === completed.length
             ? swaps.reduce((sum, value) => sum + value, 0)
+            : null,
+        minimumUsdMicros:
+          completed.length > 0 && usd.length === completed.length
+            ? usd.reduce((min, value) => (value < min ? value : min)).toString()
+            : null,
+        minimumSwapCount:
+          completed.length > 0 && swaps.length === completed.length
+            ? swaps.reduce((min, value) => (value < min ? value : min))
+            : null,
+        minimumRelativeMultiple:
+          completed.length > 0 && multiples.length === completed.length
+            ? multiples.reduce((min, value) => (value < min ? value : min))
             : null,
       };
     })

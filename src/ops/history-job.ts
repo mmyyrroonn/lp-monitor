@@ -459,6 +459,7 @@ async function verifyFixedTarget(
   spec: HistoryJobSpec,
   config: ChainConfig,
   options: HistoryJobRunOptions,
+  deadlineMs: number | undefined,
 ): Promise<{ ok: boolean; calls: number; reason: string | null }> {
   const target = parseBlock(spec.toBlock);
   const reader = (options.readerFactory ?? createChainReader)(
@@ -469,6 +470,8 @@ async function verifyFixedTarget(
       timeoutMs: config.timeoutMs,
       maxRetries: config.maxRetries,
       evidenceMode: 'off',
+      // The precheck shares the run's absolute deadline instead of extending it.
+      ...(deadlineMs === undefined ? {} : { deadlineMs }),
     },
   );
   try {
@@ -505,6 +508,10 @@ async function verifyFixedTarget(
 
 export async function runHistoryJob(options: HistoryJobRunOptions): Promise<HistoryJobState> {
   const databasePath = resolve(options.studyDatabasePath);
+  // One absolute deadline covers the target precheck, the review and every wait.
+  const runStartedAtMs = Date.now();
+  const deadlineMs =
+    options.durationMs === undefined ? undefined : runStartedAtMs + options.durationMs;
   // A missing study database must never be silently re-created from a live source.
   if (!existsSync(databasePath))
     throw new ConfigError('History job study database does not exist; prepare the job first');
@@ -557,7 +564,7 @@ export async function runHistoryJob(options: HistoryJobRunOptions): Promise<Hist
     const input = safeLoadInputs(spec);
     if (!input)
       throw new ConfigError('History job config/watchlist/metadata snapshot is unavailable');
-    const targetCheck = await verifyFixedTarget(spec, input.config, options);
+    const targetCheck = await verifyFixedTarget(spec, input.config, options, deadlineMs);
     targetRunCalls = targetCheck.calls;
     if (!targetCheck.ok) {
       const stateDb = openDatabase(databasePath);
@@ -584,6 +591,34 @@ export async function runHistoryJob(options: HistoryJobRunOptions): Promise<Hist
         });
       } finally {
         stateDb.close();
+      }
+    }
+    // The precheck shares the run budget and deadline; nothing further starts once
+    // either is spent, even if the precheck only returned after the deadline.
+    const remainingCalls =
+      options.maxRpcCalls === undefined ? undefined : options.maxRpcCalls - targetRunCalls;
+    const deadlinePassed = deadlineMs !== undefined && Date.now() >= deadlineMs;
+    if (deadlinePassed || (remainingCalls !== undefined && remainingCalls < 1)) {
+      const budgetDb = openDatabase(databasePath);
+      try {
+        const current = readHistoryJobFromDatabase(budgetDb, options.jobId);
+        return patchHistoryJob(budgetDb, current.id, {
+          status: 'paused',
+          phase: current.phase,
+          currentRunRpcCalls: targetRunCalls,
+          cumulativeRpcCalls: current.cumulativeRpcCalls + targetRunCalls,
+          notes: [
+            ...current.notes,
+            deadlinePassed
+              ? 'deadline reached during target verification'
+              : 'rpc budget consumed by target verification',
+          ],
+          lastError: deadlinePassed
+            ? 'History job deadline is exhausted before acquisition'
+            : 'History job RPC budget is exhausted before acquisition',
+        });
+      } finally {
+        budgetDb.close();
       }
     }
     const { scopeId, registryScopeId } = scopes(spec, input.config, input.assets);
@@ -613,11 +648,8 @@ export async function runHistoryJob(options: HistoryJobRunOptions): Promise<Hist
       metadata,
       environment: options.environment,
       readerFactory: options.readerFactory,
-      maxCalls:
-        options.maxRpcCalls === undefined
-          ? undefined
-          : Math.max(1, options.maxRpcCalls - targetRunCalls),
-      deadlineMs: options.durationMs === undefined ? undefined : Date.now() + options.durationMs,
+      maxCalls: remainingCalls,
+      deadlineMs,
       requiredContext: {
         startSec: spec.analysisStartSec - spec.warmupMinutes * 60,
         endSec: spec.analysisEndSec + spec.outcomeMinutes * 60,

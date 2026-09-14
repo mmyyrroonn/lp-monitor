@@ -16,7 +16,10 @@ afterEach(() => {
 });
 
 /** Spikes land inside train, validation and test so candidates can freeze. */
-function dataset(options: { secondPool?: boolean } = {}): { dir: string; path: string } {
+function dataset(options: { secondPool?: 'steady' | 'single' } = {}): {
+  dir: string;
+  path: string;
+} {
   const dir = mkdtempSync(join(tmpdir(), 'lp-study-exec-'));
   dirs.push(dir);
   const spike = (index: number) =>
@@ -29,6 +32,8 @@ function dataset(options: { secondPool?: boolean } = {}): { dir: string; path: s
     for (let index = 0; index < 79; index++) {
       const block = 70 + index * 60;
       const hot = index >= 20 && index <= 24;
+      // 'single' fires one validation spike and has no forward activity after it.
+      if (options.secondPool === 'single' && index !== 20) continue;
       logs.push({
         ...swap(block, hot ? 30_000 : 2_000),
         address: secondPool,
@@ -160,7 +165,7 @@ test('candidate support requires evaluable validation outcome windows', async ()
     validation: { startSec: 1_300, endSec: 2_300 },
     test: { startSec: 3_000, endSec: 4_000 },
   };
-  const censoredFixture = dataset({ secondPool: true });
+  const censoredFixture = dataset({ secondPool: 'steady' });
   const censored = await studyWithConfig(
     studyConfig(censoredFixture.dir, censoredFixture.path, { periods }),
     join(censoredFixture.dir, 'out-censored'),
@@ -176,7 +181,7 @@ test('candidate support requires evaluable validation outcome windows', async ()
   expect(censored.conclusion).toBe('insufficient-evidence');
   expect(censored.status).toBe('incomplete');
 
-  const evaluableFixture = dataset({ secondPool: true });
+  const evaluableFixture = dataset({ secondPool: 'steady' });
   const evaluable = await studyWithConfig(
     studyConfig(evaluableFixture.dir, evaluableFixture.path, {
       periods,
@@ -187,6 +192,36 @@ test('candidate support requires evaluable validation outcome windows', async ()
   expect(evaluable.validationSatisfied).toBe(true);
   expect(evaluable.conclusion).toBe('candidate-supported');
   expect(evaluable.status).toBe('complete');
+}, 180_000);
+
+test('a complete but inactive forward window cannot support a candidate', async () => {
+  const fixture = dataset({ secondPool: 'single' });
+  const report = await studyWithConfig(
+    studyConfig(fixture.dir, fixture.path, {
+      periods: {
+        train: { startSec: 300, endSec: 1_200 },
+        validation: { startSec: 1_300, endSec: 2_600 },
+        test: { startSec: 3_000, endSec: 4_000 },
+      },
+      validation: { primaryHorizonMinutes: 15, minimumCompleteOutcomeWindows: 1 },
+    }),
+    join(fixture.dir, 'out'),
+  );
+  const frozen = report.experiments.candidates.filter((candidate) => candidate.selectedOnTrain);
+  expect(frozen.length).toBeGreaterThan(0);
+  const observed = frozen.filter((candidate) => candidate.splits.validation.episodes > 0);
+  expect(observed.length).toBeGreaterThan(0);
+  const primary = observed[0]!.splits.validation.outcomes.find(
+    (item) => item.horizonMinutes === 15 && item.reactionDelayMinutes === 1,
+  )!;
+  // The window is evaluable, but no trade follows the trigger.
+  expect(primary.complete).toBeGreaterThan(0);
+  expect(primary.minimumSwapCount).toBe(0);
+  expect(primary.minimumUsdMicros).toBe('0');
+  expect(report.validationRequirement.minimumForwardSwapCount).toBe(1);
+  expect(report.validationSatisfied).toBe(false);
+  expect(report.issues).toContain('validation-requirement-not-met');
+  expect(report.conclusion).toBe('insufficient-evidence');
 }, 180_000);
 
 test('study periods outside the recorded window cannot report completion', async () => {
