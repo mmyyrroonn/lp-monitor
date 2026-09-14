@@ -48,6 +48,10 @@ export async function runCli(
   args = process.argv.slice(2),
   options: { environment?: NodeJS.ProcessEnv; readerFactory?: typeof createChainReader } = {},
 ): Promise<number> {
+  if (args[0] === 'stocks' && !args.includes('--help') && !args.includes('-h')) {
+    const { runStocksCli } = await import('./ops/stocks-cli.js');
+    return runStocksCli(args);
+  }
   if (args[0] === 'dashboard' && !args.includes('--help') && !args.includes('-h')) {
     const { runDashboardCli } = await import('./dashboard/cli.js');
     return runDashboardCli(args, options.environment ?? process.env);

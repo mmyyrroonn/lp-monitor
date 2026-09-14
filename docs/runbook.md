@@ -1,5 +1,16 @@
 # P6 本机只读运行手册
 
+## 股票名单快照（H1.1）
+
+股票名单只能由显式命令刷新，不会在 `follow` 启动时访问 Robinhood 资产 API，也不会改写 `config/watchlist.stocks.json`。离线重建使用保存的官方原始响应：
+
+```powershell
+pnpm lp stocks refresh --input saved-assets.json --out artifacts/stocks/snapshot-A
+pnpm lp follow --watchlist artifacts/stocks/snapshot-A/watchlist.json --config config/runtime.local.json --db data/p6.sqlite --duration 30m
+```
+
+输出目录必须是新目录，成功时含 `source.json`（原始响应）、`watchlist.json`（规范化名单及完整状态记录）和 `diff.json`。`sourceHash` 是实际保存原始 UTF-8 响应的 hash；`version` 是规范化 chain-4663 状态记录的 hash，二者不能互换。新增或状态改变的地址会在命令输出中列为需要重新核验覆盖，旧目录的 complete 不能自动复用。
+
 ## 2026-09-12 实时增量修正与独立历史回顾
 
 实时 `follow --notify local` 已改用持久化增量协议投影、逐事件估值和分钟/五分钟贡献缓存。普通批次只解码新增或修订事件，未变时间桶复用已有结果；实时计算保留规则所需有界窗口（默认180分钟，包含60分钟基线，另读最多120秒报价上下文），过期贡献退出热路径，原始证据保留。
