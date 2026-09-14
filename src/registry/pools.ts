@@ -16,6 +16,27 @@ export function poolRegistrationId(registration: Pick<PoolRegistration, 'pool'>)
     : `${pool.chainId}:v4:${pool.manager.toLowerCase()}:${pool.poolId.toLowerCase()}`;
 }
 
+/** One pool can be attributed to each stock token it contains; the pool itself remains unique. */
+export function stockPoolAttributions(
+  registrations: readonly PoolRegistration[],
+  stockAddresses: readonly Address[],
+): readonly { poolId: string; stockAddress: Address }[] {
+  const stocks = new Set(stockAddresses.map((address) => address.toLowerCase()));
+  return registrations
+    .flatMap((registration) =>
+      [registration.token0, registration.token1]
+        .filter((address, index, values) => values.indexOf(address) === index)
+        .filter((address) => stocks.has(address.toLowerCase()))
+        .map((stockAddress) => ({
+          poolId: poolRegistrationId(registration),
+          stockAddress,
+        })),
+    )
+    .sort((left, right) =>
+      `${left.poolId}:${left.stockAddress}`.localeCompare(`${right.poolId}:${right.stockAddress}`),
+    );
+}
+
 function normalizeRef(pool: PoolRef): PoolRef {
   return pool.protocol === 'v3'
     ? { ...pool, address: lowerAddress(pool.address) }

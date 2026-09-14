@@ -125,6 +125,10 @@ export interface RecorderOptions {
   evidenceMode: 'full' | 'sampled' | 'off';
   readerFactory?: typeof createChainReader;
   shutdown?: ShutdownController;
+  /** Run only the fixed-target discovery/catalogue phase; skip operation follow. */
+  catalogueOnly?: boolean;
+  /** Fixed discovery target used by catalogueOnly; defaults to the startup anchor. */
+  targetBlock?: bigint;
 }
 export async function runRecorder(options: RecorderOptions): Promise<number> {
   const { config, env } = options;
@@ -344,6 +348,8 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     });
   };
   let primary: unknown;
+  let catalogueTarget: BlockAnchor | null = null;
+  let catalogueFloor = 0n;
   let exitCode = 4;
   try {
     store.recordRun({
@@ -364,6 +370,14 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     await drain(true);
     shutdown.throwIfRequested();
     const initial = await endpointReader.getAnchor('latest');
+    if (options.targetBlock !== undefined) {
+      if (options.targetBlock < 0n || options.targetBlock > initial.number)
+        throw new ConfigError('Catalogue target must be within the observed head');
+      catalogueTarget =
+        options.targetBlock === initial.number
+          ? initial
+          : await endpointReader.getAnchor(options.targetBlock);
+    } else catalogueTarget = initial;
     const identity = await reader.meter
       .withBackfill(() =>
         verifyIdentity(
@@ -404,6 +418,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           initial.number,
         )
       : 0n;
+    catalogueFloor = floor;
     const bootstrap = async (head: BlockAnchor): Promise<boolean> => {
       let tip = store.acceptedTip(discoveryScope);
       let from = tip ? tip.number + 1n : floor;
@@ -626,7 +641,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     telemetry.setPhase(latestStart ? 'steady' : 'backfill');
     result.discoveryComplete = latestStart
       ? false
-      : await reader.meter.withPurpose('backfill', () => bootstrap(initial));
+      : await reader.meter.withPurpose('backfill', () => bootstrap(catalogueTarget!));
     Object.assign(result, {
       startMode: latestStart ? 'latest' : 'historical',
       liveStartBlock: latestStart ? initial.number : null,
@@ -642,7 +657,10 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         }),
       );
     shutdown.throwIfRequested();
-    if (!latestStart && !result.discoveryComplete) {
+    if (options.catalogueOnly) {
+      result.status = result.discoveryComplete ? 'complete' : 'incomplete';
+      exitCode = result.discoveryComplete ? 0 : 4;
+    } else if (!latestStart && !result.discoveryComplete) {
       result.status = 'incomplete';
     } else {
       // Verify the operation checkpoint before delivering a persisted backlog.
@@ -1013,6 +1031,39 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       stopAtMs,
       rpcDrainDeadlineMs,
       telemetry: measurements,
+      catalogue: options.catalogueOnly
+        ? {
+            targetAnchor: catalogueTarget,
+            acceptedTip: store.acceptedTip(discoveryScope),
+            missing:
+              catalogueTarget !== null &&
+              (store.acceptedTip(discoveryScope)?.number ?? -1n) < catalogueTarget.number
+                ? [
+                    {
+                      fromBlock:
+                        (store.acceptedTip(discoveryScope)?.number ?? catalogueFloor - 1n) + 1n,
+                      toBlock: catalogueTarget.number,
+                      reason:
+                        result.failures.find((failure) => failure.startsWith('discovery:')) ??
+                        'discovery-incomplete',
+                    },
+                  ]
+                : [],
+            sourceHash: createHash('sha256')
+              .update(
+                encodeJson({
+                  chainId: assets.chainId,
+                  version: assets.version,
+                  assets: assets.assets,
+                }),
+              )
+              .digest('hex'),
+            protocolVersion: 'uniswap-v3+uniswap-v4@1',
+            excluded: ['pons-v2-curves', 'other-dexes'],
+            providerCompletenessAssumption:
+              'Complete means all declared V3 Factory/V4 Manager discovery filters returned complete, hash-checked ranges through the fixed target anchor; the public RPC filter is not independently verified.',
+          }
+        : null,
       replayInputs:
         options.notify === 'local'
           ? {

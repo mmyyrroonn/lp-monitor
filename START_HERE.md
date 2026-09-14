@@ -14,6 +14,17 @@
 
 缓存只用于观测区块及之后，不把当前精度回填为历史事实。缺少精度或有效前序报价时仍保留未计价；有股票登记也不等于有池、成交或完整覆盖。本次未启动长期采集和提醒服务，实链长时验收状态保持不变。
 
+## 2026-09-13 固定目标 catalogue
+
+catalogue 只做固定目标块的可恢复 discovery/catalogue，不写 operation batches，不自动 follow。它输出池目录、股票-池归属、名单 sourceHash、协议版本、排除项和 missing；只有 discovery 完整时才可把报告作为可用目录。
+
+```powershell
+pnpm lp catalogue --config config/robinhood.json --watchlist config/watchlist.stocks.json --db data/recorder.sqlite --out artifacts/catalogue --duration 10m --to-block <固定目标块>
+pnpm lp follow --config config/robinhood.json --watchlist config/watchlist.stocks.json --db data/recorder.sqlite --out artifacts/p1/runs --duration 30m
+```
+
+省略 `--to-block` 使用启动时最新块；catalogue 完成后，同一数据库可以由默认 latest-only follow 复用已登记池。默认 follow 不回补跳过的历史区间，历史补采仍需显式 `ingest` 或 `history`。
+
 ## 2026-09-12 实时增量修正与独立历史回顾
 
 实时 `follow --notify local` 已改用持久化增量协议投影、逐事件估值和分钟/五分钟贡献缓存。普通批次只解码新增或修订事件，未变时间桶复用已有结果；实时计算保留规则所需有界窗口（默认180分钟，包含60分钟基线，另读最多120秒报价上下文），过期贡献退出热路径，原始证据保留。

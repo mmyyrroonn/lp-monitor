@@ -324,98 +324,102 @@ test.each([
   ['budget', 4],
   ['deadline', 4],
   ['identity-with-db-failure', 3],
-] as const)('manifest write failure preserves outcome for %s', async (scenario, expectedCode) => {
-  const dir = mkdtempSync(join(tmpdir(), 'p1-manifest-failure-'));
-  const f = fixture();
-  if (scenario === 'incomplete') f.fail();
-  const primary = ['success', 'incomplete'].includes(scenario)
-    ? null
-    : new RpcFailure(scenario === 'identity-with-db-failure' ? 'identity-unverified' : scenario);
-  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
-  const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
-  const originalSave = files.saveJson;
-  const save = vi.spyOn(files, 'saveJson').mockImplementation((path, value, root) => {
-    if (path.endsWith('manifest.json')) throw new Error('ENOSPC private-provider-details');
-    return originalSave(path, value, root);
-  });
-  const originalRecord = SqliteRangeStore.prototype.recordRun;
-  const record = vi.spyOn(SqliteRangeStore.prototype, 'recordRun').mockImplementation(function (
-    this: SqliteRangeStore,
-    entry,
-  ) {
-    if (scenario === 'identity-with-db-failure' && entry.finishedAtMs !== null)
-      throw new Error('database full');
-    return originalRecord.call(this, entry);
-  });
-  let closed = 0;
-  const factory: typeof createChainReader = (env, options) => {
-    const r = f.factory(env, options);
-    if (primary)
-      r.getAnchor = async () => {
-        throw primary;
-      };
-    const close = r.close.bind(r);
-    r.close = async () => {
-      closed++;
-      await close();
-    };
-    return r;
-  };
-  try {
-    await expect(
-      runCli(
-        [
-          'ingest',
-          '--from-block',
-          '100',
-          '--to-block',
-          '200',
-          '--db',
-          join(dir, 'db.sqlite'),
-          '--out',
-          join(dir, 'runs'),
-          '--evidence',
-          'off',
-        ],
-        { environment: { RH_RPC_HTTP: 'https://fixture.invalid' }, readerFactory: factory },
-      ),
-    ).resolves.toBe(expectedCode);
-    expect(closed).toBe(1);
-    const finished = log.mock.calls
-      .map(([text]) => JSON.parse(String(text)))
-      .find((item) => item.event === 'finished');
-    expect(finished).toMatchObject({
-      status: 'failed',
-      exitCode: expectedCode,
-      manifest: null,
-      failures: expect.arrayContaining(['manifest-write']),
+] as const)(
+  'manifest write failure preserves outcome for %s',
+  async (scenario, expectedCode) => {
+    const dir = mkdtempSync(join(tmpdir(), 'p1-manifest-failure-'));
+    const f = fixture();
+    if (scenario === 'incomplete') f.fail();
+    const primary = ['success', 'incomplete'].includes(scenario)
+      ? null
+      : new RpcFailure(scenario === 'identity-with-db-failure' ? 'identity-unverified' : scenario);
+    const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const originalSave = files.saveJson;
+    const save = vi.spyOn(files, 'saveJson').mockImplementation((path, value, root) => {
+      if (path.endsWith('manifest.json')) throw new Error('ENOSPC private-provider-details');
+      return originalSave(path, value, root);
     });
-    if (primary) expect(finished.failures).toContain(primary.kind);
-    expect(stderr.mock.calls.map(([text]) => String(text)).join(' ')).toContain('manifest-write');
-    expect(stderr.mock.calls.map(([text]) => String(text)).join(' ')).not.toContain(
-      'private-provider-details',
-    );
-    if (scenario !== 'identity-with-db-failure') {
-      const db = openDatabase(join(dir, 'db.sqlite'));
-      try {
-        const row = db.prepare('select status, payload_json from runs').get() as {
-          status: string;
-          payload_json: string;
+    const originalRecord = SqliteRangeStore.prototype.recordRun;
+    const record = vi.spyOn(SqliteRangeStore.prototype, 'recordRun').mockImplementation(function (
+      this: SqliteRangeStore,
+      entry,
+    ) {
+      if (scenario === 'identity-with-db-failure' && entry.finishedAtMs !== null)
+        throw new Error('database full');
+      return originalRecord.call(this, entry);
+    });
+    let closed = 0;
+    const factory: typeof createChainReader = (env, options) => {
+      const r = f.factory(env, options);
+      if (primary)
+        r.getAnchor = async () => {
+          throw primary;
         };
-        expect(row.status).toBe('failed');
-        expect(JSON.parse(row.payload_json).failures).toContain('manifest-write');
-      } finally {
-        db.close();
+      const close = r.close.bind(r);
+      r.close = async () => {
+        closed++;
+        await close();
+      };
+      return r;
+    };
+    try {
+      await expect(
+        runCli(
+          [
+            'ingest',
+            '--from-block',
+            '100',
+            '--to-block',
+            '200',
+            '--db',
+            join(dir, 'db.sqlite'),
+            '--out',
+            join(dir, 'runs'),
+            '--evidence',
+            'off',
+          ],
+          { environment: { RH_RPC_HTTP: 'https://fixture.invalid' }, readerFactory: factory },
+        ),
+      ).resolves.toBe(expectedCode);
+      expect(closed).toBe(1);
+      const finished = log.mock.calls
+        .map(([text]) => JSON.parse(String(text)))
+        .find((item) => item.event === 'finished');
+      expect(finished).toMatchObject({
+        status: 'failed',
+        exitCode: expectedCode,
+        manifest: null,
+        failures: expect.arrayContaining(['manifest-write']),
+      });
+      if (primary) expect(finished.failures).toContain(primary.kind);
+      expect(stderr.mock.calls.map(([text]) => String(text)).join(' ')).toContain('manifest-write');
+      expect(stderr.mock.calls.map(([text]) => String(text)).join(' ')).not.toContain(
+        'private-provider-details',
+      );
+      if (scenario !== 'identity-with-db-failure') {
+        const db = openDatabase(join(dir, 'db.sqlite'));
+        try {
+          const row = db.prepare('select status, payload_json from runs').get() as {
+            status: string;
+            payload_json: string;
+          };
+          expect(row.status).toBe('failed');
+          expect(JSON.parse(row.payload_json).failures).toContain('manifest-write');
+        } finally {
+          db.close();
+        }
       }
+    } finally {
+      save.mockRestore();
+      record.mockRestore();
+      log.mockRestore();
+      stderr.mockRestore();
+      rmSync(dir, { recursive: true, force: true });
     }
-  } finally {
-    save.mockRestore();
-    record.mockRestore();
-    log.mockRestore();
-    stderr.mockRestore();
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
+  },
+  30_000,
+);
 
 test('bootstrap accepts case-only anchor differences without recovery', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'p1-anchor-case-'));

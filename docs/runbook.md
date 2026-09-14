@@ -11,6 +11,17 @@ pnpm lp follow --watchlist artifacts/stocks/snapshot-A/watchlist.json --config c
 
 --before 接受此前不可变快照目录或其 watchlist.json；若同目录存在 source.json，会同时核验 sourceHash。省略时本次作为初始基线，所有当前地址记为新增。输出目录必须是新目录，成功时含 `source.json`（原始响应）、`watchlist.json`（规范化名单及完整状态记录）和 `diff.json`。`sourceHash` 是实际保存原始 UTF-8 响应的 hash；`version` 是规范化 chain-4663 状态记录的 hash，二者不能互换。新增或状态改变的地址会在命令输出中列为需要重新核验覆盖，旧目录的 complete 不能自动复用。
 
+## 固定目标 catalogue 与 follow
+
+先用 `catalogue` 完成固定目标块的 discovery，再用同一数据库启动 latest-only follow：
+
+```powershell
+pnpm lp catalogue --config config/runtime.local.json --watchlist config/watchlist.stocks.json --db data/p6.sqlite --out artifacts/catalogue --duration 10m --to-block <固定目标块>
+pnpm lp follow --config config/runtime.local.json --watchlist config/watchlist.stocks.json --db data/p6.sqlite --out artifacts/p6/runs --duration 30m
+```
+
+`catalogue` 不记录 operation ranges，也不自动进入 follow；`--to-block` 省略时锁定启动时的最新块。运行目录内的 `catalogue-report.json` 是审阅入口，检查 `status`、`targetAnchor`、`acceptedTip`、`missing`、`poolCount`、股票-池归属、`sourceHash`、协议版本和供应商完整性假设。目录不完整时退出 4；不可把已接受前缀或部分池登记当作完整名单。默认 follow 只从启动时最新块开始并复用本地登记，未登记旧池仍未知；需要补采历史时显式使用 `ingest` 或 `history`。
+
 ## 2026-09-12 实时增量修正与独立历史回顾
 
 实时 `follow --notify local` 已改用持久化增量协议投影、逐事件估值和分钟/五分钟贡献缓存。普通批次只解码新增或修订事件，未变时间桶复用已有结果；实时计算保留规则所需有界窗口（默认180分钟，包含60分钟基线，另读最多120秒报价上下文），过期贡献退出热路径，原始证据保留。

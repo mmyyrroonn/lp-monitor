@@ -6,6 +6,17 @@
 
 未登记老池的覆盖未知：最新启动不保证发现所有历史池，页面统计仅代表本地已登记池。需要历史数据时显式使用 `history --from-block N --to-block M` 或 `ingest`；显式 `follow --from-block N` 保留原历史发现和补采行为。
 
+## 2026-09-13 固定目标 catalogue
+
+catalogue 是一次有界、可恢复的历史发现阶段：只更新 discovery scope 到固定目标块，生成 catalogue-report.json 和股票-池归属，不记录 operation ranges，也不会进入 follow。省略 --to-block 时目标是启动时读取的最新块；missing 非空或发现未完成时退出码为 4，不能把部分目录当作完整覆盖。
+
+```powershell
+pnpm lp catalogue --config config/robinhood.json --watchlist config/watchlist.stocks.json --db data/recorder.sqlite --out artifacts/catalogue --duration 10m --to-block <固定目标块>
+pnpm lp follow --config config/robinhood.json --watchlist config/watchlist.stocks.json --db data/recorder.sqlite --out artifacts/p1/runs --duration 30m
+```
+
+完成 catalogue 后可直接复用同一数据库启动默认 latest-only follow；follow 仍不追赶未登记的旧池，历史补采必须显式使用 ingest 或 history。目录报告中的协议版本、源名单 hash、供应商完整性假设、排除协议和 missing 必须随报告一起审阅。
+
 ## 2026-09-13 代币热度前端
 
 新增本机只读监控台：`pnpm dashboard --db data/recorder.sqlite`，打开 `http://127.0.0.1:8787`。支持热度排行、分钟热力图、历史分钟回看、代币/池详情、自选和运行状态。数据缺失或过期明确标注；不会自动启动采集。已有旧版数据库可显式使用 `--legacy-snapshot`，需要匹配原观察名单并通过来源核验。完整参数、统计口径和边界见[前端使用说明](docs/dashboard.md)。
