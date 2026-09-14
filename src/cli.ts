@@ -15,6 +15,8 @@ const help = `Robinhood read-only P0/P1/P2/P3/P4/P5/P6 CLI
   pnpm lp dashboard --db data/recorder.sqlite --port 8787 [--legacy-snapshot]
   pnpm lp history --from-block N --to-block M --db data/recorder.sqlite [--out artifacts/history]
   pnpm lp catalogue --duration 10m --db data/recorder.sqlite --out artifacts/catalogue [--to-block N]
+  pnpm lp storage audit --db data/recorder.sqlite [--artifacts artifacts/p1]
+  pnpm lp storage compact --source data/recorder.sqlite --out data/recorder-compact.sqlite
   pnpm lp status --db data/recorder.sqlite --scope SCOPE_ID
   pnpm lp backup --db data/recorder.sqlite --out data/backup.sqlite
   P6: follow writes <db>.health.json and per-run ops-report.json; SIGINT stops cooperatively.
@@ -57,6 +59,10 @@ export async function runCli(
   if (args[0] === 'catalogue' && !args.includes('--help') && !args.includes('-h')) {
     const { runCatalogueCli } = await import('./ops/catalogue-cli.js');
     return runCatalogueCli(args, options);
+  }
+  if (args[0] === 'storage' && !args.includes('--help') && !args.includes('-h')) {
+    const { runStorageCli } = await import('./ops/storage-cli.js');
+    return runStorageCli(args);
   }
   if (args[0] === 'dashboard' && !args.includes('--help') && !args.includes('-h')) {
     const { runDashboardCli } = await import('./dashboard/cli.js');

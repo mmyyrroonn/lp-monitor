@@ -70,7 +70,11 @@ export type BlockReadBounds = {
 export class SqliteRangeStore {
   constructor(private readonly database: Database.Database) {}
 
-  saveRaw(batch: RecordedRangeBatch): void {
+  saveRaw(batch: RecordedRangeBatch, options: { compact?: boolean } = {}): void {
+    if (options.compact) {
+      writeCompactBatch(this.database, batch);
+      return;
+    }
     this.database.transaction(() => this.persistTransport(batch)).immediate();
   }
 

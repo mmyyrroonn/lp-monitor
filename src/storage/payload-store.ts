@@ -294,6 +294,11 @@ export function writeCompactBatch(db: Database.Database, batch: RecordedRangeBat
       const current = readBatch(db, batch.id);
       if (!sameTransport(current, batch))
         throw new PayloadFormatError('Ingest batch transport payload is immutable');
+      if (existing.payload_json !== payloadJson)
+        db.prepare('update ingest_batches set payload_json=? where id=?').run(
+          payloadJson,
+          batch.id,
+        );
     } else {
       db.prepare(
         `insert into ingest_batches(

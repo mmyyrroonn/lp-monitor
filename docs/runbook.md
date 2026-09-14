@@ -22,6 +22,22 @@ pnpm lp follow --config config/runtime.local.json --watchlist config/watchlist.s
 
 `catalogue` 不记录 operation ranges，也不自动进入 follow；`--to-block` 省略时锁定启动时的最新块。运行目录内的 `catalogue-report.json` 是审阅入口，检查 `status`、`targetAnchor`、`acceptedTip`、`missing`、`poolCount`、股票-池归属、`sourceHash`、协议版本和供应商完整性假设。目录不完整时退出 4；不可把已接受前缀或部分池登记当作完整名单。默认 follow 只从启动时最新块开始并复用本地登记，未登记旧池仍未知；需要补采历史时显式使用 `ingest` 或 `history`。
 
+## H2 存储审计与 compact 副本
+
+`storage audit` 是只读统计，不访问 RPC，也不执行迁移；它分别报告数据库文件、WAL、SQLite 表、inline payload、compressed objects 和 artifacts：
+
+```powershell
+pnpm lp storage audit --db data/p6.sqlite --artifacts artifacts/p6/runs
+```
+
+需要迁移时只指定新的目标文件。命令先用 SQLite backup 复制源库，再把可读取的 ingest batch 转为 `batch-ref-v1`，完成校验和 WAL checkpoint 后发布；源库及其 WAL 不修改。目标已存在、源/目标相同或对象损坏时拒绝继续。新格式由当前 reader 展开，旧 inline JSON 继续可读。
+
+```powershell
+pnpm lp storage compact --source data/p6.sqlite --out data/p6-compact.sqlite
+```
+
+压缩比例只能依据相同固定夹具或实际 audit 比较，不能按一个空区间外推全链、全天或月度容量。合成存储基准见[H2 基线](reviews/2026-09-13-heat-storage-baseline.md)。
+
 ## 2026-09-12 实时增量修正与独立历史回顾
 
 实时 `follow --notify local` 已改用持久化增量协议投影、逐事件估值和分钟/五分钟贡献缓存。普通批次只解码新增或修订事件，未变时间桶复用已有结果；实时计算保留规则所需有界窗口（默认180分钟，包含60分钟基线，另读最多120秒报价上下文），过期贡献退出热路径，原始证据保留。

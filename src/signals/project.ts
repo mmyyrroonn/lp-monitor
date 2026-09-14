@@ -6,6 +6,7 @@ import { encodeJson } from '../domain/json.js';
 import type { BlockAnchor } from '../domain/types.js';
 import { poolRegistrationId } from '../registry/pools.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
+import { encodeBatchReference, putPayload } from '../storage/payload-store.js';
 import { LiveProjectionStore, type LiveProjectionChanges } from '../storage/live-projection.js';
 import { StaleMetricProjectionError } from '../storage/metric-store.js';
 import { SqliteProjectionStore } from '../storage/projection-store.js';
@@ -69,6 +70,11 @@ function statement(db: Database.Database, sql: string): Database.Statement {
   return prepared;
 }
 const digest = (v: unknown) => createHash('sha256').update(encodeJson(v)).digest('hex');
+
+function compactSignalJson(db: Database.Database, value: unknown): string {
+  const ref = putPayload(db, Buffer.from(encodeSignalState(value), 'utf8'));
+  return encodeBatchReference(ref);
+}
 
 /** Called within the same outer transaction as range acceptance and P2 rebuild.
  * It never performs I/O to a notification destination. */
@@ -560,7 +566,7 @@ export function projectSignals(
             context.batchId,
             report.sourceHash,
             w.poolId,
-            encodeSignalState({
+            compactSignalJson(db, {
               matches: decision.matches,
               evaluations: decision.evaluations,
               at: report.at,
