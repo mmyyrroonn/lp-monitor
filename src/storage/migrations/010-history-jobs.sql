@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS history_jobs (
   raw_events_added INTEGER NOT NULL DEFAULT 0,
   raw_bytes_added INTEGER NOT NULL DEFAULT 0,
   completed_coverage_json TEXT NOT NULL DEFAULT '[]',
+  notes_json TEXT NOT NULL DEFAULT '[]',
   attempts INTEGER NOT NULL DEFAULT 0,
   last_error TEXT,
   updated_at_ms INTEGER NOT NULL

@@ -22,7 +22,7 @@ import { createChainReader } from '../rpc/client.js';
 import { verifyIdentity } from '../registry/identity.js';
 import { loadAssetVersion } from '../registry/assets.js';
 import { PoolRegistry } from '../registry/pools.js';
-import { computeWatchScopeId } from '../ingest/filter-plan.js';
+import { buildDiscoveryFilterPlan, computeWatchScopeId } from '../ingest/filter-plan.js';
 import {
   classifyDiscoveryFailures,
   discoveryRetryDelayMs,
@@ -33,6 +33,7 @@ import { follow } from '../ingest/follow.js';
 import { warmupStart } from '../ingest/checkpoint.js';
 import { findMatchingCheckpoint } from '../ingest/reorg.js';
 import { resolveLogTimes } from '../ingest/log-time.js';
+import { acceptedCoverage, missingIntervals } from './history.js';
 import { openDatabase } from '../storage/database.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
 import { rawLogKey, type RecordedRangeBatch } from '../storage/manifest.js';
@@ -368,6 +369,42 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
   let catalogueTarget: BlockAnchor | null = null;
   let catalogueFloor = 0n;
   let exitCode = 4;
+  let catalogueTargetConflict: string | null = null;
+  const discoveryCoverageEvidence = () =>
+    acceptedCoverage(db, discoveryScope, (batch) =>
+      buildDiscoveryFilterPlan(
+        assets,
+        deployments,
+        batch.fromBlock,
+        batch.toBlock,
+        config.maxFilterValues,
+      ),
+    );
+  const catalogueMissingSummary = (): {
+    fromBlock: bigint;
+    toBlock: bigint;
+    reason: string;
+  }[] => {
+    if (catalogueTarget === null) return [];
+    // Completion already verified coverage and the fixed target; skip a second scan.
+    if (result.discoveryComplete && catalogueTargetConflict === null) return [];
+    const gaps = missingIntervals(
+      catalogueFloor,
+      catalogueTarget.number,
+      discoveryCoverageEvidence(),
+    ).map(([fromBlock, toBlock]) => ({
+      fromBlock,
+      toBlock,
+      reason: 'registry-coverage-missing',
+    }));
+    if (catalogueTargetConflict !== null)
+      gaps.push({
+        fromBlock: catalogueTarget.number,
+        toBlock: catalogueTarget.number,
+        reason: catalogueTargetConflict,
+      });
+    return gaps;
+  };
   try {
     store.recordRun({
       id,
@@ -442,6 +479,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       let retryEnd: BlockAnchor | null = null;
       let consecutiveFailures = 0;
       let retriesForRange = 0;
+      let missingRanges: [bigint, bigint][] = [];
       const noteFailure = (failure: string) => {
         if (!result.failures.includes(failure)) result.failures.push(failure);
       };
@@ -559,30 +597,141 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         }
       };
 
-      try {
-        await recheckAcceptedTip();
-      } catch (error) {
-        if (error instanceof DiscoveryRecoveryStop) {
-          noteFailure('discovery:' + error.kind);
-          return false;
+      const withRecovery = async <T>(
+        step: () => Promise<T>,
+        endNumber: bigint,
+        phase: 'batch' | 'anchor',
+      ): Promise<T | null> => {
+        for (;;) {
+          if (!preflightOrStop()) return null;
+          const callsBefore = reader.meter.summary().calls;
+          try {
+            return await step();
+          } catch (error) {
+            if (error instanceof DiscoveryRecoveryStop) {
+              noteFailure('discovery:' + error.kind);
+              return null;
+            }
+            const failure = classifyRpcError(error);
+            const action = classifyDiscoveryFailures([failure.kind]);
+            const rpcAttempts = reader.meter.summary().calls - callsBefore;
+            if (action === 'stop') {
+              noteFailure('discovery:' + failure.kind);
+              return null;
+            }
+            if (action !== 'retry') throw error;
+            noteFailure('discovery:' + failure.kind);
+            if (!(await waitForRetry([failure.kind], endNumber, rpcAttempts, phase))) return null;
+          }
         }
-        throw error;
-      }
-      from = tip ? tip.number + 1n : floor;
-      while (from <= head.number) {
-        if (!preflightOrStop()) return false;
-        const top = from + BigInt(config.discoveryMaxRangeBlocks) - 1n;
-        let end: BlockAnchor;
+      };
+      const verifiedCoverage = () =>
+        acceptedCoverage(db, discoveryScope, (batch) =>
+          buildDiscoveryFilterPlan(
+            assets,
+            deployments,
+            batch.fromBlock,
+            batch.toBlock,
+            config.maxFilterValues,
+          ),
+        );
+      const recomputeMissing = (): void => {
+        missingRanges = missingIntervals(floor, head.number, verifiedCoverage());
+      };
+      const fetchEndAnchor = async (endNumber: bigint): Promise<BlockAnchor | null> =>
+        withRecovery(
+          async () => {
+            const pending = retryEnd;
+            retryEnd = null;
+            return (
+              pending ??
+              (endNumber < head.number ? await discoveryReader.getAnchor(endNumber) : head)
+            );
+          },
+          endNumber,
+          'anchor',
+        );
+      const confirmTarget = async (): Promise<boolean> => {
+        recomputeMissing();
+        if (missingRanges.length > 0) return false;
+        const accepted = store.acceptedTip(discoveryScope);
+        if (!accepted || accepted.number < head.number) return false;
         try {
-          end = retryEnd ?? (top < head.number ? await discoveryReader.getAnchor(top) : head);
+          const chainTarget = await discoveryReader.getAnchor(head.number);
+          if (!sameAnchor(chainTarget, head)) {
+            noteFailure('discovery:target-anchor-changed');
+            catalogueTargetConflict = 'target-anchor-changed';
+            return false;
+          }
+          const chainTip = await discoveryReader.getAnchor(accepted.number);
+          if (!sameAnchor(chainTip, accepted)) {
+            noteFailure('discovery:accepted-tip-changed');
+            return false;
+          }
         } catch (error) {
           if (error instanceof DiscoveryRecoveryStop) {
             noteFailure('discovery:' + error.kind);
             return false;
           }
+          const failure = classifyRpcError(error);
+          noteFailure('discovery:' + failure.kind);
+          if (classifyDiscoveryFailures([failure.kind]) === 'retry') return false;
           throw error;
         }
-        retryEnd = null;
+        if (accepted.number === head.number && !sameAnchor(accepted, head)) {
+          noteFailure('discovery:target-anchor-conflict');
+          catalogueTargetConflict = 'target-anchor-conflict';
+          return false;
+        }
+        return true;
+      };
+
+      const rechecked = await withRecovery(
+        async () => {
+          await recheckAcceptedTip();
+          return true;
+        },
+        head.number,
+        'anchor',
+      );
+      if (rechecked === null) return false;
+      // A legal database can hold accepted tail ranges whose prefix was never proven.
+      // The accepted cursor cannot be advanced over an uncovered interval, so the
+      // scope is rebuilt from the verified deployment floor before refetching.
+      recomputeMissing();
+      if (
+        missingRanges.length > 0 &&
+        tip !== null &&
+        (missingRanges[0]![0] <= tip.number || missingRanges[0]![0] > tip.number + 1n)
+      ) {
+        recordChanges(recover(discoveryScope, null), 'discovery-rebuild');
+        await drain(true);
+        tip = store.acceptedTip(discoveryScope);
+        recomputeMissing();
+      }
+      from = tip ? tip.number + 1n : floor;
+      let gapIndex = 0;
+      while (gapIndex < missingRanges.length) {
+        const gap = missingRanges[gapIndex]!;
+        if (from < gap[0]) from = gap[0];
+        if (from > gap[1]) {
+          gapIndex++;
+          continue;
+        }
+        if (from > head.number) break;
+        if (!preflightOrStop()) return false;
+        const top = from + BigInt(config.discoveryMaxRangeBlocks) - 1n;
+        const capped = top < gap[1] ? top : gap[1];
+        const endNumber = capped < head.number ? capped : head.number;
+        const end = await fetchEndAnchor(endNumber);
+        if (end === null) return false;
+        // The fixed target block must keep the hash it was declared with. A
+        // substitute branch at the same height cannot satisfy completion.
+        if (end.number === head.number && !sameAnchor(end, head)) {
+          noteFailure('discovery:target-anchor-changed');
+          catalogueTargetConflict = 'target-anchor-changed';
+          return false;
+        }
         const callsBefore = reader.meter.summary().calls;
         let batch: Awaited<ReturnType<typeof fetchRange>>;
         try {
@@ -631,12 +780,14 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           if (action === 'retry') {
             if (!(await waitForRetry(failureKinds, end.number, rpcAttempts))) return false;
             if (
-              failureKinds.some(
-                (kind) => kind === 'anchor-changed' || kind === 'anchor-conflict',
-              ) &&
-              !(await refreshRetryAnchor(end))
-            )
-              return false;
+              failureKinds.some((kind) => kind === 'anchor-changed' || kind === 'anchor-conflict')
+            ) {
+              if (!(await refreshRetryAnchor(end))) return false;
+              // Branches may have been invalidated by the recheck; re-derive the gaps.
+              recomputeMissing();
+              gapIndex = missingRanges.findIndex(([, gapTo]) => gapTo >= from);
+              if (gapIndex === -1) gapIndex = missingRanges.length;
+            }
             continue;
           }
           if (action === 'stop' || isCooperativeDiscoveryStop(failureKinds)) return false;
@@ -653,7 +804,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         tip = end;
         from = end.number + 1n;
       }
-      return (store.acceptedTip(discoveryScope)?.number ?? -1n) >= head.number;
+      return await confirmTarget();
     };
     telemetry.setPhase(latestStart ? 'steady' : 'backfill');
     result.discoveryComplete = latestStart
@@ -1052,20 +1203,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         ? {
             targetAnchor: catalogueTarget,
             acceptedTip: store.acceptedTip(discoveryScope),
-            missing:
-              catalogueTarget !== null &&
-              (store.acceptedTip(discoveryScope)?.number ?? -1n) < catalogueTarget.number
-                ? [
-                    {
-                      fromBlock:
-                        (store.acceptedTip(discoveryScope)?.number ?? catalogueFloor - 1n) + 1n,
-                      toBlock: catalogueTarget.number,
-                      reason:
-                        result.failures.find((failure) => failure.startsWith('discovery:')) ??
-                        'discovery-incomplete',
-                    },
-                  ]
-                : [],
+            missing: catalogueMissingSummary(),
             sourceHash: createHash('sha256')
               .update(
                 encodeJson({

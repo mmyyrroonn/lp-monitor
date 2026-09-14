@@ -4,12 +4,78 @@ import { dirname, join, relative, resolve } from 'node:path';
 import { gzipSync } from 'node:zlib';
 import { CHAIN_ID } from '../domain/chain.js';
 import { encodeJson } from '../domain/json.js';
+import type { LogTime } from '../domain/types.js';
 import { missingIntervals, type BlockInterval } from '../ops/history.js';
 import { openDatabase } from '../storage/database.js';
 import { readBatch } from '../storage/payload-store.js';
-import type { RecordedRangeBatch } from '../storage/manifest.js';
+import { SqliteRangeStore } from '../storage/raw-store.js';
+import { rawLogKey, type RecordedRangeBatch } from '../storage/manifest.js';
 import { checkBatchIntegrity } from './integrity.js';
 import type { ReplayInputSnapshot, ReplayManifestV2 } from './reader.js';
+
+const UNRESOLVED_TIME: LogTime = {
+  minuteStartSec: null,
+  exactTimestampSec: null,
+  source: 'unresolved',
+};
+
+/** The stored transport payload is written before minute evidence is resolved.
+ * Replay must assemble the accepted derived evidence, while recorded-observed
+ * mode cannot pretend that a later backfill was available at capture time. */
+function assembleBatchEvidence(
+  store: SqliteRangeStore,
+  scopeId: string,
+  batch: RecordedRangeBatch,
+  mode: 'chain-time' | 'recorded-observed',
+): {
+  batch: RecordedRangeBatch;
+  derivedTimes: number;
+  unresolved: number;
+} {
+  const payloadTimes = new Map(
+    (batch.logTimes ?? []).map((item) => [rawLogKey(item.ref), item.time]),
+  );
+  const derived = store.logTimes(scopeId, { fromBlock: batch.fromBlock, toBlock: batch.toBlock });
+  let derivedTimes = 0;
+  let unresolved = 0;
+  const logTimes = batch.logs.map((log) => {
+    const key = rawLogKey(log);
+    const stored = payloadTimes.get(key);
+    const recorded = derived.get(key);
+    const time = recorded ?? stored ?? UNRESOLVED_TIME;
+    if (time.minuteStartSec === null) unresolved++;
+    // The transport payload never carries resolved minutes; recording the count
+    // keeps later backfilled evidence distinguishable from capture-time facts.
+    else if (stored === undefined && recorded !== undefined) derivedTimes++;
+    return { ref: log, time };
+  });
+  const anchors =
+    mode === 'chain-time'
+      ? store.anchors(scopeId, {
+          fromBlock: batch.fromBlock,
+          toBlock: batch.toBlock,
+          includeBrackets: true,
+        })
+      : [];
+  const boundaries =
+    mode === 'chain-time'
+      ? store.boundaries(scopeId, {
+          sinceSec: 0,
+          untilSec: batch.end.timestampSec,
+          includeBrackets: true,
+        })
+      : [];
+  return {
+    batch: {
+      ...batch,
+      logTimes,
+      anchors: mode === 'chain-time' ? anchors : (batch.anchors ?? []),
+      boundaries: mode === 'chain-time' ? boundaries : (batch.boundaries ?? []),
+    },
+    derivedTimes,
+    unresolved,
+  };
+}
 
 export interface ExportReplayOptions {
   databasePath: string;
@@ -139,11 +205,16 @@ export async function exportReplayDataset(
   const logicalSource = createHash('sha256');
   const operationRows: AcceptedBatchRow[] = [];
   let unresolvedTimes = 0;
+  let derivedTimes = 0;
   let observedOrderComplete = true;
   let sourceDb: ReturnType<typeof openDatabase> | null = null;
   try {
     sourceDb = openDatabase(source, { readonly: true });
+    // One read snapshot covers batches, times and anchors so the export cannot
+    // mix evidence from different writer commits.
+    sourceDb.exec('begin');
     const rows = batchRows(sourceDb, options);
+    const store = new SqliteRangeStore(sourceDb);
     operationRows.push(...rows.filter((row) => row.scope_id === options.scopeId));
     const coverage = coverageFromRows(operationRows, options.fromBlock, options.toBlock);
     issues.push(
@@ -155,20 +226,17 @@ export async function exportReplayDataset(
       let batch: RecordedRangeBatch;
       let logical: Buffer;
       try {
-        batch = readBatch(sourceDb, row.id);
-        const integrity = checkBatchIntegrity(batch, false);
+        const stored = readBatch(sourceDb, row.id);
+        const integrity = checkBatchIntegrity(stored, false);
         for (const issue of integrity) issues.push(`batch:${row.id}:${issue.code}:${issue.detail}`);
+        const evidence = assembleBatchEvidence(store, row.scope_id, stored, options.mode);
+        batch = evidence.batch;
         logical = Buffer.from(encodeJson(batch), 'utf8');
         logicalSource.update(logical);
-        unresolvedTimes += (batch.logs ?? []).filter((log) => {
-          const time = batch.logTimes?.find(
-            (item) =>
-              item.ref.blockHash.toLowerCase() === log.blockHash.toLowerCase() &&
-              item.ref.transactionHash.toLowerCase() === log.transactionHash.toLowerCase() &&
-              item.ref.logIndex === log.logIndex,
-          )?.time;
-          return !time || time.minuteStartSec === null;
-        }).length;
+        derivedTimes += evidence.derivedTimes;
+        unresolvedTimes += evidence.unresolved;
+        if (evidence.unresolved > 0)
+          issues.push(`batch:${row.id}:time-unresolved:${evidence.unresolved}`);
         if (!Number.isSafeInteger(batch.observedAtMs) || batch.observedAtMs < 0)
           observedOrderComplete = false;
         const path = `segments/${String(index).padStart(6, '0')}.json.gz`;
@@ -215,6 +283,9 @@ export async function exportReplayDataset(
     }
     if (options.mode === 'recorded-observed' && !observedOrderComplete)
       issues.push('recorded-observed:observedAt-missing');
+    if (options.mode === 'recorded-observed' && derivedTimes > 0)
+      issues.push('recorded-observed:derived-time-not-recorded-at-capture');
+    if (unresolvedTimes > 0) issues.push(`time-unresolved:${unresolvedTimes}`);
     if (!options.inputSnapshot) issues.push('input-snapshot-missing');
     if (
       options.mode === 'recorded-observed' &&
@@ -263,6 +334,7 @@ export async function exportReplayDataset(
         coverage,
         timeQuality: {
           unresolvedLogs: unresolvedTimes,
+          derivedTimes,
           observedOrderComplete,
         },
         provenance: 'native sqlite accepted batches; simulated acquisition is not recorded latency',
@@ -271,6 +343,7 @@ export async function exportReplayDataset(
     };
     const manifestPath = join(temporary, 'manifest.json');
     writeFileSync(manifestPath, encodeJson(manifest), { flag: 'wx' });
+    sourceDb.exec('commit');
     sourceDb.close();
     sourceDb = null;
     renameSync(temporary, output);

@@ -196,6 +196,30 @@ export interface HistoryOptions {
   maxCalls?: number;
   deadlineMs?: number;
   metadata?: MetricMetadata;
+  /** Chain-time window the fixed range must contain (analysis period plus context). */
+  requiredContext?: { startSec: number; endSec: number };
+}
+
+/** Recorded anchors must prove both endpoints of the fixed range, otherwise the
+ * requested study window and its warmup/outcome context are not contained. */
+function contextUnproven(
+  store: SqliteRangeStore,
+  scopeId: string,
+  fromBlock: bigint,
+  toBlock: bigint,
+  required: { startSec: number; endSec: number },
+): boolean {
+  const anchors = store.anchors(scopeId, { fromBlock, toBlock });
+  if (anchors.length === 0) return true;
+  const earliest = anchors.reduce(
+    (min, anchor) => (anchor.timestampSec < min ? anchor.timestampSec : min),
+    anchors[0]!.timestampSec,
+  );
+  const latest = anchors.reduce(
+    (max, anchor) => (anchor.timestampSec > max ? anchor.timestampSec : max),
+    anchors[0]!.timestampSec,
+  );
+  return earliest > required.startSec || latest < required.endSec;
 }
 export async function reviewHistory(options: HistoryOptions) {
   const { fromBlock, toBlock, config, assets } = options;
@@ -208,10 +232,11 @@ export async function reviewHistory(options: HistoryOptions) {
   const databasePath = options.studyDatabasePath
     ? resolve(options.studyDatabasePath)
     : resolve(out, 'review.sqlite');
-  if (
-    existsSync(options.databasePath) &&
-    (!options.studyDatabasePath || !existsSync(databasePath))
-  ) {
+  // A prepared job owns a frozen study database. Re-creating it from a live
+  // source would silently replace the fixed input with today's evidence.
+  if (options.studyDatabasePath !== undefined && !existsSync(databasePath))
+    throw new ConfigError('History study database is missing; prepare the job first');
+  if (options.studyDatabasePath === undefined && existsSync(options.databasePath)) {
     const source = openDatabase(options.databasePath, { readonly: true });
     try {
       await source.backup(databasePath);
@@ -286,10 +311,40 @@ export async function reviewHistory(options: HistoryOptions) {
       ),
     ]);
   };
+  const unresolvedTimeLogs = () => {
+    const times = store.logTimes(scopeId);
+    return store
+      .activeLogs(scopeId)
+      .filter((log) => log.blockNumber >= fromBlock && log.blockNumber <= toBlock)
+      .filter((log) => {
+        const time = times.get(rawLogKey(log));
+        return time === undefined || time.minuteStartSec === null;
+      });
+  };
+  const endpointAnchorsMissing = (): bigint[] => {
+    if (!options.requiredContext) return [];
+    const recorded = new Set(
+      store.anchors(scopeId, { fromBlock, toBlock }).map((anchor) => anchor.number.toString()),
+    );
+    return [fromBlock, toBlock].filter(
+      (block) =>
+        !recorded.has(block.toString()) &&
+        store.anchors(scopeId, { fromBlock: block, toBlock: block }).length === 0,
+    );
+  };
   try {
     const localMissing = missingIntervals(fromBlock, toBlock, operationCoverage());
     const localRegistryMissing = readRegistry().missing;
-    if (localMissing.length > 0 || localRegistryMissing.length > 0) {
+    const localTimeMissing = unresolvedTimeLogs().length > 0;
+    const localContextMissing = options.requiredContext
+      ? contextUnproven(store, scopeId, fromBlock, toBlock, options.requiredContext)
+      : false;
+    if (
+      localMissing.length > 0 ||
+      localRegistryMissing.length > 0 ||
+      localTimeMissing ||
+      localContextMissing
+    ) {
       try {
         reader = (options.readerFactory ?? createChainReader)(
           loadEnv(options.environment ?? process.env),
@@ -373,12 +428,79 @@ export async function reviewHistory(options: HistoryOptions) {
               })();
             }
         };
+        /** Existing accepted logs can lack minute evidence for several reasons: an
+         * earlier provider outage, a partially resolved batch, or a review that ran
+         * before boundary support existed. Repair reuses stored raw logs and shares
+         * the run's RPC budget instead of requiring a new batch. */
+        const repairLogTimes = async (): Promise<void> => {
+          for (let pass = 0; pass < 4; pass++) {
+            const logs = unresolvedTimeLogs();
+            if (logs.length === 0) return;
+            const end =
+              store
+                .anchors(scopeId, { fromBlock: toBlock, toBlock, includeBrackets: true })
+                .find((anchor) => anchor.number === toBlock) ?? store.acceptedTip(scopeId);
+            if (!end) {
+              unavailable.push('time-repair: no stored endpoint anchor');
+              return;
+            }
+            const first = logs.reduce(
+              (min, log) => (log.blockNumber < min ? log.blockNumber : min),
+              logs[0]!.blockNumber,
+            );
+            const resolution = await resolveLogTimes(
+              reader!,
+              logs,
+              first,
+              end,
+              store.anchors(scopeId, {
+                fromBlock: first,
+                toBlock: end.number,
+                includeBrackets: true,
+              }),
+              store.boundaries(scopeId, {
+                sinceSec: 0,
+                untilSec: end.timestampSec,
+                includeBrackets: true,
+              }),
+            );
+            const wrote = store.recordLogTimes(scopeId, {
+              anchors: resolution.queriedAnchors,
+              boundaries: resolution.boundaries,
+              logTimes: logs.map((log) => ({
+                ref: log,
+                time: resolution.times.get(rawLogKey(log))!,
+              })),
+            });
+            if (resolution.failures.length > 0)
+              unavailable.push(
+                'time-repair: ' + (resolution.failures[0]?.reason ?? 'boundary-unavailable'),
+              );
+            if (wrote === 0) return;
+          }
+          if (unresolvedTimeLogs().length > 0)
+            unavailable.push('time-repair: unresolved time evidence remains');
+        };
         await acquire('discovery-only', readRegistry().missing);
         if (readRegistry().missing.length === 0)
           await acquire('operations', missingIntervals(fromBlock, toBlock, operationCoverage()));
         else
           unavailable.push(
             'discovery-incomplete: operation gaps were not fetched with an incomplete pool registry',
+          );
+        await repairLogTimes();
+        // The plan allows run to supplement the endpoint anchors the fixed range
+        // needs; the offline window check remains the authority afterwards.
+        for (const block of endpointAnchorsMissing()) {
+          const anchor = await reader!.getAnchor(block);
+          store.recordLogTimes(scopeId, { anchors: [anchor] });
+        }
+        if (
+          options.requiredContext &&
+          contextUnproven(store, scopeId, fromBlock, toBlock, options.requiredContext)
+        )
+          unavailable.push(
+            'analysis-window-unproven: recorded anchors do not contain the analysis period and its context',
           );
       } catch (error) {
         const classified = classifyRpcError(error);
@@ -529,6 +651,11 @@ export async function reviewHistory(options: HistoryOptions) {
       unavailable,
       rpc: rpcSummary,
       complete: missing.length === 0 && registryMissing.length === 0,
+      requiredContext: options.requiredContext ?? null,
+      contextProven:
+        options.requiredContext === undefined
+          ? null
+          : !contextUnproven(store, scopeId, fromBlock, toBlock, options.requiredContext),
       end,
       projection,
       rawLogs: projection ? undefined : logs,

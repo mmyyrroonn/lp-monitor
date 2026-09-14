@@ -326,6 +326,7 @@ test('explicit derived retention preserves pending, failed and raw evidence', ()
   expect(pruneSignalDerivedHistory(db, 's', { evaluations: 0, terminalDeliveries: 0 })).toEqual({
     evaluations: 1,
     terminalDeliveries: 2,
+    payloadObjects: 1,
   });
   expect(db.prepare('select count(*) n from raw_logs').get()).toEqual(raw);
   expect(db.prepare('select status from alert_outbox order by sequence').all()).toEqual([

@@ -155,6 +155,12 @@ export interface StorageCompactReport {
   sourceAudit: StorageAudit;
   targetAudit: StorageAudit;
   batchesCompacted: number;
+  physical: {
+    sourceBytes: number;
+    targetBytes: number;
+    savedBytes: number;
+    savedRatio: number;
+  };
 }
 
 function samePath(left: string, right: string): boolean {
@@ -192,6 +198,10 @@ export async function compactStorage(
     batchesCompacted = ids.length;
     for (const id of ids) writeCompactBatch(compactDb, readBatch(compactDb, id));
     compactDb.pragma('wal_checkpoint(TRUNCATE)');
+    // Rewriting batches leaves free pages behind; reclaim them before publication
+    // so the new copy is physically smaller rather than merely logical.
+    compactDb.exec('VACUUM');
+    compactDb.pragma('wal_checkpoint(TRUNCATE)');
     compactDb.close();
     compactDb = null;
     // Rename is the only publication step; a failed conversion leaves no target path.
@@ -204,13 +214,22 @@ export async function compactStorage(
       rmSync(temporary, { force: true });
     }
   }
+  const targetAudit = auditStorage(target, artifactDirectory);
+  const sourceBytes = sourceAudit.databaseBytes + sourceAudit.walBytes;
+  const targetBytes = targetAudit.databaseBytes + targetAudit.walBytes;
   return {
     version: 1,
     status: 'complete',
     source,
     target,
     sourceAudit,
-    targetAudit: auditStorage(target, artifactDirectory),
+    targetAudit,
     batchesCompacted,
+    physical: {
+      sourceBytes,
+      targetBytes,
+      savedBytes: sourceBytes - targetBytes,
+      savedRatio: sourceBytes === 0 ? 0 : (sourceBytes - targetBytes) / sourceBytes,
+    },
   };
 }

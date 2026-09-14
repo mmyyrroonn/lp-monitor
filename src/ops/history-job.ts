@@ -2,6 +2,7 @@ import { existsSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { createChainReader } from '../rpc/client.js';
 import type Database from 'better-sqlite3';
+import type { BlockAnchor } from '../domain/types.js';
 import { ConfigError } from '../config/env.js';
 import { loadChainConfig, type ChainConfig } from '../config/chain.js';
 import { loadAssetVersion, type AssetRegistry } from '../registry/assets.js';
@@ -98,22 +99,153 @@ function scopes(spec: HistoryJobSpec, config: ChainConfig, assets: AssetRegistry
   };
 }
 
+function anchorHashes(db: Database.Database, scopeId: string, blockNumber: number): string[] {
+  return (
+    db
+      .prepare('select block_hash from anchors where scope_id=? and block_number=?')
+      .all(scopeId, blockNumber) as { block_hash: string }[]
+  ).map((row) => row.block_hash.toLowerCase());
+}
+
+/** Every declared scope must carry the fixed target hash. One matching scope
+ * cannot excuse a conflicting branch in the other. */
 function targetAnchorMissing(
   db: Database.Database,
   scopeIds: readonly string[],
   spec: HistoryJobSpec,
 ): HistoryJobMissing[] {
   const target = parseBlock(spec.toBlock);
+  const expected = spec.targetHash.toLowerCase();
+  const missing: HistoryJobMissing[] = [];
+  for (const scopeId of scopeIds) {
+    const hashes = anchorHashes(db, scopeId, Number(target));
+    if (hashes.includes(expected)) continue;
+    missing.push(
+      range(target, target, hashes.length ? 'target-anchor-mismatch' : 'target-anchor-missing'),
+    );
+  }
+  return missing;
+}
+
+export interface HistoryBranchDivergence {
+  blockNumber: bigint;
+  hashes: { scopeId: string; hash: string }[];
+}
+
+/** Heights where two scopes hold anchors that share no hash. */
+export function historyBranchDivergence(
+  db: Database.Database,
+  scopeIds: readonly string[],
+): HistoryBranchDivergence[] {
+  if (scopeIds.length < 2) return [];
   const rows = db
     .prepare(
-      `select scope_id,block_hash from anchors where block_number=? and scope_id in (${scopeIds
+      `select scope_id,block_number,block_hash from anchors where scope_id in (${scopeIds
         .map(() => '?')
         .join(',')})`,
     )
-    .all(Number(target), ...scopeIds) as { scope_id: string; block_hash: string }[];
-  if (rows.some((row) => row.block_hash.toLowerCase() === spec.targetHash.toLowerCase())) return [];
-  const reason = rows.length ? 'target-anchor-mismatch' : 'target-anchor-missing';
-  return [range(target, target, reason)];
+    .all(...scopeIds) as { scope_id: string; block_number: number; block_hash: string }[];
+  const byHeight = new Map<number, Map<string, Set<string>>>();
+  for (const row of rows) {
+    const perScope = byHeight.get(row.block_number) ?? new Map<string, Set<string>>();
+    const hashes = perScope.get(row.scope_id) ?? new Set<string>();
+    hashes.add(row.block_hash.toLowerCase());
+    perScope.set(row.scope_id, hashes);
+    byHeight.set(row.block_number, perScope);
+  }
+  const divergences: HistoryBranchDivergence[] = [];
+  for (const [height, perScope] of byHeight) {
+    if (perScope.size < 2) continue;
+    const sets = [...perScope.values()];
+    const shared = [...sets[0]!].some((hash) => sets.every((set) => set.has(hash)));
+    if (shared) continue;
+    divergences.push({
+      blockNumber: BigInt(height),
+      hashes: [...perScope].flatMap(([scopeId, hashes]) =>
+        [...hashes].map((hash) => ({ scopeId, hash })),
+      ),
+    });
+  }
+  return divergences.sort((left, right) =>
+    left.blockNumber < right.blockNumber ? -1 : left.blockNumber > right.blockNumber ? 1 : 0,
+  );
+}
+
+/** Invalidate the scope that disagrees with the fixed target so the affected
+ * coverage is refetched instead of mixing withdrawn and replacement events. */
+export function reconcileHistoryJobBranches(
+  db: Database.Database,
+  spec: HistoryJobSpec,
+  scopeId: string,
+  registryScopeId: string,
+): {
+  conflicts: HistoryJobMissing[];
+  invalidated: { scopeId: string; afterBlock: string | null }[];
+  notes: string[];
+} {
+  const divergences = historyBranchDivergence(db, [scopeId, registryScopeId]);
+  if (divergences.length === 0) return { conflicts: [], invalidated: [], notes: [] };
+  const target = parseBlock(spec.toBlock);
+  const expected = spec.targetHash.toLowerCase();
+  const keepers = [scopeId, registryScopeId].filter((scope) =>
+    anchorHashes(db, scope, Number(target)).includes(expected),
+  );
+  if (keepers.length !== 1)
+    return {
+      conflicts: [range(target, target, 'target-anchor-conflict')],
+      invalidated: [],
+      notes: ['Branch divergence without exactly one target-matching scope'],
+    };
+  const keeper = keepers[0]!;
+  const other = keeper === scopeId ? registryScopeId : scopeId;
+  const firstDivergence = divergences[0]!.blockNumber;
+  const rows = db
+    .prepare(
+      `select scope_id,block_number,block_hash,timestamp_sec from anchors
+       where scope_id in (?,?) and block_number < ? order by block_number desc`,
+    )
+    .all(scopeId, registryScopeId, Number(firstDivergence)) as {
+    scope_id: string;
+    block_number: number;
+    block_hash: string;
+    timestamp_sec: number;
+  }[];
+  const byHeight = new Map<number, Map<string, { hash: string; timestampSec: number }>>();
+  for (const row of rows) {
+    const perScope = byHeight.get(row.block_number) ?? new Map();
+    perScope.set(row.scope_id, {
+      hash: row.block_hash.toLowerCase(),
+      timestampSec: row.timestamp_sec,
+    });
+    byHeight.set(row.block_number, perScope);
+  }
+  let keep: BlockAnchor | null = null;
+  for (const height of [...byHeight.keys()].sort((left, right) => right - left)) {
+    const perScope = byHeight.get(height)!;
+    const left = perScope.get(scopeId);
+    const right = perScope.get(registryScopeId);
+    if (left && right && left.hash === right.hash) {
+      keep = {
+        number: BigInt(height),
+        hash: left.hash as `0x${string}`,
+        timestampSec: left.timestampSec,
+      };
+      break;
+    }
+  }
+  const store = new SqliteRangeStore(db);
+  const tip = store.acceptedTip(other);
+  const retained = keep !== null && tip !== null && keep.number <= tip.number ? keep : null;
+  const changes = retained ? store.invalidateAfter(other, retained) : store.resetForWarmup(other);
+  return {
+    conflicts: [],
+    invalidated: [{ scopeId: other, afterBlock: retained?.number.toString() ?? null }],
+    notes: [
+      `Branch divergence from block ${firstDivergence} invalidated ${other}` +
+        (retained === null ? ' (full scope reset)' : ` after block ${retained.number}`) +
+        `; ${changes.removed.length} events removed`,
+    ],
+  };
 }
 
 function unknownTimeRanges(
@@ -140,6 +272,31 @@ function unknownTimeRanges(
     else result.push([block, block]);
   }
   return ranges(result, 'time-unknown');
+}
+
+/** Recorded anchors bound the chain times of the fixed range. Without a proven
+ * bound on both ends the analysis period, warmup and outcome context are not
+ * contained, so the job cannot claim the study window was collected. */
+function analysisWindowMissing(
+  db: Database.Database,
+  spec: HistoryJobSpec,
+  scopeId: string,
+): HistoryJobMissing[] {
+  const [fromBlock, toBlock] = allRange(spec);
+  const requiredStartSec = spec.analysisStartSec - spec.warmupMinutes * 60;
+  const requiredEndSec = spec.analysisEndSec + spec.outcomeMinutes * 60;
+  const anchors = new SqliteRangeStore(db).anchors(scopeId, { fromBlock, toBlock });
+  if (anchors.length === 0) return [range(fromBlock, toBlock, 'analysis-window-unproven')];
+  const earliest = anchors.reduce(
+    (min, anchor) => (anchor.timestampSec < min ? anchor.timestampSec : min),
+    anchors[0]!.timestampSec,
+  );
+  const latest = anchors.reduce(
+    (max, anchor) => (anchor.timestampSec > max ? anchor.timestampSec : max),
+    anchors[0]!.timestampSec,
+  );
+  if (earliest <= requiredStartSec && latest >= requiredEndSec) return [];
+  return [range(fromBlock, toBlock, 'analysis-window-unproven')];
 }
 
 function missingCategories(
@@ -200,10 +357,13 @@ function missingCategories(
   );
   const timeUnknown = unknownTimeRanges(db, scopeId, fromBlock, toBlock);
   const anchorMissing = targetAnchorMissing(db, [scopeId, registryScopeId], spec);
-  const registryWithAnchor = [...registryMissing, ...anchorMissing];
+  const divergent = historyBranchDivergence(db, [scopeId, registryScopeId]).map((item) =>
+    range(item.blockNumber, item.blockNumber, 'branch-anchor-divergence'),
+  );
+  const registryWithAnchor = [...registryMissing, ...anchorMissing, ...divergent];
   const categories = {
     registryMissing: registryWithAnchor,
-    operationMissing,
+    operationMissing: [...operationMissing, ...analysisWindowMissing(db, spec, scopeId)],
     timeUnknown,
     unpriced: [] as HistoryJobMissing[],
   };
@@ -294,6 +454,9 @@ function isPause(message: string): boolean {
 
 export async function runHistoryJob(options: HistoryJobRunOptions): Promise<HistoryJobState> {
   const databasePath = resolve(options.studyDatabasePath);
+  // A missing study database must never be silently re-created from a live source.
+  if (!existsSync(databasePath))
+    throw new ConfigError('History job study database does not exist; prepare the job first');
   const db = openDatabase(databasePath);
   let state = readHistoryJobFromDatabase(db, options.jobId);
   const expected = state.inputSnapshots;
@@ -337,10 +500,24 @@ export async function runHistoryJob(options: HistoryJobRunOptions): Promise<Hist
   db.close();
   const spec = state.spec;
   let report: Awaited<ReturnType<typeof reviewHistory>>;
+  let branchNotes: string[] = [];
   try {
     const input = safeLoadInputs(spec);
     if (!input)
       throw new ConfigError('History job config/watchlist/metadata snapshot is unavailable');
+    const { scopeId, registryScopeId } = scopes(spec, input.config, input.assets);
+    const reconcileDb = openDatabase(databasePath);
+    try {
+      const reconciliation = reconcileHistoryJobBranches(
+        reconcileDb,
+        spec,
+        scopeId,
+        registryScopeId,
+      );
+      branchNotes = reconciliation.notes;
+    } finally {
+      reconcileDb.close();
+    }
     const metadata = options.metadataPath
       ? loadMetricMetadata(resolve(options.metadataPath))
       : input.metadata;
@@ -357,6 +534,10 @@ export async function runHistoryJob(options: HistoryJobRunOptions): Promise<Hist
       readerFactory: options.readerFactory,
       maxCalls: options.maxRpcCalls,
       deadlineMs: options.durationMs === undefined ? undefined : Date.now() + options.durationMs,
+      requiredContext: {
+        startSec: spec.analysisStartSec - spec.warmupMinutes * 60,
+        endSec: spec.analysisEndSec + spec.outcomeMinutes * 60,
+      },
     });
   } catch (error) {
     const failedDb = openDatabase(databasePath);
@@ -398,6 +579,7 @@ export async function runHistoryJob(options: HistoryJobRunOptions): Promise<Hist
         status === 'complete'
           ? [range(parseBlock(spec.fromBlock), parseBlock(spec.toBlock), 'accepted-complete')]
           : [],
+      notes: [...current.notes, ...branchNotes],
       lastError: incomplete ? unavailable || 'History evidence remains incomplete' : null,
     });
     return updated;

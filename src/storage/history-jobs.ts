@@ -58,6 +58,7 @@ export interface HistoryJobState {
   rawEventsAdded: number;
   rawBytesAdded: number;
   completedCoverage: HistoryJobMissing[];
+  notes: string[];
   inputSnapshots: HistoryInputSnapshot[];
   attempts: number;
   lastError: string | null;
@@ -85,6 +86,7 @@ type HistoryJobRow = {
   raw_events_added: number;
   raw_bytes_added: number;
   completed_coverage_json: string;
+  notes_json: string;
   attempts: number;
   last_error: string | null;
   updated_at_ms: number;
@@ -237,6 +239,7 @@ function rowState(row: HistoryJobRow): HistoryJobState {
     rawEventsAdded: row.raw_events_added,
     rawBytesAdded: row.raw_bytes_added,
     completedCoverage: json<HistoryJobMissing[]>(row.completed_coverage_json, []),
+    notes: json<string[]>(row.notes_json ?? '[]', []),
     inputSnapshots: json<HistoryInputSnapshot[]>(row.input_snapshots_json, []),
     attempts: row.attempts,
     lastError: row.last_error,
@@ -283,6 +286,7 @@ function values(state: HistoryJobState) {
     state.rawEventsAdded,
     state.rawBytesAdded,
     encodeJson(state.completedCoverage),
+    encodeJson(state.notes),
     state.attempts,
     state.lastError,
     state.updatedAtMs,
@@ -300,8 +304,8 @@ export function insertHistoryJob(db: Database.Database, state: HistoryJobState):
       id,spec_hash,source_database_path,study_database_path,spec_json,input_snapshots_json,
       status,phase,missing_json,registry_missing_json,operation_missing_json,time_unknown_json,
       unpriced_json,cumulative_rpc_calls,current_run_rpc_calls,raw_events_added,raw_bytes_added,
-      completed_coverage_json,attempts,last_error,updated_at_ms
-    ) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      completed_coverage_json,notes_json,attempts,last_error,updated_at_ms
+    ) values (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
   ).run(...values(state));
 }
 
@@ -312,7 +316,7 @@ export function updateHistoryJob(db: Database.Database, state: HistoryJobState):
         spec_hash=?,source_database_path=?,study_database_path=?,spec_json=?,input_snapshots_json=?,
         status=?,phase=?,missing_json=?,registry_missing_json=?,operation_missing_json=?,time_unknown_json=?,
         unpriced_json=?,cumulative_rpc_calls=?,current_run_rpc_calls=?,raw_events_added=?,raw_bytes_added=?,
-        completed_coverage_json=?,attempts=?,last_error=?,updated_at_ms=? where id=?`,
+        completed_coverage_json=?,notes_json=?,attempts=?,last_error=?,updated_at_ms=? where id=?`,
     )
     .run(
       state.specHash,
@@ -332,6 +336,7 @@ export function updateHistoryJob(db: Database.Database, state: HistoryJobState):
       state.rawEventsAdded,
       state.rawBytesAdded,
       encodeJson(state.completedCoverage),
+      encodeJson(state.notes),
       state.attempts,
       state.lastError,
       state.updatedAtMs,
@@ -377,6 +382,7 @@ export function newHistoryJobState(
     rawEventsAdded: 0,
     rawBytesAdded: 0,
     completedCoverage: [],
+    notes: [],
     inputSnapshots: snapshots,
     attempts: 0,
     lastError: null,
@@ -385,13 +391,21 @@ export function newHistoryJobState(
   };
 }
 
+/** Configuration inputs must still match; the live source database is not re-hashed.
+ * The consistent backup taken by prepare is the frozen source, so a running
+ * recorder may keep writing to its own file without invalidating this job. */
 export function currentHistoryInputSnapshots(state: HistoryJobState): HistoryInputSnapshot[] {
-  return captureHistoryInputSnapshots(state.spec);
+  return captureHistoryInputSnapshots(state.spec).filter(
+    (snapshot) => snapshot.kind !== 'source-database',
+  );
 }
 
 export function historyInputSnapshotsMatch(
   expected: readonly HistoryInputSnapshot[],
   actual: readonly HistoryInputSnapshot[],
 ): boolean {
-  return encodeJson(expected) === encodeJson(actual);
+  return (
+    encodeJson(expected.filter((snapshot) => snapshot.kind !== 'source-database')) ===
+    encodeJson(actual)
+  );
 }

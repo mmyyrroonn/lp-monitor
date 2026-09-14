@@ -648,6 +648,22 @@ export function commitAcceptedSignalBatch(
     .immediate();
 }
 
+/** Content-addressed objects may be shared by batches and evaluations in any
+ * scope, so an object is reclaimed only when no surviving row references it. */
+const RECLAIM_PAYLOAD_OBJECTS = `delete from payload_objects where hash not in (
+  select hash from (
+    select json_extract(payload_json,'$.payload.hash') as hash from ingest_batches
+    union all
+    select json_extract(value,'$.hash') as hash
+      from ingest_batches, json_each(ingest_batches.payload_json,'$.payloads')
+    union all
+    select json_extract(payload_json,'$.payload.hash') as hash from signal_evaluations
+    union all
+    select json_extract(value,'$.hash') as hash
+      from signal_evaluations, json_each(signal_evaluations.payload_json,'$.payloads')
+  ) where hash is not null
+)`;
+
 /** Explicit maintenance only: preserve raw history, current alerts, snapshots,
  * cursors and all pending/failed deliveries. Limits count newest derived rows
  * per scope; terminal outbox payloads remain in the alert ledger where current. */
@@ -655,7 +671,7 @@ export function pruneSignalDerivedHistory(
   db: Database.Database,
   scopeId: string,
   limits: { evaluations: number; terminalDeliveries: number },
-): { evaluations: number; terminalDeliveries: number } {
+): { evaluations: number; terminalDeliveries: number; payloadObjects: number } {
   for (const limit of Object.values(limits))
     if (!Number.isSafeInteger(limit) || limit < 0)
       throw new RangeError('Retention limits must be non-negative safe integers');
@@ -670,5 +686,8 @@ export function pruneSignalDerivedHistory(
       `delete from alert_outbox where scope_id=? and status in ('sent','superseded') and sequence not in
       (select sequence from alert_outbox where scope_id=? and status in ('sent','superseded') order by sequence desc limit ?)`,
     ).run(scopeId, scopeId, limits.terminalDeliveries).changes,
+    // Runs inside the same transaction: deleted evaluation content cannot be
+    // left behind as an orphan, and a failure keeps every row and object.
+    payloadObjects: statement(db, RECLAIM_PAYLOAD_OBJECTS).run().changes,
   }))();
 }

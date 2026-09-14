@@ -761,13 +761,39 @@ export class SqliteRangeStore {
     }
   }
 
-  private persistDerived(batch: RecordedRangeBatch, shards: readonly FetchShardManifest[]): void {
-    const anchors = [batch.previous, batch.end, ...(batch.anchors ?? [])].filter(
-      (item): item is BlockAnchor => item !== null,
-    );
-    for (const boundary of batch.boundaries ?? []) anchors.push(boundary.before, boundary.at);
-    for (const anchor of anchors) this.persistAnchor(batch.scopeId, anchor);
+  /** Merge resolved minute evidence for already-recorded logs without re-fetching
+   * raw ranges. Unresolved assignments never overwrite known evidence. */
+  recordLogTimes(
+    scopeId: WatchScopeId,
+    resolution: {
+      anchors?: readonly BlockAnchor[];
+      boundaries?: readonly MinuteBoundary[];
+      logTimes?: readonly { ref: LogRef; time: LogTime }[];
+    },
+  ): number {
+    return this.database
+      .transaction(() => {
+        const anchors = [...(resolution.anchors ?? [])];
+        for (const boundary of resolution.boundaries ?? [])
+          anchors.push(boundary.before, boundary.at);
+        for (const anchor of anchors) this.persistAnchor(scopeId, anchor);
+        this.persistBoundaries(scopeId, resolution.boundaries ?? []);
+        let updated = 0;
+        for (const assignment of resolution.logTimes ?? []) {
+          const time = assignment.time;
+          if (time.minuteStartSec === null && time.exactTimestampSec === null) continue;
+          if (time.minuteStartSec !== null) checkedTimestamp(time.minuteStartSec);
+          if (time.exactTimestampSec !== null) checkedTimestamp(time.exactTimestampSec);
+          const rawId = this.rawId(rawLogKey(assignment.ref));
+          this.upsertLogTime(scopeId, rawId, time);
+          updated++;
+        }
+        return updated;
+      })
+      .immediate();
+  }
 
+  private persistBoundaries(scopeId: WatchScopeId, boundaries: readonly MinuteBoundary[]): void {
     const insertBoundary = this.database.prepare(
       `insert into minute_boundaries(
          scope_id, timestamp_sec, first_block, before_number, before_hash,
@@ -779,10 +805,10 @@ export class SqliteRangeStore {
          at_number=excluded.at_number, at_hash=excluded.at_hash,
          at_timestamp_sec=excluded.at_timestamp_sec`,
     );
-    for (const boundary of batch.boundaries ?? []) {
+    for (const boundary of boundaries) {
       checkedTimestamp(boundary.timestampSec);
       insertBoundary.run(
-        batch.scopeId,
+        scopeId,
         boundary.timestampSec,
         checkedHeight(boundary.firstBlock),
         checkedHeight(boundary.before.number),
@@ -793,24 +819,22 @@ export class SqliteRangeStore {
         checkedTimestamp(boundary.at.timestampSec),
       );
     }
+  }
 
-    const upsertTime = this.database.prepare(
-      `insert into log_times(
-         scope_id, raw_log_id, minute_start_sec, exact_timestamp_sec, source, boundary_timestamp_sec
-       ) values (?, ?, ?, ?, ?, ?)
-       on conflict(scope_id, raw_log_id) do update set
-         minute_start_sec=excluded.minute_start_sec,
-         exact_timestamp_sec=excluded.exact_timestamp_sec,
-         source=excluded.source,
-         boundary_timestamp_sec=excluded.boundary_timestamp_sec`,
-    );
-    for (const assignment of batch.logTimes ?? []) {
-      const rawId = this.rawId(rawLogKey(assignment.ref));
-      const time = assignment.time;
-      if (time.minuteStartSec !== null) checkedTimestamp(time.minuteStartSec);
-      if (time.exactTimestampSec !== null) checkedTimestamp(time.exactTimestampSec);
-      upsertTime.run(
-        batch.scopeId,
+  private upsertLogTime(scopeId: WatchScopeId, rawId: number, time: LogTime): void {
+    this.database
+      .prepare(
+        `insert into log_times(
+           scope_id, raw_log_id, minute_start_sec, exact_timestamp_sec, source, boundary_timestamp_sec
+         ) values (?, ?, ?, ?, ?, ?)
+         on conflict(scope_id, raw_log_id) do update set
+           minute_start_sec=excluded.minute_start_sec,
+           exact_timestamp_sec=excluded.exact_timestamp_sec,
+           source=excluded.source,
+           boundary_timestamp_sec=excluded.boundary_timestamp_sec`,
+      )
+      .run(
+        scopeId,
         rawId,
         time.minuteStartSec,
         time.exactTimestampSec,
@@ -819,6 +843,23 @@ export class SqliteRangeStore {
           ? time.minuteStartSec + 60
           : null,
       );
+  }
+
+  private persistDerived(batch: RecordedRangeBatch, shards: readonly FetchShardManifest[]): void {
+    const anchors = [batch.previous, batch.end, ...(batch.anchors ?? [])].filter(
+      (item): item is BlockAnchor => item !== null,
+    );
+    for (const boundary of batch.boundaries ?? []) anchors.push(boundary.before, boundary.at);
+    for (const anchor of anchors) this.persistAnchor(batch.scopeId, anchor);
+
+    this.persistBoundaries(batch.scopeId, batch.boundaries ?? []);
+
+    for (const assignment of batch.logTimes ?? []) {
+      const rawId = this.rawId(rawLogKey(assignment.ref));
+      const time = assignment.time;
+      if (time.minuteStartSec !== null) checkedTimestamp(time.minuteStartSec);
+      if (time.exactTimestampSec !== null) checkedTimestamp(time.exactTimestampSec);
+      this.upsertLogTime(batch.scopeId, rawId, time);
     }
 
     const insertPool = this.database.prepare(

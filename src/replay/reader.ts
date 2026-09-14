@@ -7,6 +7,7 @@ import { CHAIN_ID } from '../domain/chain.js';
 import { encodeJson } from '../domain/json.js';
 import type { AssetRegistration, AssetRegistry } from '../registry/assets.js';
 import type { MetricMetadata } from '../metrics/metadata.js';
+import { missingIntervals } from '../ops/history.js';
 import type { RecordedRangeBatch } from '../storage/manifest.js';
 import type { ReplayIssue } from './integrity.js';
 export const contentHash = (value: unknown) =>
@@ -241,6 +242,44 @@ export function readReplayManifest(path: string) {
       code: 'revision-history-unavailable',
       detail: 'P1 revision summaries lack exact replay ordering/rollback anchors',
     });
+  if (manifest.version === 2) {
+    // Declared export gaps are part of the dataset, not metadata to be dropped.
+    for (const entry of manifest.export.excluded ?? []) {
+      const parts = String(entry).split(':');
+      const nested = parts[0] === 'batch' && parts.length >= 3;
+      issues.push({
+        code: (nested ? parts[2]! : parts[0]! || 'export-declared-issue').trim(),
+        ...(nested ? { batchId: parts[1] } : {}),
+        detail: String(entry),
+      });
+    }
+    const timeQuality = manifest.export.timeQuality as
+      | { unresolvedLogs?: number; derivedTimes?: number; observedOrderComplete?: boolean }
+      | null
+      | undefined;
+    if (Number(timeQuality?.unresolvedLogs ?? 0) > 0)
+      issues.push({
+        code: 'time-unresolved',
+        detail: `${timeQuality!.unresolvedLogs} exported logs have no verified minute`,
+      });
+    if (manifest.export.mode === 'recorded-observed' && Number(timeQuality?.derivedTimes ?? 0) > 0)
+      issues.push({
+        code: 'recorded-observed-derived-time',
+        detail: 'Derived minute evidence was not available when the batches were captured',
+      });
+    // Independently re-derive the declared range coverage from accepted batches.
+    const fromBlock = BigInt(manifest.export.fromBlock);
+    const toBlock = BigInt(manifest.export.toBlock);
+    const accepted = batches
+      .filter((batch) => batch.scopeId === manifest.scopeId)
+      .map((batch) => [batch.fromBlock, batch.toBlock] as [bigint, bigint]);
+    for (const [from, to] of missingIntervals(fromBlock, toBlock, accepted))
+      issues.push({
+        code: 'declared-range-coverage-missing',
+        scopeId: manifest.scopeId,
+        detail: `Accepted batches do not cover blocks ${from}-${to}`,
+      });
+  }
   return {
     manifest,
     batches,

@@ -13,6 +13,7 @@ import { compareExperiments, gridSchema, type ExperimentDataset } from './experi
 import { renderStudyReport, renderStudyConfigReport } from './report.js';
 import { parseStudyConfig, type StudyConfig } from './study-config.js';
 import { runRollingReplay } from './rolling-replay.js';
+import { runStudyExperiments, type StudyExperimentReport } from './study-run.js';
 const address = z
   .string()
   .regex(/^0x[0-9a-fA-F]{40}$/)
@@ -397,8 +398,10 @@ export interface StudyConfigReport {
   datasetManifest: string;
   mode: StudyConfig['mode'];
   cadenceSec: number;
+  effectiveCadenceSec: number | null;
   periods: StudyConfig['periods'];
   splitCounts: Record<'train' | 'validation' | 'test' | 'outside', number>;
+  experiments: StudyExperimentReport;
   onlineRuleChanged: false;
   integrity: unknown;
   rolling: unknown;
@@ -415,11 +418,14 @@ export async function studyWithConfig(
   const studyConfigText = readFileSync(resolvedConfigPath, 'utf8');
   const issues: string[] = [];
   let gridHash = '';
+  let grid: unknown = null;
   try {
     const gridText = readFileSync(config.grid, 'utf8');
-    JSON.parse(gridText);
+    grid = JSON.parse(gridText) as unknown;
+    gridSchema.parse(grid);
     gridHash = createHash('sha256').update(gridText).digest('hex');
   } catch {
+    grid = null;
     issues.push('study-grid-unavailable');
   }
   let replayReport: ReplayReport | null = null;
@@ -452,12 +458,72 @@ export async function studyWithConfig(
         version: 1 as const,
         mode: config.mode,
         cadenceSec: config.cadenceSec,
+        effectiveCadenceSec: null,
         evaluations: [],
         issues: ['no-evaluable-frames'],
       };
   issues.push(...rolling.issues);
   const splitCounts = { train: 0, validation: 0, test: 0, outside: 0 };
   for (const evaluation of rolling.evaluations) splitCounts[evaluation.split ?? 'outside']++;
+  const emptyExperiments: StudyExperimentReport = {
+    gridVersion: '',
+    parameters: 0,
+    selectionRule: '',
+    frozen: [],
+    candidates: [],
+    issues: [],
+  };
+  let experiments = emptyExperiments;
+  if (replayReport && grid !== null) {
+    try {
+      experiments = runStudyExperiments({
+        grid,
+        evaluations: rolling.evaluations,
+        events: replayReport.metricEvents,
+        coverage: replayReport.coverage,
+        scopeId: replayReport.finalMetrics?.scopeId ?? '',
+        periods: config.periods,
+        integrityComplete: replayReport.integrity.complete,
+      });
+      issues.push(...experiments.issues);
+    } catch {
+      issues.push('study-grid-invalid');
+    }
+  }
+  // A complete source dataset is not a complete study: the requested periods and
+  // their warmup/outcome context must exist inside the evaluated window.
+  for (const segment of ['train', 'validation', 'test'] as const)
+    if (splitCounts[segment] === 0) issues.push(`period-${segment}-without-evaluations`);
+  const evaluatedTimes = rolling.evaluations.map((evaluation) => evaluation.at.timestampSec);
+  const datasetStartSec = evaluatedTimes.length ? Math.min(...evaluatedTimes) : null;
+  const datasetEndSec = evaluatedTimes.length ? Math.max(...evaluatedTimes) : null;
+  if (
+    datasetStartSec === null ||
+    datasetStartSec > config.periods.train.startSec - config.warmupMinutes * 60
+  )
+    issues.push('warmup-context-missing');
+  if (
+    datasetEndSec === null ||
+    datasetEndSec < config.periods.test.endSec + config.outcomeMinutes * 60
+  )
+    issues.push('outcome-context-missing');
+  const periodsWithoutEvaluations = (['train', 'validation', 'test'] as const).some(
+    (segment) => splitCounts[segment] === 0,
+  );
+  const validated = experiments.candidates.some(
+    (candidate) =>
+      candidate.selectedOnTrain &&
+      candidate.splits.validation.exposureComplete &&
+      candidate.splits.validation.episodes > 0 &&
+      candidate.splits.test.exposureComplete,
+  );
+  const conclusion: StudyConfigReport['conclusion'] = !replayReport
+    ? 'insufficient-data'
+    : periodsWithoutEvaluations
+      ? 'insufficient-data'
+      : issues.length === 0 && validated
+        ? 'candidate-supported'
+        : 'insufficient-evidence';
   const status =
     replayReport && replayReport.status === 'complete' && issues.length === 0
       ? ('complete' as const)
@@ -470,15 +536,16 @@ export async function studyWithConfig(
     studyRunId,
     chainId: 4663,
     status,
-    conclusion:
-      replayReport && replayReport.frames.length ? 'insufficient-evidence' : 'insufficient-data',
+    conclusion,
     outputDirectory,
     studyConfigPath: resolvedConfigPath,
     datasetManifest: config.datasetManifest,
     mode: config.mode,
     cadenceSec: config.cadenceSec,
+    effectiveCadenceSec: rolling.effectiveCadenceSec,
     periods: config.periods,
     splitCounts,
+    experiments,
     onlineRuleChanged: false,
     integrity: replayReport?.integrity ?? { complete: false, issues },
     rolling,

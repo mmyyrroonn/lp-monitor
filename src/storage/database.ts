@@ -83,6 +83,9 @@ export function openDatabase(
     const poolColumns = database.pragma('table_info(pools)') as { name: string }[];
     if (!poolColumns.some((column) => column.name === 'protocol'))
       database.exec('alter table pools add column protocol TEXT');
+    const historyColumns = database.pragma('table_info(history_jobs)') as { name: string }[];
+    if (!historyColumns.some((column) => column.name === 'notes_json'))
+      database.exec("alter table history_jobs add column notes_json TEXT NOT NULL DEFAULT '[]'");
     database.exec(
       "update pools set protocol = json_extract(payload_json, '$.pool.protocol') where protocol is null",
     );

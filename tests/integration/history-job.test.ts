@@ -21,14 +21,16 @@ function spec(dir: string): HistoryJobSpec {
     fromBlock: '120',
     toBlock: '200',
     targetHash: toHex(200n, { size: 32 }),
+    // The fixture chain maps block N to timestamp 1000+N, so this spec must not
+    // request warmup/outcome context outside the recorded anchor span.
     analysisStartSec: 1_120,
     analysisEndSec: 1_200,
     sourceDatabasePath: join(dir, 'source.sqlite'),
     studyDatabasePath: join(dir, 'study.sqlite'),
     watchlistPath,
     configPath,
-    warmupMinutes: 180,
-    outcomeMinutes: 180,
+    warmupMinutes: 0,
+    outcomeMinutes: 0,
   };
 }
 

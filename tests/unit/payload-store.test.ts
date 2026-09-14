@@ -1,11 +1,15 @@
 import { expect, test } from 'vitest';
+import type { Hex } from 'viem';
+import { batch, swap } from '../helpers/alert-fixture.js';
 import { openDatabase } from '../../src/storage/database.js';
 import {
   getPayload,
   PayloadFormatError,
   putPayload,
+  readBatch,
   type PayloadRef,
 } from '../../src/storage/payload-store.js';
+import { SqliteRangeStore } from '../../src/storage/raw-store.js';
 
 test('content references round-trip and deduplicate', () => {
   const db = openDatabase(':memory:');
@@ -36,6 +40,40 @@ test('a damaged or missing object fails closed', () => {
     db.close();
   }
 });
+
+test('a logical batch above the object limit is stored as ordered chunks', () => {
+  const db = openDatabase(':memory:');
+  try {
+    const wide = ('0x' + 'ab'.repeat(30_000)) as Hex;
+    const logs = Array.from({ length: 1_200 }, (_, index) => ({
+      ...swap(60 + index * 60),
+      logIndex: index,
+      data: wide,
+    }));
+    const huge = batch('huge', logs);
+    const store = new SqliteRangeStore(db);
+    expect(() => store.saveRaw(huge, { compact: true })).not.toThrow();
+    const envelope = JSON.parse(
+      db
+        .prepare('select payload_json from ingest_batches where id=?')
+        .pluck()
+        .get('huge') as string,
+    ) as { format: string; payloads: PayloadRef[] };
+    expect(envelope.format).toBe('batch-ref-v2');
+    expect(envelope.payloads.length).toBeGreaterThan(1);
+    expect(db.prepare('select count(*) n from payload_objects').pluck().get()).toBe(
+      envelope.payloads.length,
+    );
+    const read = readBatch(db, 'huge');
+    expect(read.logs).toHaveLength(logs.length);
+    expect(read.logs[0]!.data).toBe(wide);
+    expect(read.manifestHash).toBe(huge.manifestHash);
+    db.prepare('delete from payload_objects where hash=?').run(envelope.payloads[0]!.hash);
+    expect(() => readBatch(db, 'huge')).toThrow(/missing/i);
+  } finally {
+    db.close();
+  }
+}, 120_000);
 
 test('references reject unknown codecs and oversized data before allocation', () => {
   const db = openDatabase(':memory:');

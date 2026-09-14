@@ -114,6 +114,43 @@ test('storage compact creates a new equivalent database and leaves source inline
   }
 });
 
+test('storage compact reclaims free pages before publishing the target', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lp-storage-compact-vacuum-'));
+  const sourcePath = join(dir, 'source.sqlite');
+  const targetPath = join(dir, 'compact.sqlite');
+  const source = openDatabase(sourcePath);
+  const store = new SqliteRangeStore(source);
+  for (let index = 0; index < 40; index++)
+    store.saveRaw({ ...batch('batch-' + index), id: 'batch-' + index });
+  // Simulate deleted history: filler rows leave reusable free pages behind.
+  source.exec('create table filler(x blob)');
+  for (let index = 0; index < 400; index++)
+    source.prepare('insert into filler(x) values (?)').run(Buffer.alloc(20_000, index % 251));
+  source.exec('drop table filler');
+  const freePages = source.pragma('freelist_count') as { freelist_count: number }[];
+  expect(freePages[0]!.freelist_count).toBeGreaterThan(0);
+  source.close();
+  try {
+    const result = await compactStorage(sourcePath, targetPath);
+    expect(result.physical.savedBytes).toBeGreaterThan(0);
+    expect(result.physical.savedRatio).toBeGreaterThan(0);
+    expect(result.physical.savedBytes + result.physical.targetBytes).toBe(
+      result.physical.sourceBytes,
+    );
+    const target = openDatabase(targetPath, { readonly: true });
+    try {
+      expect((target.pragma('freelist_count') as { freelist_count: number }[])[0]).toEqual({
+        freelist_count: 0,
+      });
+      expect(readBatch(target, 'batch-0').logs).toHaveLength(1);
+    } finally {
+      target.close();
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+}, 60000);
+
 test('storage compact rejects an existing target and same source target', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'lp-storage-compact-reject-'));
   const sourcePath = join(dir, 'source.sqlite');

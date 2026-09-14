@@ -57,8 +57,84 @@ export interface RollingReplayResult {
   version: 1;
   mode: 'chain-time' | 'recorded-observed';
   cadenceSec: number;
+  effectiveCadenceSec: number | null;
   evaluations: RollingReplayEvaluation[];
   issues: string[];
+}
+
+export interface CadencePlan {
+  points: BlockAnchor[];
+  requestedCadenceSec: number;
+  effectiveCadenceSec: number | null;
+  unprovable: boolean;
+}
+
+function minimumSpacing(points: readonly BlockAnchor[]): number | null {
+  let minimum: number | null = null;
+  for (let index = 1; index < points.length; index++) {
+    const gap = points[index]!.timestampSec - points[index - 1]!.timestampSec;
+    if (gap > 0 && (minimum === null || gap < minimum)) minimum = gap;
+  }
+  return minimum;
+}
+
+/** Evaluation points must come from provable chain time. Minute watermarks and
+ * exact event timestamps are used; when the requested cadence cannot be met the
+ * plan says so instead of fabricating intermediate anchors. */
+export function cadenceWatermarks(
+  watermarks: readonly BlockAnchor[],
+  events: readonly MetricEvent[],
+  cadenceSec: number,
+  mode: 'chain-time' | 'recorded-observed' = 'chain-time',
+): CadencePlan {
+  if (!Number.isSafeInteger(cadenceSec) || cadenceSec <= 0)
+    throw new RangeError('Rolling replay cadence must be a positive safe integer');
+  if (mode === 'recorded-observed') {
+    const effective = minimumSpacing(watermarks);
+    return {
+      points: [...watermarks],
+      requestedCadenceSec: cadenceSec,
+      effectiveCadenceSec: effective,
+      unprovable: effective !== null && effective > cadenceSec,
+    };
+  }
+  const candidates: BlockAnchor[] = [...watermarks];
+  for (const event of events) {
+    if (event.event.time.exactTimestampSec === null) continue;
+    candidates.push({
+      number: event.event.ref.blockNumber,
+      hash: event.event.ref.blockHash,
+      timestampSec: event.event.time.exactTimestampSec,
+    });
+  }
+  const byTimestamp = new Map<number, BlockAnchor>();
+  for (const point of candidates) {
+    const existing = byTimestamp.get(point.timestampSec);
+    if (!existing || point.number > existing.number) byTimestamp.set(point.timestampSec, point);
+  }
+  const sorted = [...byTimestamp.values()].sort((left, right) =>
+    left.timestampSec !== right.timestampSec
+      ? left.timestampSec - right.timestampSec
+      : left.number < right.number
+        ? -1
+        : left.number > right.number
+          ? 1
+          : 0,
+  );
+  const points: BlockAnchor[] = [];
+  for (const point of sorted) {
+    const last = points.at(-1);
+    // Keep the first provable point of each cadence bucket and skip the rest.
+    if (last && point.timestampSec - last.timestampSec < cadenceSec) continue;
+    points.push(point);
+  }
+  const effective = minimumSpacing(points);
+  return {
+    points,
+    requestedCadenceSec: cadenceSec,
+    effectiveCadenceSec: effective,
+    unprovable: effective !== null && effective > cadenceSec,
+  };
 }
 
 function orderedWatermarks(
@@ -86,9 +162,15 @@ export function runRollingReplay(options: RollingReplayOptions): RollingReplayRe
   const cadenceSec = options.cadenceSec ?? 10;
   if (!Number.isSafeInteger(cadenceSec) || cadenceSec <= 0)
     throw new RangeError('Rolling replay cadence must be a positive safe integer');
-  const watermarks = orderedWatermarks(options.watermarks, mode);
+  const ordered = orderedWatermarks(options.watermarks, mode);
+  const plan = cadenceWatermarks(ordered, options.events, cadenceSec, mode);
+  const watermarks = orderedWatermarks(plan.points, mode);
   const evaluations: RollingReplayEvaluation[] = [];
   const issues: string[] = [];
+  if (plan.unprovable)
+    issues.push(
+      `evaluation-cadence-unprovable: requested ${cadenceSec}s, proven minimum ${plan.effectiveCadenceSec}s`,
+    );
   let previousAt = -Infinity;
   for (const watermark of watermarks) {
     if (watermark.timestampSec < previousAt) throw new Error('Rolling replay time moves backwards');
@@ -124,7 +206,14 @@ export function runRollingReplay(options: RollingReplayOptions): RollingReplayRe
   }
   if (mode === 'recorded-observed' && options.watermarks.length === 0)
     issues.push('recorded-observed-no-evaluations');
-  return { version: 1, mode, cadenceSec, evaluations, issues };
+  return {
+    version: 1,
+    mode,
+    cadenceSec,
+    effectiveCadenceSec: plan.effectiveCadenceSec,
+    evaluations,
+    issues,
+  };
 }
 
 export const rollingReplay = runRollingReplay;

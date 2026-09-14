@@ -114,31 +114,90 @@ function batchBytes(batch: RecordedRangeBatch): Buffer {
   );
 }
 
-function isEnvelope(value: unknown): value is { format: string; payload: PayloadRef } {
+function isEnvelope(value: unknown): value is { format: string } {
   return typeof value === 'object' && value !== null && 'format' in value;
 }
 
-function parseEnvelope(text: string): PayloadRef | null {
+interface SingleReference {
+  kind: 'single';
+  ref: PayloadRef;
+}
+
+interface ChunkedReference {
+  kind: 'chunked';
+  refs: PayloadRef[];
+  hash: string;
+  rawBytes: number;
+}
+
+function asRef(value: unknown): PayloadRef {
+  if (typeof value !== 'object' || value === null || (value as { version?: unknown }).version !== 1)
+    throw new PayloadFormatError('Invalid batch payload reference');
+  return value as PayloadRef;
+}
+
+function parseEnvelope(text: string): SingleReference | ChunkedReference {
   let value: unknown;
   try {
     value = JSON.parse(text);
   } catch {
     throw new PayloadFormatError('Batch payload is not valid JSON');
   }
-  if (!isEnvelope(value)) return null;
-  if (value.format !== 'batch-ref-v1') throw new PayloadFormatError('Unknown batch payload format');
-  if (
-    typeof value.payload !== 'object' ||
-    value.payload === null ||
-    (value.payload as { version?: unknown }).version !== 1
-  )
-    throw new PayloadFormatError('Invalid batch payload reference');
-  return value.payload;
+  if (!isEnvelope(value)) throw new PayloadFormatError('Invalid batch payload envelope');
+  if (value.format === 'batch-ref-v1')
+    return { kind: 'single', ref: asRef((value as { payload?: unknown }).payload) };
+  if (value.format === 'batch-ref-v2') {
+    const chunked = value as { hash?: unknown; rawBytes?: unknown; payloads?: unknown };
+    if (
+      typeof chunked.hash !== 'string' ||
+      !HASH_PATTERN.test(chunked.hash) ||
+      !Number.isSafeInteger(chunked.rawBytes) ||
+      (chunked.rawBytes as number) < 0 ||
+      !Array.isArray(chunked.payloads)
+    )
+      throw new PayloadFormatError('Invalid chunked batch payload reference');
+    const refs = chunked.payloads.map(asRef);
+    for (const ref of refs) checkedRef(ref);
+    return {
+      kind: 'chunked',
+      refs,
+      hash: chunked.hash,
+      rawBytes: chunked.rawBytes as number,
+    };
+  }
+  throw new PayloadFormatError('Unknown batch payload format');
 }
 
 export function encodeBatchReference(ref: PayloadRef): string {
   checkedRef(ref);
   return JSON.stringify({ format: 'batch-ref-v1', payload: ref });
+}
+
+/** A logical batch larger than one object is stored as ordered opaque chunks
+ * whose concatenation is verified against the whole-payload hash on read. */
+function putChunkedPayload(
+  db: Database.Database,
+  raw: Buffer,
+): { refs: PayloadRef[]; hash: string; rawBytes: number } {
+  const refs: PayloadRef[] = [];
+  for (let offset = 0; offset < raw.byteLength; offset += MAX_PAYLOAD_BYTES)
+    refs.push(
+      putPayload(db, raw.subarray(offset, Math.min(offset + MAX_PAYLOAD_BYTES, raw.byteLength))),
+    );
+  return { refs, hash: hashBytes(raw), rawBytes: raw.byteLength };
+}
+
+function encodeChunkedBatchReference(chunked: {
+  refs: PayloadRef[];
+  hash: string;
+  rawBytes: number;
+}): string {
+  return JSON.stringify({
+    format: 'batch-ref-v2',
+    hash: chunked.hash,
+    rawBytes: chunked.rawBytes,
+    payloads: chunked.refs,
+  });
 }
 
 /** Read a batch by id from either the legacy inline JSON or a compact reference. */
@@ -150,9 +209,15 @@ export function readBatch(db: Database.Database, batchId: string): RecordedRange
   // Legacy payloads are parsed once; compact envelopes are deliberately parsed
   // once for the reference and once for their compressed logical payload.
   if (!/^\{\s*"format"\s*:/.test(trimmed)) return revive<RecordedRangeBatch>(row.payload_json);
-  const ref = parseEnvelope(row.payload_json);
-  if (ref === null) throw new PayloadFormatError('Invalid batch payload envelope');
-  return revive<RecordedRangeBatch>(Buffer.from(getPayload(db, ref)).toString('utf8'));
+  const envelope = parseEnvelope(row.payload_json);
+  if (envelope.kind === 'single')
+    return revive<RecordedRangeBatch>(Buffer.from(getPayload(db, envelope.ref)).toString('utf8'));
+  const bytes = Buffer.concat(envelope.refs.map((ref) => Buffer.from(getPayload(db, ref))));
+  if (bytes.byteLength !== envelope.rawBytes)
+    throw new PayloadFormatError('Chunked payload length does not match');
+  if (hashBytes(bytes) !== envelope.hash)
+    throw new PayloadFormatError('Chunked payload hash mismatch');
+  return revive<RecordedRangeBatch>(bytes.toString('utf8'));
 }
 
 function checkedHeight(value: bigint): number {
@@ -285,8 +350,12 @@ export function writeCompactBatch(db: Database.Database, batch: RecordedRangeBat
   checkedTimestamp(batch.observedAtMs);
   const raw = batchBytes(batch);
   db.transaction(() => {
-    const ref = putPayload(db, raw);
-    const payloadJson = encodeBatchReference(ref);
+    // A single RPC shard limit does not bound the merged batch, so oversized
+    // logical batches must be split instead of being rejected after the fetch.
+    const payloadJson =
+      raw.byteLength > MAX_PAYLOAD_BYTES
+        ? encodeChunkedBatchReference(putChunkedPayload(db, raw))
+        : encodeBatchReference(putPayload(db, raw));
     const existing = db
       .prepare('select payload_json from ingest_batches where id=?')
       .get(batch.id) as { payload_json: string } | undefined;

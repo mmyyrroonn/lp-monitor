@@ -136,10 +136,16 @@ export async function runCatalogue(options: CatalogueOptions): Promise<Catalogue
   let poolCount = 0;
   let stockPoolAttributionCount = 0;
   let attributions: readonly { poolId: string; stockAddress: string }[] = [];
+  // A catalogue query must not attribute pools that were created after its fixed
+  // target height, even when a later range is already accepted in the same scope.
+  const targetNumber = summary.catalogue?.targetAnchor?.number ?? options.targetBlock ?? null;
   try {
     const store = new SqliteRangeStore(db);
     acceptedTip = store.acceptedTip(scopeId);
-    const pools = store.pools(scopeId);
+    const pools =
+      targetNumber === null
+        ? store.pools(scopeId)
+        : store.pools(scopeId).filter((pool) => pool.discoveredAt.blockNumber <= targetNumber);
     poolCount = pools.length;
     attributions = stockPoolAttributions(pools, assets.addresses);
     stockPoolAttributionCount = attributions.length;

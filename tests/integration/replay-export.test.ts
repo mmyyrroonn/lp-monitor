@@ -41,7 +41,7 @@ test('replay export publishes portable v2 gzip segments and reader needs no sour
       scopeId: 's',
       fromBlock: 60n,
       toBlock: 4800n,
-      mode: 'recorded-observed',
+      mode: 'chain-time',
       cohortMode: 'as-of',
       inputSnapshot: snapshot(),
     });

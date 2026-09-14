@@ -108,27 +108,60 @@ export function renderStudyConfigReport(report: StudyConfigReport): string {
       report.datasetManifest +
       '`；模式：`' +
       report.mode +
-      '`；评价 cadence：' +
+      '`；评价 cadence：请求 ' +
       report.cadenceSec +
+      ' 秒 / 实际 ' +
+      (report.effectiveCadenceSec ?? 'unknown') +
       ' 秒。',
     '',
-    '| 分段 | startSec | endSec | 评价点 |',
-    '|---|---:|---:|---:|',
-    '| train | ' +
-      p.train.startSec +
-      ' | ' +
-      p.train.endSec +
-      ' | ' +
-      report.splitCounts.train +
-      ' |',
-    '| validation | ' +
-      p.validation.startSec +
-      ' | ' +
-      p.validation.endSec +
-      ' | ' +
-      report.splitCounts.validation +
-      ' |',
-    '| test | ' + p.test.startSec + ' | ' + p.test.endSec + ' | ' + report.splitCounts.test + ' |',
+    '| 分段 | startSec | endSec | 评价点 | 覆盖分钟 | 提醒 | 独立 episode |',
+    '|---|---:|---:|---:|---:|---:|---:|',
+    ...(['train', 'validation', 'test'] as const).map((segment) => {
+      const row = report.experiments.candidates.find((candidate) => candidate.selectedOnTrain)
+        ?.splits[segment];
+      return (
+        '| ' +
+        segment +
+        ' | ' +
+        p[segment].startSec +
+        ' | ' +
+        p[segment].endSec +
+        ' | ' +
+        (row?.evaluations ?? report.splitCounts[segment]) +
+        ' | ' +
+        (row ? `${row.coveredMinutes}/${row.requestedMinutes}` : 'unknown') +
+        ' | ' +
+        (row ? row.alerts : 'unknown') +
+        ' | ' +
+        (row ? row.episodes : 'unknown') +
+        ' |'
+      );
+    }),
+    '',
+    '参数网格：' +
+      report.experiments.parameters +
+      ' 组；训练冻结：' +
+      (report.experiments.frozen.length ? report.experiments.frozen.join(', ') : 'none') +
+      '。',
+    '',
+    '| 候选 | 状态 | train episode | validation episode | test episode | 训练冻结 |',
+    '|---|---|---:|---:|---:|---|',
+    ...report.experiments.candidates.map(
+      (candidate) =>
+        '| ' +
+        candidate.id +
+        ' | ' +
+        candidate.status +
+        ' | ' +
+        candidate.splits.train.episodes +
+        ' | ' +
+        candidate.splits.validation.episodes +
+        ' | ' +
+        candidate.splits.test.episodes +
+        ' | ' +
+        String(candidate.selectedOnTrain) +
+        ' |',
+    ),
     '',
     '完整性问题：' + (report.issues.length ? report.issues.join('; ') : 'none') + '。',
     '',
