@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
 import { z } from 'zod';
 import type { Address } from 'viem';
 import { CHAIN_ID } from '../domain/chain.js';
@@ -30,7 +31,7 @@ const storedSnapshotSchema = z.object({
   fetchedAtSec: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
   sourceUrl: z.literal(sourceUrl),
   sourceHash: z.string().regex(/^[0-9a-f]{64}$/),
-  rwa: z.array(assetRegistrationSchema).min(1),
+  rwa: z.array(assetRegistrationSchema),
   records: z.array(stockSnapshotRecordSchema),
 });
 
@@ -49,19 +50,9 @@ export function buildStockSnapshot(raw: string, fetchedAtSec: number): StockSnap
   }
   if (!isRecord(parsed) || !Array.isArray(parsed.assets))
     throw new TypeError('Invalid assets response: assets must be an array');
-  const normalized = parsed.assets
-    .flatMap((item) => normalizeAsset(item as RawAsset))
-    .sort(compareRecord);
-  const byAddress = new Map<string, (typeof normalized)[number]>();
-  for (const record of normalized) {
-    const prior = byAddress.get(record.address);
-    if (prior && prior.status !== record.status)
-      throw new RangeError(`Conflicting status for address ${record.address}`);
-    if (prior && prior.symbol !== record.symbol)
-      throw new RangeError(`Conflicting symbol for address ${record.address}`);
-    byAddress.set(record.address, record);
-  }
-  const records = [...byAddress.values()].sort(compareRecord);
+  const records = normalizeRecords(
+    parsed.assets.flatMap((item) => normalizeAsset(item as RawAsset)),
+  );
   const rwa = records
     .filter((record) => record.status === 'active')
     .map((record): AssetRegistration => ({
@@ -71,7 +62,7 @@ export function buildStockSnapshot(raw: string, fetchedAtSec: number): StockSnap
     }));
   if (rwa.length === 0) throw new RangeError('At least one active chain-4663 asset is required');
   return {
-    version: createHash('sha256').update(JSON.stringify(records), 'utf8').digest('hex'),
+    version: hashRecords(records),
     chainId: CHAIN_ID,
     fetchedAtSec,
     sourceUrl,
@@ -81,8 +72,23 @@ export function buildStockSnapshot(raw: string, fetchedAtSec: number): StockSnap
   };
 }
 
+/** Accepts a snapshot directory or its watchlist.json; a sibling source.json is verified when present. */
 export function loadStockSnapshot(path: string): StockSnapshot {
-  return storedSnapshotSchema.parse(JSON.parse(readFileSync(path, 'utf8')));
+  const candidate = resolve(path);
+  const snapshotPath = statSync(candidate).isDirectory()
+    ? join(candidate, 'watchlist.json')
+    : candidate;
+  const parsed = storedSnapshotSchema.parse(JSON.parse(readFileSync(snapshotPath, 'utf8')));
+  const records = normalizeRecords(parsed.records);
+  if (parsed.version !== hashRecords(records))
+    throw new RangeError('Snapshot version does not match normalized records');
+  const sourcePath = join(dirname(snapshotPath), 'source.json');
+  if (existsSync(sourcePath)) {
+    const sourceHash = createHash('sha256').update(readFileSync(sourcePath)).digest('hex');
+    if (parsed.sourceHash !== sourceHash)
+      throw new RangeError('Snapshot sourceHash does not match source.json');
+  }
+  return { ...parsed, records };
 }
 
 export function diffStockSnapshots(before: StockSnapshot, after: StockSnapshot) {
@@ -98,6 +104,23 @@ export function diffStockSnapshots(before: StockSnapshot, after: StockSnapshot) 
       .map(([address]) => address)
       .sort(),
   };
+}
+
+function normalizeRecords(records: StockSnapshot['records']): StockSnapshot['records'] {
+  const byAddress = new Map<string, StockSnapshot['records'][number]>();
+  for (const record of records) {
+    const prior = byAddress.get(record.address);
+    if (prior && prior.status !== record.status)
+      throw new RangeError(`Conflicting status for address ${record.address}`);
+    if (prior && prior.symbol !== record.symbol)
+      throw new RangeError(`Conflicting symbol for address ${record.address}`);
+    byAddress.set(record.address, record);
+  }
+  return [...byAddress.values()].sort(compareRecord);
+}
+
+function hashRecords(records: StockSnapshot['records']): string {
+  return createHash('sha256').update(JSON.stringify(records), 'utf8').digest('hex');
 }
 
 function normalizeAsset(asset: RawAsset): StockSnapshot['records'] {
