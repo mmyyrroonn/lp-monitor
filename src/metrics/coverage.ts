@@ -2,8 +2,15 @@ import type Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import type { BlockAnchor, MinuteBoundary } from '../domain/types.js';
 import type { ProjectionQualityError } from '../state/project-range.js';
-import { verifySuccessfulShardCoverage } from '../ingest/completeness.js';
-import { rawLogKey, type RecordedRangeBatch } from '../storage/manifest.js';
+import {
+  completePartitions,
+  coversIntervals,
+  successfulShardRowsMatch,
+  verifySuccessfulShardCoverage,
+  type StoredShardRow,
+} from '../ingest/completeness.js';
+import { rawLogKey } from '../storage/manifest.js';
+import { BatchCoverageStore, type BatchCoverageProof } from '../storage/batch-coverage.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
 import { readBatch } from '../storage/payload-store.js';
 
@@ -24,49 +31,73 @@ const caches = new WeakMap<
 >();
 const CACHE_LIMIT = 2048;
 
-function covers(ranges: readonly Interval[], from: bigint, to: bigint): boolean {
-  if (to < from) return true;
-  let next = from;
-  for (const range of [...ranges].sort((a, b) =>
-    a.fromBlock < b.fromBlock ? -1 : a.fromBlock > b.fromBlock ? 1 : 0,
-  )) {
-    if (range.fromBlock > next) return false;
-    if (range.toBlock >= next) next = range.toBlock + 1n;
-    if (next > to) return true;
-  }
-  return false;
+/** The shard rows a batch's coverage is compared against, in the order both paths read them. */
+function shardRows(db: Database.Database, batchId: string): StoredShardRow[] {
+  return db
+    .prepare(
+      'select shard_id,status,response_hash,log_count,error from fetch_shards where batch_id=? order by shard_id',
+    )
+    .all(batchId) as StoredShardRow[];
 }
 
-// P1 transport retains decimal strings. Revive the narrow batch contract used by
-// the same successful-shard validator that guards acceptRange.
-function completePartitions(batch: RecordedRangeBatch): boolean {
-  const partitions = new Map<string, Interval[]>();
-  // Expand each concrete address/topic alternative. A shorter successful scan
-  // of address B must not borrow address A's block coverage under the same family.
-  for (const shard of batch.manifest.shards) {
-    let selectors: (string | null)[][] = shard.request.address.map((a) => [a.toLowerCase()]);
-    for (const topic of shard.request.topics) {
-      const alternatives =
-        topic === null
-          ? [null]
-          : typeof topic === 'string'
-            ? [topic.toLowerCase()]
-            : topic.map((t) => t.toLowerCase());
-      if (selectors.length * alternatives.length > 100000) return false;
-      selectors = selectors.flatMap((prefix) => alternatives.map((t) => [...prefix, t]));
-    }
-    for (const selector of selectors) {
-      const key = JSON.stringify([shard.filterId, ...selector]);
-      const intervals = partitions.get(key) ?? [];
-      intervals.push({ fromBlock: shard.request.fromBlock, toBlock: shard.request.toBlock });
-      partitions.set(key, intervals);
-    }
-  }
+/** What a decoded verdict depends on: the stored payload text and the batch's shard rows. */
+function strictSignature(
+  db: Database.Database,
+  batchId: string,
+  scopeId: string,
+  stored: readonly StoredShardRow[],
+): string {
+  const payload = db
+    .prepare('select payload_json from ingest_batches where id=? and scope_id=?')
+    .pluck()
+    .get(batchId, scopeId) as string;
+  return createHash('sha256').update(payload).update(JSON.stringify(stored)).digest('hex');
+}
+
+/** What a proof verdict depends on: every fact the proof read validated against current rows. The
+ * prefix keeps it distinct from the payload digests above, which are bare hexadecimal. */
+function proofSignature(proof: BatchCoverageProof): string {
   return (
-    partitions.size > 0 &&
-    [...partitions.values()].every((ranges) => covers(ranges, batch.fromBlock, batch.toBlock))
+    'proof\0' +
+    createHash('sha256')
+      .update(
+        JSON.stringify([
+          proof.mutationEpoch,
+          proof.manifestHash,
+          proof.payloadRefDigest,
+          proof.shardDigest,
+          proof.fromBlock,
+          proof.toBlock,
+          proof.filters,
+        ]),
+      )
+      .digest('hex')
   );
 }
+
+/** Strict verification: decode the batch and require its stored shards to state its coverage.
+ * Every batch without a proof takes this path, and it is the only path that counts a decode. */
+function verifiedBatch(
+  db: Database.Database,
+  batchId: string,
+  scopeId: string,
+  stored: readonly StoredShardRow[],
+): CachedBatch {
+  try {
+    const decoded = readBatch(db, batchId);
+    if (decoded.scopeId !== scopeId) return null;
+    verifySuccessfulShardCoverage(decoded);
+    if (!successfulShardRowsMatch(stored, decoded) || !completePartitions(decoded)) return null;
+    return {
+      fromBlock: decoded.fromBlock,
+      toBlock: decoded.toBlock,
+      filters: [...new Set(decoded.manifest.shards.map((shard) => shard.filterId))],
+    };
+  } catch {
+    return null;
+  }
+}
+
 /** Only current accepted ranges count. Failed raw attempts are historical evidence,
  * and cannot create either a complete minute or erase prior accepted coverage. */
 export function acceptedMetricRanges(
@@ -125,60 +156,33 @@ export function acceptedMetricRanges(
       cache.delete(key);
   }
   const result: Interval[] = [];
+  // A coverage proof is the verdict acceptRange reached when it stored this batch, so a reader
+  // that finds one skips decoding the batch and reading its stored payload text.
+  const proofs = new BatchCoverageStore(db);
   for (const [batchId, accepted] of groups) {
     const row = db
       .prepare('select id from ingest_batches where id=? and scope_id=?')
       .get(batchId, scopeId) as { id: string } | undefined;
     if (!row) continue;
-    const stored = db
-      .prepare(
-        'select shard_id,status,response_hash,log_count,error from fetch_shards where batch_id=? order by shard_id',
-      )
-      .all(batchId) as {
-      shard_id: string;
-      status: string;
-      response_hash: string | null;
-      log_count: number;
-      error: string | null;
-    }[];
-    const payloadSignature = db
-      .prepare('select payload_json from ingest_batches where id=? and scope_id=?')
-      .pluck()
-      .get(batchId, scopeId) as string;
-    const signature = createHash('sha256')
-      .update(payloadSignature)
-      .update(JSON.stringify(stored))
-      .digest('hex');
+    const proof = proofs.read(batchId);
+    const stored = proof === null ? shardRows(db, batchId) : null;
+    // One cache entry per batch behind the window, whether its verdict came from a proof or from
+    // decoding it: the signature is whatever that verdict was derived from.
+    const signature =
+      proof === null
+        ? strictSignature(db, batchId, scopeId, stored ?? [])
+        : proofSignature(proof);
     const key = scopeId + '\0' + batchId;
     let value = cache.get(key)?.signature === signature ? cache.get(key)!.value : undefined;
     if (value === undefined) {
-      value = null;
-      try {
-        const decoded = readBatch(db, row.id);
-        if (decoded.scopeId === scopeId) {
-          verifySuccessfulShardCoverage(decoded);
-          const complete =
-            stored.length === decoded.manifest.expectedShardIds.length &&
-            decoded.manifest.shards.every((shard) =>
-              stored.some(
-                (item) =>
-                  item.shard_id === shard.shardId &&
-                  item.status === 'success' &&
-                  item.response_hash === shard.responseHash &&
-                  item.log_count === shard.logCount &&
-                  item.error === null,
-              ),
-            );
-          if (complete && completePartitions(decoded))
-            value = {
-              fromBlock: decoded.fromBlock,
-              toBlock: decoded.toBlock,
-              filters: [...new Set(decoded.manifest.shards.map((shard) => shard.filterId))],
+      value =
+        proof === null
+          ? verifiedBatch(db, row.id, scopeId, stored ?? [])
+          : {
+              fromBlock: BigInt(proof.fromBlock),
+              toBlock: BigInt(proof.toBlock),
+              filters: [...proof.filters],
             };
-        }
-      } catch {
-        value = null;
-      }
       // Saturating admission avoids sequential scans evicting every useful
       // entry once history exceeds capacity. Changed admitted entries still
       // replace their old validation, including failed validation.
@@ -198,7 +202,7 @@ export function acceptedMetricRanges(
       if (from < batch.fromBlock || to > batch.toBlock) continue;
       if (
         filters.every((f) =>
-          covers(
+          coversIntervals(
             accepted
               .filter((r) => r.filter_id === f)
               .map((r) => ({ fromBlock: BigInt(r.from_block), toBlock: BigInt(r.to_block) })),
@@ -305,7 +309,7 @@ export function readMetricCoverage(
     if (minute + 60 > watermark.timestampSec || (right && right.at.number > watermark.number))
       reasons.push('watermark-partial');
     if (fromBlock !== null && toBlock !== null) {
-      if (!covers(ranges, fromBlock, toBlock)) reasons.push('range-gap');
+      if (!coversIntervals(ranges, fromBlock, toBlock)) reasons.push('range-gap');
       if (
         errors.some(
           (e) =>

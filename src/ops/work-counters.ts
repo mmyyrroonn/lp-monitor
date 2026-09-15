@@ -4,7 +4,7 @@
  * The sink is disabled by default, so production paths pay a single null check per counted
  * site. Counters are incremented where the real work happens (SQL reads, registry
  * serialization, raw batch decoding, valuation and pool evaluation, metadata candidate
- * selection) so a caller cannot report an idealized number.
+ * selection, registry journal rows) so a caller cannot report an idealized number.
  */
 export type WorkCounts = {
   /** Pool registration rows read from SQLite. */
@@ -21,6 +21,12 @@ export type WorkCounts = {
   metadataCandidates: number;
   /** Minute indexes built over a coverage set (one per coverage set per build). */
   coverageIndexBuilds: number;
+  /** Registry journal rows read to advance a live registry instead of reloading the catalogue. */
+  registryChangesRead: number;
+  /** Operation request templates rebuilt from a protocol's pool values. */
+  operationFilterRebuilds: number;
+  /** Pool identity values sorted into a rebuilt operation request template. */
+  operationFilterValuesScanned: number;
 };
 
 export type WorkCounterKey = keyof WorkCounts;
@@ -33,6 +39,9 @@ export const WORK_COUNTER_KEYS: readonly WorkCounterKey[] = [
   'evaluatedPools',
   'metadataCandidates',
   'coverageIndexBuilds',
+  'registryChangesRead',
+  'operationFilterRebuilds',
+  'operationFilterValuesScanned',
 ];
 
 export function emptyWorkCounts(): WorkCounts {
@@ -44,6 +53,9 @@ export function emptyWorkCounts(): WorkCounts {
     evaluatedPools: 0,
     metadataCandidates: 0,
     coverageIndexBuilds: 0,
+    registryChangesRead: 0,
+    operationFilterRebuilds: 0,
+    operationFilterValuesScanned: 0,
   };
 }
 

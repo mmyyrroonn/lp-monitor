@@ -22,7 +22,7 @@ import { evaluateSignal, initialSignalSnapshot } from '../signals/engine.js';
 import { parseSignalConfig, type SignalConfig } from '../signals/config.js';
 import type { AlertRecord, SignalSnapshot } from '../signals/types.js';
 import { encodeJson } from '../domain/json.js';
-import { readReplayManifest, contentHash, assetRegistry } from './reader.js';
+import { readReplayManifest, readCatalogue, contentHash, assetRegistry } from './reader.js';
 import { checkBatchIntegrity, checkMinuteIntegrity, type ReplayIssue } from './integrity.js';
 import { minutePrefixes, prefixAt, mergeHistoricalBatches, type ReplayMode } from './clock.js';
 export interface ReplayFrame {
@@ -172,6 +172,34 @@ export async function replay(
       usdg: snapshot.usdg,
       metadata: snapshot.metadata,
     };
+    // The complete register is stated once for the whole dataset. A batch may carry only the
+    // pools its own events touch, so the projection is grown from here instead — and never past
+    // the height the frame being evaluated stands at, or a later discovery would be presented as
+    // knowledge the study point did not have.
+    const catalogueRead = readCatalogue(snapshot, {
+      registryScopeId: input.registryScopeId,
+      assetVersion: input.assets.version,
+      cutoffBlock: read.batches.reduce(
+        (furthest, batch) => (batch.toBlock > furthest ? batch.toBlock : furthest),
+        read.manifest.version === 2 ? BigInt(read.manifest.export.toBlock) : 0n,
+      ),
+    });
+    issues.push(...(catalogueRead?.issues ?? []));
+    const catalogue = [...(catalogueRead?.pools ?? [])].sort((left, right) =>
+      left.discoveredAt.blockNumber < right.discoveredAt.blockNumber ? -1 : 1,
+    );
+    let adopted = 0;
+    let deferred: readonly PersistedPoolRegistration[] = [];
+    const adoptUpTo = (blockNumber: bigint) => {
+      // A register row names the block its pool came from, and that evidence has to be in the
+      // store before the row can exist. Evidence arrives as batches are accepted, so a pool that
+      // is not placeable yet waits for the next adoption rather than being written or dropped.
+      let end = adopted;
+      while (end < catalogue.length && catalogue[end]!.discoveredAt.blockNumber <= blockNumber) end++;
+      const ready = [...deferred, ...catalogue.slice(adopted, end)];
+      adopted = end;
+      deferred = store.persistCatalogue(input.registryScopeId, ready).unplaced;
+    };
     const states = new Map<string, SignalSnapshot>();
     const historical: typeof valid = [];
     const consumedDiscovery = new Set<string>();
@@ -229,9 +257,12 @@ export async function replay(
               : scheduled;
           try {
             let alerts: AlertRecord[] = [];
-            if (mode === 'recorded-observed')
+            if (mode === 'recorded-observed') {
+              // Recorded-observed walks its own batch: the register is grown to what was known one
+              // block before its close, never to a discovery the capture could not have seen.
+              adoptUpTo(b.end.number - 1n);
               alerts = commitAcceptedSignalBatch(db, input, config, b).alerts;
-            else {
+            } else {
               if (input.registryScopeId !== input.scopeId)
                 for (const discovery of valid.filter((d) => d.scopeId === input.registryScopeId)) {
                   const tip = store.acceptedTip(input.registryScopeId);
@@ -245,7 +276,12 @@ export async function replay(
                   const end = b.end;
                   store.acceptRange(prefixAt(discovery, end, b.end.timestampSec, tip, false));
                 }
+              // The evidence for a register pool arrives with the batches that carry it, so the
+              // register is grown after they are accepted and before the projection is rebuilt:
+              // a pool discovered in this frame is visible to it, and one above the boundary
+              // stays out, matching the strict cutoff `prefixAt` already applies to a batch's own array.
               store.acceptRange(b);
+              adoptUpTo(b.end.number - 1n);
               new SqliteProjectionStore(db).rebuild(
                 input.scopeId,
                 input.registryScopeId,
@@ -323,6 +359,20 @@ export async function replay(
       }
       // Final historical evidence intentionally spans the requested archive,
       // independently of the bounded live frames used by recorded-observed mode.
+      adoptUpTo(catalogue.at(-1)?.discoveredAt.blockNumber ?? 0n);
+      const register = new PoolRegistry([
+        ...store.pools(input.registryScopeId),
+        ...store.pools(input.scopeId),
+      ]).snapshot();
+      // A pool the catalogue names but whose discovery evidence this dataset does not hold stays
+      // unknown: it is reported, never counted as a silent zero.
+      const held = new Set(register.map((entry) => poolRegistrationId(entry)));
+      const unknown = catalogue.filter((pool) => !held.has(poolRegistrationId(pool))).length;
+      if (unknown > 0)
+        issues.push({
+          code: 'catalogue-pool-unknown',
+          detail: `${unknown} catalogue pools have no discovery evidence in this dataset`,
+        });
       if (store.acceptedTip(input.scopeId))
         new SqliteProjectionStore(db).rebuild(
           input.scopeId,
@@ -335,12 +385,7 @@ export async function replay(
         input.configVersion,
       );
       events = projection?.events ?? [];
-      registrations = [
-        ...new PoolRegistry([
-          ...store.pools(input.registryScopeId),
-          ...store.pools(input.scopeId),
-        ]).snapshot(),
-      ];
+      registrations = [...register];
       const coverageHistory = (scope: string, endSec: number) => {
         const first = store
           .boundaries(scope)

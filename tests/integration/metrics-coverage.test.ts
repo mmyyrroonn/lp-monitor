@@ -149,6 +149,9 @@ test('a time jump with the same verified adjacent anchor pair closes a no-block 
 
 test('accepted coverage cache reuses immutable validation and invalidates on shard mutation', () => {
   const { db } = fixture();
+  // This batch is read through the strict cache, as a database migrated to 012 reads the batches
+  // it stored before the proof table existed. The proof path has its own regression.
+  db.prepare("delete from batch_coverage_proofs where batch_id='a'").run();
   const parse = vi.spyOn(JSON, 'parse');
   expect(acceptedMetricRanges(db, 'scope')).toHaveLength(1);
   const afterFirst = parse.mock.calls.length;
@@ -243,6 +246,9 @@ function addBatch(f: ReturnType<typeof fixture>, id: string, from = 100n, to = 1
 
 test('saturated cache retains admitted validations while overflow and mutations stay checked', () => {
   const f = fixture();
+  // Every batch in this window is read through the strict cache: an accepted batch without a
+  // proof, which is what a database migrated to 012 holds.
+  f.db.prepare('delete from batch_coverage_proofs').run();
   f.db.transaction(() => {
     for (let i = 1; i < 2051; i++) addBatch(f, 'batch-' + i);
   })();
@@ -324,6 +330,9 @@ test.each(['normal', 'missing', 'invalid', 'conflict', 'gap', 'time-jump'])(
 
 test('minute horizon avoids decoding unrelated old payloads without closing a coverage gap', () => {
   const f = fixture(101n);
+  // The window's own batch keeps the strict read path here, so the count below is about which
+  // batches a bounded horizon decodes: the accepted one, never the unrelated old one.
+  f.db.prepare("delete from batch_coverage_proofs where batch_id='a'").run();
   addBatch(f, 'old', 1n, 99n);
   const parse = vi.spyOn(JSON, 'parse');
   try {

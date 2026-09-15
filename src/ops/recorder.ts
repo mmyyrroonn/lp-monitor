@@ -9,6 +9,8 @@ import type { SignalConfig } from '../signals/config.js';
 import { loadMetricMetadata, type MetricMetadata } from '../metrics/metadata.js';
 import { commitAcceptedSignalBatch, projectSignals, retractSignals } from '../signals/project.js';
 import { LiveProjectionStore } from '../storage/live-projection.js';
+import { registryCacheFor } from '../storage/registry-cache.js';
+import { OperationFilterIndex } from '../ingest/operation-filter-index.js';
 import { AlertOutbox } from '../notify/outbox.js';
 import { createConsoleSink } from '../notify/console.js';
 import { createJsonlSink } from '../notify/jsonl.js';
@@ -153,6 +155,9 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
   const deployments = { v3Factory: config.v3Factory, v4Manager: config.v4Manager };
   const scopeId = computeWatchScopeId(assets, 'operations', deployments);
   const discoveryScope = computeWatchScopeId(assets, 'discovery-only', deployments);
+  // One request-template index per run: the pool values behind the operation requests are sorted
+  // once and only ever advanced by the registry's own changes, never re-derived per batch.
+  const operationFilters = new OperationFilterIndex(deployments, config.maxFilterValues);
   const id = new Date().toISOString().replace(/[:.]/g, '-') + '-' + randomUUID().slice(0, 8);
   const out = resolve(options.outputDirectory, id);
   mkdirSync(out, { recursive: true });
@@ -923,45 +928,139 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           // per-batch log line can explain the batch instead of re-reading the run.
           const timings = new BatchTimings();
           const workCounts = (batchWorkCounts = openWorkCounts());
-          const pools = timings.measure(
-            'registry',
-            () => new PoolRegistry([...store.pools(discoveryScope), ...store.pools(scopeId)]),
-          );
-          // The acquisition stage wraps the fetch alone; rpcAcquisitionMs below keeps
-          // its legacy wider window so existing reports stay comparable.
-          const batch = await timings.measureAsync('rpcAcquisition', () =>
-            reader.meter.withPurpose(phase === 'backfill' ? 'backfill' : 'logs', () =>
-              fetchRange(endpointReader, {
-                mode: 'operations',
+          // The registry context this batch is planned and decoded against is prepared before the
+          // fetch: the requests are built from the registry the batch will be read against, and the
+          // batch's own discoveries join them for the round they were found in. It is settled on
+          // every path out of this batch — `publish` after the accepted transaction, `discard` for
+          // everything else — so a rolled back or abandoned batch leaves no trace in the catalogue.
+          const registryContext =
+            metricInput && options.signalConfig
+              ? registryCacheFor(db, discoveryScope, scopeId)
+              : null;
+          const prepared = registryContext?.prepare() ?? null;
+          try {
+            // Only a run without a registry context still needs the whole catalogue in memory; the
+            // referenced path plans its requests from the shared templates instead.
+            const pools =
+              prepared === null
+                ? timings.measure(
+                    'registry',
+                    () =>
+                      new PoolRegistry([...store.pools(discoveryScope), ...store.pools(scopeId)]),
+                  )
+                : null;
+            // The acquisition stage wraps the fetch alone; rpcAcquisitionMs below keeps
+            // its legacy wider window so existing reports stay comparable.
+            const batch = await timings.measureAsync('rpcAcquisition', () =>
+              reader.meter.withPurpose(phase === 'backfill' ? 'backfill' : 'logs', () =>
+                fetchRange(endpointReader, {
+                  mode: 'operations',
+                  fromBlock: from,
+                  toBlock: end.number,
+                  end,
+                  previous,
+                  assets,
+                  pools: pools ?? undefined,
+                  registry: prepared ?? undefined,
+                  operationFilters: prepared === null ? undefined : operationFilters,
+                  ...deployments,
+                  logResponseGuard: config.logResponseGuard,
+                  maxLogsPerResponse: config.maxLogsPerResponse,
+                  maxFilterValues: config.maxFilterValues,
+                  maxRangeBlocks: config.maxRangeBlocks,
+                  observedAtMs: Date.now(),
+                  captureMode:
+                    options.command === 'ingest' ||
+                    end.number !== head.number ||
+                    end.hash !== head.hash
+                      ? 'backfill'
+                      : 'live',
+                }),
+              ),
+            );
+            const rawWriteAt = Date.now();
+            rawSaveStage('operations', () =>
+              timings.measure('rawPersist', () => store.saveRaw(batch, { compact: true })),
+            );
+            const rawWriteMs = Date.now() - rawWriteAt;
+            if (shutdown.requested) {
+              timings.measure('artifactPersist', () =>
+                saveJson(resolve(out, 'range-' + batch.id + '.json'), batch, out),
+              );
+              batchRecords.push({
+                id: batch.id,
+                scopeId: batch.scopeId,
                 fromBlock: from,
                 toBlock: end.number,
-                end,
-                previous,
-                assets,
-                pools,
-                ...deployments,
-                logResponseGuard: config.logResponseGuard,
-                maxLogsPerResponse: config.maxLogsPerResponse,
-                maxFilterValues: config.maxFilterValues,
-                maxRangeBlocks: config.maxRangeBlocks,
-                observedAtMs: Date.now(),
-                captureMode:
-                  options.command === 'ingest' ||
-                  end.number !== head.number ||
-                  end.hash !== head.hash
-                    ? 'backfill'
-                    : 'live',
-              }),
-            ),
-          );
-          const rawWriteAt = Date.now();
-          rawSaveStage('operations', () =>
-            timings.measure('rawPersist', () => store.saveRaw(batch, { compact: true })),
-          );
-          const rawWriteMs = Date.now() - rawWriteAt;
-          if (shutdown.requested) {
+                manifestHash: batch.manifestHash,
+                completeness: batch.completeness,
+                logs: batch.logs.length,
+                accepted: false,
+              });
+              shutdown.throwIfRequested();
+            }
+            const liveTimeHistoryMinutes = Math.min(
+              10080,
+              Math.max(
+                180,
+                (options.signalConfig?.candidate.samples ?? 0) + 10,
+                (options.signalConfig?.confirmRelative.samples ?? 0) * 5 + 10,
+                (options.signalConfig?.cooling.buckets ?? 0) * 5 + 10,
+              ) + 2,
+            );
+            const timeContext = timings.measure('coverage', () =>
+              store.liveTimeContext(scopeId, from, end, liveTimeHistoryMinutes),
+            );
+            const allLogs = [
+              ...new Map(
+                [...timeContext.unresolved, ...batch.logs].map((log) => [rawLogKey(log), log]),
+              ).values(),
+            ];
+            const timeFrom = allLogs.reduce(
+              (min, log) => (log.blockNumber < min ? log.blockNumber : min),
+              timeContext.retryFromBlock,
+            );
+            let timed: RecordedRangeBatch = batch;
+            let timingFailures: readonly unknown[] = [];
+            if (batch.completeness === 'complete') {
+              const resolution = await timings.measureAsync('coverage', () =>
+                resolveLogTimes(
+                  metered('minuteAnchors'),
+                  allLogs,
+                  timeFrom,
+                  end,
+                  timeContext.anchors,
+                  timeContext.boundaries,
+                ),
+              );
+              timingFailures = resolution.failures;
+              result.timingFailures.push(
+                ...resolution.failures.map((failure) => ({ batchId: batch.id, ...failure })),
+              );
+              timed = {
+                ...batch,
+                anchors: [end, ...resolution.queriedAnchors],
+                boundaries: resolution.boundaries,
+                logTimes: allLogs.map((log) => ({
+                  ref: log,
+                  time: resolution.times.get(rawLogKey(log))!,
+                })),
+              };
+              result.timingUnresolved = timed.logTimes!.filter(
+                (item) => item.time.source === 'unresolved',
+              ).length;
+            }
+            const completeEvidenceAtMs =
+              batch.completeness === 'complete' && result.timingUnresolved === 0
+                ? Date.now()
+                : null;
+            const rpcAcquisitionMs = Date.now() - acquisitionAt;
             timings.measure('artifactPersist', () =>
-              saveJson(resolve(out, 'range-' + batch.id + '.json'), batch, out),
+              saveJson(
+                resolve(out, 'range-' + batch.id + '.json'),
+                { ...timed, timingFailures },
+                out,
+              ),
             );
             batchRecords.push({
               id: batch.id,
@@ -973,184 +1072,124 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
               logs: batch.logs.length,
               accepted: false,
             });
-            shutdown.throwIfRequested();
-          }
-          const liveTimeHistoryMinutes = Math.min(
-            10080,
-            Math.max(
-              180,
-              (options.signalConfig?.candidate.samples ?? 0) + 10,
-              (options.signalConfig?.confirmRelative.samples ?? 0) * 5 + 10,
-              (options.signalConfig?.cooling.buckets ?? 0) * 5 + 10,
-            ) + 2,
-          );
-          const timeContext = timings.measure('coverage', () =>
-            store.liveTimeContext(scopeId, from, end, liveTimeHistoryMinutes),
-          );
-          const allLogs = [
-            ...new Map(
-              [...timeContext.unresolved, ...batch.logs].map((log) => [rawLogKey(log), log]),
-            ).values(),
-          ];
-          const timeFrom = allLogs.reduce(
-            (min, log) => (log.blockNumber < min ? log.blockNumber : min),
-            timeContext.retryFromBlock,
-          );
-          let timed: RecordedRangeBatch = batch;
-          let timingFailures: readonly unknown[] = [];
-          if (batch.completeness === 'complete') {
-            const resolution = await timings.measureAsync('coverage', () =>
-              resolveLogTimes(
-                metered('minuteAnchors'),
-                allLogs,
-                timeFrom,
-                end,
-                timeContext.anchors,
-                timeContext.boundaries,
-              ),
-            );
-            timingFailures = resolution.failures;
-            result.timingFailures.push(
-              ...resolution.failures.map((failure) => ({ batchId: batch.id, ...failure })),
-            );
-            timed = {
-              ...batch,
-              anchors: [end, ...resolution.queriedAnchors],
-              boundaries: resolution.boundaries,
-              logTimes: allLogs.map((log) => ({
-                ref: log,
-                time: resolution.times.get(rawLogKey(log))!,
-              })),
-            };
-            result.timingUnresolved = timed.logTimes!.filter(
-              (item) => item.time.source === 'unresolved',
-            ).length;
-          }
-          const completeEvidenceAtMs =
-            batch.completeness === 'complete' && result.timingUnresolved === 0 ? Date.now() : null;
-          const rpcAcquisitionMs = Date.now() - acquisitionAt;
-          timings.measure('artifactPersist', () =>
-            saveJson(
-              resolve(out, 'range-' + batch.id + '.json'),
-              { ...timed, timingFailures },
-              out,
-            ),
-          );
-          batchRecords.push({
-            id: batch.id,
-            scopeId: batch.scopeId,
-            fromBlock: from,
-            toBlock: end.number,
-            manifestHash: batch.manifestHash,
-            completeness: batch.completeness,
-            logs: batch.logs.length,
-            accepted: false,
-          });
-          if (batch.completeness !== 'complete') {
-            workCounts.close();
-            return null;
-          }
-          if (batch.completeness === 'complete') {
-            const registered = timings.measure('registry', () =>
-              new PoolRegistry([
-                ...pools.snapshot(),
-                ...(batch.poolRegistrations ?? []),
-              ]).snapshot(),
-            );
-            const targets: TokenMetadataTarget[] = [
-              { address: config.tokens.USDG, blockNumber: from },
-            ];
-            // A new pool may contain a token deployed after the range start.
-            for (const pool of registered) {
-              const height =
-                pool.discoveredAt.blockNumber > from ? pool.discoveredAt.blockNumber : from;
-              if (height <= end.number)
-                for (const address of [pool.token0, pool.token1])
-                  targets.push({ address, blockNumber: height });
+            if (batch.completeness !== 'complete') {
+              workCounts.close();
+              return null;
             }
-            countWork('metadataCandidates', targets.length);
-            await refreshMetadata(targets);
-          }
+            if (batch.completeness === 'complete') {
+              // The batch's own registrations are the pools its events touch: a token introduced by
+              // this batch is exactly the metadata this batch needs, and no other pool's tokens are.
+              const registered = timings.measure('registry', () => batch.poolRegistrations ?? []);
+              const targets: TokenMetadataTarget[] = [
+                { address: config.tokens.USDG, blockNumber: from },
+              ];
+              // A new pool may contain a token deployed after the range start.
+              for (const pool of registered) {
+                const height =
+                  pool.discoveredAt.blockNumber > from ? pool.discoveredAt.blockNumber : from;
+                if (height <= end.number)
+                  for (const address of [pool.token0, pool.token1])
+                    targets.push({ address, blockNumber: height });
+              }
+              countWork('metadataCandidates', targets.length);
+              await refreshMetadata(targets);
+            }
 
-          await timings.measureAsync('commitOther', async () => reader.flush?.());
-          shutdown.throwIfRequested();
-          const commitAt = Date.now();
-          const changes =
-            metricInput && options.signalConfig
-              ? signalStage('accepted-batch', () =>
-                  commitAcceptedSignalBatch(db, metricInput, options.signalConfig!, timed, {
-                    startNewSegment: latestStart && from === start,
-                    timings,
-                  }),
-                ).changes
-              : store.acceptRange(timed, { startNewSegment: latestStart && from === start });
-          const outboxDurableAtMs = metricInput ? Date.now() : null;
-          const writeLatencyMs = rawWriteMs + Date.now() - commitAt;
-          if (metricInput) telemetry.markProjectionFresh();
-          const processingLatencyMs =
-            completeEvidenceAtMs !== null && outboxDurableAtMs !== null
-              ? outboxDurableAtMs - completeEvidenceAtMs
-              : null;
-          if (processingLatencyMs !== null) reader.meter.recordProcessing(processingLatencyMs);
-          const delivery = await timings.measureAsync('notify', () =>
-            drain(batch.captureMode !== 'live'),
-          );
-          const localProcessingMs = processingLatencyMs;
-          const headObservedAgeMs =
-            telemetry.headObservedAtMs === null ? null : Date.now() - telemetry.headObservedAtMs;
-          // Wall-clock age of the data this batch accepted, next to the stage
-          // breakdown, so a fast batch on stale data cannot look healthy.
-          const acceptedDataAgeMs =
-            end.timestampSec > 0 ? Math.max(0, Date.now() - end.timestampSec * 1000) : null;
-          telemetry.batchTimings.push({
-            phase,
-            batchId: batch.id,
-            fromBlock: from,
-            toBlock: end.number,
-            logs: batch.logs.length,
-            rpcAcquisitionMs,
-            completeEvidenceAtMs,
-            outboxDurableAtMs,
-            acquisitionStartedAtMs: acquisitionAt,
-            headObservedAtMs: telemetry.headObservedAtMs,
-            notifyAttemptCompletedAtMs: metricInput ? Date.now() : null,
-            deliveredAtMs: delivery.deliveredAtMs,
-            writeLatencyMs,
-            processingLatencyMs,
-            headAcquisitionLagMs:
-              head.timestampSec > 0 ? Math.max(0, acquisitionAt - head.timestampSec * 1000) : null,
-            stageMs: timings.snapshot(),
-            localProcessingMs,
-            headObservedAgeMs,
-            acceptedDataAgeMs,
-            counts: { ...workCounts.counts },
-          });
-          workCounts.close();
-          // Per-batch line: stages, real structural counts and data ages only. No
-          // endpoint URL, credential or full catalogue ever reaches this log.
-          console.log(
-            encodeJson({
-              event: 'batch-timing',
-              runId: id,
-              batchId: batch.id,
+            await timings.measureAsync('commitOther', async () => reader.flush?.());
+            shutdown.throwIfRequested();
+            const commitAt = Date.now();
+            // The accepted transaction writes the batch's own discoveries, and a nested one must
+            // never make them durable in a cache the outer transaction could still roll back.
+            // `stage` is what puts the batch's registrations in the view the projection decodes
+            // against; the batch's round is published only after it commits.
+            prepared?.stage(timed.poolRegistrations ?? []);
+            const changes: RangeChangeSet =
+              metricInput && options.signalConfig
+                ? signalStage('accepted-batch', () =>
+                    commitAcceptedSignalBatch(db, metricInput, options.signalConfig!, timed, {
+                      startNewSegment: latestStart && from === start,
+                      timings,
+                      registry: prepared ?? undefined,
+                    }),
+                  ).changes
+                : store.acceptRange(timed, { startNewSegment: latestStart && from === start });
+            prepared?.publish();
+            operationFilters.publish();
+            const outboxDurableAtMs = metricInput ? Date.now() : null;
+            const writeLatencyMs = rawWriteMs + Date.now() - commitAt;
+            if (metricInput) telemetry.markProjectionFresh();
+            const processingLatencyMs =
+              completeEvidenceAtMs !== null && outboxDurableAtMs !== null
+                ? outboxDurableAtMs - completeEvidenceAtMs
+                : null;
+            if (processingLatencyMs !== null) reader.meter.recordProcessing(processingLatencyMs);
+            const delivery = await timings.measureAsync('notify', () =>
+              drain(batch.captureMode !== 'live'),
+            );
+            const localProcessingMs = processingLatencyMs;
+            const headObservedAgeMs =
+              telemetry.headObservedAtMs === null ? null : Date.now() - telemetry.headObservedAtMs;
+            // Wall-clock age of the data this batch accepted, next to the stage
+            // breakdown, so a fast batch on stale data cannot look healthy.
+            const acceptedDataAgeMs =
+              end.timestampSec > 0 ? Math.max(0, Date.now() - end.timestampSec * 1000) : null;
+            telemetry.batchTimings.push({
               phase,
-              captureMode: batch.captureMode,
+              batchId: batch.id,
               fromBlock: from,
               toBlock: end.number,
               logs: batch.logs.length,
               rpcAcquisitionMs,
+              completeEvidenceAtMs,
+              outboxDurableAtMs,
+              acquisitionStartedAtMs: acquisitionAt,
+              headObservedAtMs: telemetry.headObservedAtMs,
+              notifyAttemptCompletedAtMs: metricInput ? Date.now() : null,
+              deliveredAtMs: delivery.deliveredAtMs,
               writeLatencyMs,
+              processingLatencyMs,
+              headAcquisitionLagMs:
+                head.timestampSec > 0
+                  ? Math.max(0, acquisitionAt - head.timestampSec * 1000)
+                  : null,
+              stageMs: timings.snapshot(),
               localProcessingMs,
               headObservedAgeMs,
               acceptedDataAgeMs,
-              stageMs: timings.snapshot(),
-              counts: workCounts.counts,
-            }),
-          );
-          batchRecords.at(-1)!.accepted = true;
-          counts.operationBatches++;
-          telemetry.sample(null);
-          return changes;
+              counts: { ...workCounts.counts },
+            });
+            workCounts.close();
+            // Per-batch line: stages, real structural counts and data ages only. No
+            // endpoint URL, credential or full catalogue ever reaches this log.
+            console.log(
+              encodeJson({
+                event: 'batch-timing',
+                runId: id,
+                batchId: batch.id,
+                phase,
+                captureMode: batch.captureMode,
+                fromBlock: from,
+                toBlock: end.number,
+                logs: batch.logs.length,
+                rpcAcquisitionMs,
+                writeLatencyMs,
+                localProcessingMs,
+                headObservedAgeMs,
+                acceptedDataAgeMs,
+                stageMs: timings.snapshot(),
+                counts: workCounts.counts,
+              }),
+            );
+            batchRecords.at(-1)!.accepted = true;
+            counts.operationBatches++;
+            telemetry.sample(null);
+            return changes;
+          } finally {
+            // Every path out of this batch settles the context it prepared. `discard` after a
+            // `publish` is already settled and does nothing, so the success path is untouched.
+            prepared?.discard();
+            operationFilters.discard();
+          }
         },
         onProgress: (health) => {
           const runtimeHealth = telemetry.sample(

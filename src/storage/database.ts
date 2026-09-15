@@ -26,6 +26,8 @@ const migration = [
   '008-token-metadata.sql',
   '009-payload-store.sql',
   '010-history-jobs.sql',
+  '011-registry-changes.sql',
+  '012-batch-coverage.sql',
 ]
   .map(loadMigration)
   .join('\n');

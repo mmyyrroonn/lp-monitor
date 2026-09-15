@@ -13,7 +13,13 @@ import type {
 } from '../domain/types.js';
 import { verifySuccessfulShardCoverage } from '../ingest/completeness.js';
 import { countWork } from '../ops/work-counters.js';
+import { BatchCoverageStore } from './batch-coverage.js';
 import { readBatch, writeCompactBatch } from './payload-store.js';
+import {
+  decodeStoredRegistration,
+  storedPoolKey,
+  storedRegistrationJson,
+} from './registration-codec.js';
 import {
   rawLogKey,
   type FetchShardManifest,
@@ -117,6 +123,11 @@ export class SqliteRangeStore {
         const before = this.activeMap(batch.scopeId, bounds, explicitRefs);
         const beforeTimes = this.activeTimeMap(batch.scopeId, bounds, explicitRefs);
         this.persistTransport(batch);
+        // Record the coverage verdict here, where acceptance was decided, so a later reader can
+        // take this batch's proof instead of decoding the batch again. A batch whose stored
+        // evidence does not state its own coverage simply gets no proof and stays on the strict
+        // read path; acceptance itself is unaffected.
+        new BatchCoverageStore(this.database).accept(batch);
         this.reconcileActive(batch, shards);
         this.reconcilePools(batch, shards);
         this.persistDerived(batch, shards);
@@ -499,7 +510,53 @@ export class SqliteRangeStore {
       )
       .all(scopeId) as { payload_json: string }[];
     countWork('registryRowsRead', rows.length);
-    return rows.map((row) => decodePoolRegistration(row.payload_json));
+    return rows.map((row) => decodeStoredRegistration(row.payload_json));
+  }
+
+  /**
+   * Materialize a catalogue that no batch carries — a replayed dataset whose batches state only the
+   * pools their own events touch, or a window whose discovery history is outside the export. The
+   * rows are bounded by the caller's cutoff and inserted, never replaced: a pool the register does
+   * not mention is unknown, not withdrawn, so this can only add to what the batches already proved.
+   */
+  persistCatalogue(
+    scopeId: WatchScopeId,
+    registrations: readonly PersistedPoolRegistration[],
+  ): { written: number; unplaced: readonly PersistedPoolRegistration[] } {
+    const findRawId = this.database.prepare('select id from raw_logs where raw_key = ?').pluck();
+    const insertPool = this.database.prepare(
+      `insert or ignore into pools(
+         scope_id, pool_key, protocol, discovered_raw_log_id, discovered_block_number,
+         discovered_block_hash, payload_json
+       ) values (?, ?, ?, ?, ?, ?, ?)`,
+    );
+    return this.database
+      .transaction(() => {
+        let written = 0;
+        const unplaced: PersistedPoolRegistration[] = [];
+        for (const registration of registrations) {
+          const key = rawLogKey(registration.discoveredAt);
+          const discoveredRawId = findRawId.get(key) as number | undefined;
+          // A register row names the block its pool came from, and that evidence has to be in this
+          // dataset already. Fetching it back would silently repair history, and inventing a raw
+          // row would forge evidence, so a pool without it stays unknown and is reported as such.
+          if (discoveredRawId === undefined) {
+            unplaced.push(registration);
+            continue;
+          }
+          written += insertPool.run(
+            scopeId,
+            storedPoolKey(registration),
+            registration.pool.protocol,
+            discoveredRawId,
+            checkedHeight(registration.discoveredAt.blockNumber),
+            normalizeHex(registration.discoveredAt.blockHash),
+            storedRegistrationJson(registration),
+          ).changes;
+        }
+        return { written, unplaced };
+      })
+      .immediate();
   }
 
   resetForWarmup(scopeId: WatchScopeId): RangeChangeSet {
@@ -887,12 +944,12 @@ export class SqliteRangeStore {
       }
       insertPool.run(
         batch.scopeId,
-        poolKey(registration),
+        storedPoolKey(registration),
         registration.pool.protocol,
         discoveredRawId,
         checkedHeight(registration.discoveredAt.blockNumber),
         normalizeHex(registration.discoveredAt.blockHash),
-        losslessJson(normalizePoolRegistration(registration)),
+        storedRegistrationJson(registration),
       );
     }
   }
@@ -1110,6 +1167,9 @@ function transportJson(batch: RecordedRangeBatch): string {
     filterPlanHash: batch.filterPlanHash,
     manifestHash: batch.manifestHash,
     completeness: batch.completeness,
+    // The registration records themselves are persisted as `pools` rows; the mode that says how to
+    // read the batch's own array travels with the transport, so a reader never has to guess.
+    ...(batch.registryMode === undefined ? {} : { registryMode: batch.registryMode }),
     manifest: {
       ...batch.manifest,
       shards: batch.manifest.shards.map((shard) => ({
@@ -1190,56 +1250,4 @@ function minimumBlock(refs: readonly LogRef[], fallback: bigint): bigint {
     (minimum, ref) => (ref.blockNumber < minimum ? ref.blockNumber : minimum),
     refs.length === 0 ? fallback : refs[0]!.blockNumber,
   );
-}
-
-function poolKey(registration: PersistedPoolRegistration): string {
-  return losslessJson(
-    registration.pool.protocol === 'v3'
-      ? {
-          chainId: registration.pool.chainId,
-          protocol: registration.pool.protocol,
-          address: normalizeHex(registration.pool.address),
-        }
-      : {
-          chainId: registration.pool.chainId,
-          protocol: registration.pool.protocol,
-          manager: normalizeHex(registration.pool.manager),
-          poolId: normalizeHex(registration.pool.poolId),
-        },
-  );
-}
-
-function normalizePoolRegistration(registration: PersistedPoolRegistration): object {
-  const pool =
-    registration.pool.protocol === 'v3'
-      ? { ...registration.pool, address: normalizeHex(registration.pool.address) }
-      : {
-          ...registration.pool,
-          manager: normalizeHex(registration.pool.manager),
-          poolId: normalizeHex(registration.pool.poolId),
-        };
-  return {
-    ...registration,
-    pool,
-    token0: normalizeHex(registration.token0),
-    token1: normalizeHex(registration.token1),
-    hooks: normalizeHex(registration.hooks),
-    discoveredAt: {
-      ...registration.discoveredAt,
-      blockHash: normalizeHex(registration.discoveredAt.blockHash),
-      transactionHash: normalizeHex(registration.discoveredAt.transactionHash),
-    },
-  };
-}
-
-function decodePoolRegistration(payloadJson: string): PersistedPoolRegistration {
-  const value = JSON.parse(payloadJson) as Record<string, unknown>;
-  const discoveredAt = value.discoveredAt as Record<string, unknown>;
-  return {
-    ...(value as Omit<PersistedPoolRegistration, 'discoveredAt'>),
-    discoveredAt: {
-      ...(discoveredAt as Omit<LogRef, 'blockNumber'>),
-      blockNumber: BigInt(discoveredAt.blockNumber as string),
-    },
-  };
 }

@@ -105,6 +105,90 @@ export function verifySuccessfulShardCoverage(
   return batch.manifest.expectedShardIds.map((id) => actual.get(id)!);
 }
 
+/** The `fetch_shards` columns a reader compares a stored batch against. Shared so the strict
+ * reader and the accept-time coverage proof agree on what "the stored shards are this batch's
+ * successful shards" means. */
+export type StoredShardRow = {
+  shard_id: string;
+  status: string;
+  response_hash: string | null;
+  log_count: number;
+  error: string | null;
+};
+
+export type BlockInterval = { fromBlock: bigint; toBlock: bigint };
+
+export function coversIntervals(
+  ranges: readonly BlockInterval[],
+  from: bigint,
+  to: bigint,
+): boolean {
+  if (to < from) return true;
+  let next = from;
+  for (const range of [...ranges].sort((a, b) =>
+    a.fromBlock < b.fromBlock ? -1 : a.fromBlock > b.fromBlock ? 1 : 0,
+  )) {
+    if (range.fromBlock > next) return false;
+    if (range.toBlock >= next) next = range.toBlock + 1n;
+    if (next > to) return true;
+  }
+  return false;
+}
+
+/** True when the stored shard rows are exactly this batch's shards, all successful with matching
+ * response evidence. A row that moved is a batch whose coverage is no longer established. */
+export function successfulShardRowsMatch(
+  stored: readonly StoredShardRow[],
+  batch: Pick<RecordedRangeBatch, 'manifest'>,
+): boolean {
+  return (
+    stored.length === batch.manifest.expectedShardIds.length &&
+    batch.manifest.shards.every((shard) =>
+      stored.some(
+        (item) =>
+          item.shard_id === shard.shardId &&
+          item.status === 'success' &&
+          item.response_hash === shard.responseHash &&
+          item.log_count === shard.logCount &&
+          item.error === null,
+      ),
+    )
+  );
+}
+
+// P1 transport retains decimal strings. Revive the narrow batch contract used by
+// the same successful-shard validator that guards acceptRange.
+export function completePartitions(batch: RecordedRangeBatch): boolean {
+  const partitions = new Map<string, BlockInterval[]>();
+  // Expand each concrete address/topic alternative. A shorter successful scan
+  // of address B must not borrow address A's block coverage under the same family.
+  for (const shard of batch.manifest.shards) {
+    let selectors: (string | null)[][] = shard.request.address.map((a) => [a.toLowerCase()]);
+    for (const topic of shard.request.topics) {
+      const alternatives =
+        topic === null
+          ? [null]
+          : typeof topic === 'string'
+            ? [topic.toLowerCase()]
+            : topic.map((t) => t.toLowerCase());
+      if (selectors.length * alternatives.length > 100000) return false;
+      selectors = selectors.flatMap((prefix) => alternatives.map((t) => [...prefix, t]));
+    }
+    for (const selector of selectors) {
+      const key = JSON.stringify([shard.filterId, ...selector]);
+      const intervals = partitions.get(key) ?? [];
+      intervals.push({ fromBlock: shard.request.fromBlock, toBlock: shard.request.toBlock });
+      partitions.set(key, intervals);
+    }
+  }
+  return (
+    partitions.size > 0 &&
+    [...partitions.values()].every((ranges) =>
+      coversIntervals(ranges, batch.fromBlock, batch.toBlock),
+    )
+  );
+}
+
 function checkedHeight(value: bigint): number {
   try {
     return encodeCheckedInteger(value, 0, Number.MAX_SAFE_INTEGER);

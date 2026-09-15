@@ -60,6 +60,12 @@ export interface RecordedRangeBatch extends RangeBatch {
   anchors?: readonly BlockAnchor[];
   boundaries?: readonly MinuteBoundary[];
   poolRegistrations?: readonly PersistedPoolRegistration[];
+  /**
+   * How `poolRegistrations` is to be read. Absent keeps the original reading: the array is the
+   * whole catalogue the batch was planned from. `referenced-v1` means the array holds exactly the
+   * pools the batch's own logs touch, so a pool it does not mention is unknown, not withdrawn.
+   */
+  registryMode?: 'referenced-v1';
 }
 
 export type RangeInvalidationRecord = {

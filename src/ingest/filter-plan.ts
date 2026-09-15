@@ -9,7 +9,8 @@ import { v4ManagerAbi } from '../protocols/uniswap-v4/abi.js';
 
 export type FetchMode = 'operations' | 'discovery-only';
 export type LogFilter = Parameters<ChainReader['getLogs']>[0];
-export type FilterFamily = 'discovery-v3' | 'discovery-v4' | 'operation-v3' | 'operation-v4';
+export type OperationFamily = 'operation-v3' | 'operation-v4';
+export type FilterFamily = 'discovery-v3' | 'discovery-v4' | OperationFamily;
 export interface PlannedFilter {
   readonly id: FilterFamily;
   readonly family: FilterFamily;
@@ -18,6 +19,22 @@ export interface PlannedFilter {
 export interface ProtocolDeployments {
   readonly v3Factory: Address;
   readonly v4Manager: Address;
+}
+/** The values half of a request filter: what to ask for, with no block range attached. */
+export interface ShardFilter {
+  readonly address: readonly Address[];
+  readonly topics: readonly (Hex | readonly Hex[] | null)[];
+}
+/** One pool-request template: a chunk of values that fits inside a single bounded request. */
+export interface OperationShard {
+  readonly id: OperationFamily;
+  readonly family: OperationFamily;
+  readonly filter: ShardFilter;
+}
+/** The distinct pool identities every operation request for one catalogue is built from. */
+export interface OperationFilterValues {
+  readonly v3Addresses: readonly Address[];
+  readonly v4PoolIds: readonly Hex[];
 }
 
 const eventTopic = (abi: readonly unknown[], name: string): Hex =>
@@ -39,6 +56,14 @@ const v4OperationTopics = [
   'ProtocolFeeUpdated',
 ].map((name) => eventTopic(v4ManagerAbi, name));
 const addressTopic = (address: Address): Hex => padHex(address.toLowerCase() as Hex, { size: 32 });
+const v4OperationTopicSet = new Set<string>(v4OperationTopics.map((topic) => topic.toLowerCase()));
+/** Lowercase a hex identity without losing its type: every request value and index key is lowercase. */
+export const lower = <T extends string>(value: T): T => value.toLowerCase() as T;
+
+/** Whether a topic is one of the manager events an operation request asks for. */
+export function isV4OperationTopic(topic: string): boolean {
+  return v4OperationTopicSet.has(topic.toLowerCase());
+}
 
 function valueChunks<T>(values: readonly T[], maximum: number): readonly (readonly T[])[] {
   const chunks: T[][] = [];
@@ -48,41 +73,64 @@ function valueChunks<T>(values: readonly T[], maximum: number): readonly (readon
   return chunks;
 }
 
+function ensureFilterValueLimit(maxFilterValues: number): void {
+  if (!Number.isSafeInteger(maxFilterValues) || maxFilterValues <= 0) {
+    throw new RangeError('maxFilterValues must be a positive safe integer');
+  }
+}
+
+/**
+ * Every value split of one filter's value lists, each small enough to be one bounded request.
+ *
+ * Only the value lists move: the rest of a filter is whatever the caller reattaches, which is how
+ * the same split shards serve every block range they are asked for.
+ */
+function partitionValues(filter: ShardFilter, maxFilterValues: number): readonly ShardFilter[] {
+  let splits: ShardFilter[] = [{ address: filter.address, topics: filter.topics }];
+  if (filter.address.length > maxFilterValues) {
+    splits = valueChunks(filter.address, maxFilterValues).map((address) => ({
+      address,
+      topics: filter.topics,
+    }));
+  }
+  for (let index = 0; index < filter.topics.length; index++) {
+    const alternatives = filter.topics[index];
+    if (
+      alternatives === undefined ||
+      alternatives === null ||
+      typeof alternatives === 'string' ||
+      alternatives.length <= maxFilterValues
+    ) {
+      continue;
+    }
+    splits = splits.flatMap((split) =>
+      valueChunks(alternatives, maxFilterValues).map((values) => {
+        const topics = [...split.topics];
+        topics[index] = values.length === 1 ? values[0]! : values;
+        return { address: split.address, topics };
+      }),
+    );
+  }
+  return splits;
+}
+
 function partitionPlans(
   plans: readonly PlannedFilter[],
   maxFilterValues: number,
 ): readonly PlannedFilter[] {
-  if (!Number.isSafeInteger(maxFilterValues) || maxFilterValues <= 0) {
-    throw new RangeError('maxFilterValues must be a positive safe integer');
-  }
-  return plans.flatMap((planned) => {
-    let filters: LogFilter[] = [planned.filter];
-    if (planned.filter.address.length > maxFilterValues) {
-      filters = valueChunks(planned.filter.address, maxFilterValues).map((address) => ({
-        ...planned.filter,
-        address,
-      }));
-    }
-    for (let index = 0; index < planned.filter.topics.length; index++) {
-      const alternatives = planned.filter.topics[index];
-      if (
-        alternatives === undefined ||
-        alternatives === null ||
-        typeof alternatives === 'string' ||
-        alternatives.length <= maxFilterValues
-      ) {
-        continue;
-      }
-      filters = filters.flatMap((filter) =>
-        valueChunks(alternatives, maxFilterValues).map((values) => {
-          const topics = [...filter.topics];
-          topics[index] = values.length === 1 ? values[0]! : values;
-          return { ...filter, topics };
-        }),
-      );
-    }
-    return filters.map((filter) => ({ ...planned, filter }));
-  });
+  ensureFilterValueLimit(maxFilterValues);
+  return plans.flatMap((planned) =>
+    partitionValues(planned.filter, maxFilterValues).map((partitioned) => ({
+      id: planned.id,
+      family: planned.family,
+      filter: {
+        fromBlock: planned.filter.fromBlock,
+        toBlock: planned.filter.toBlock,
+        address: partitioned.address,
+        topics: partitioned.topics,
+      },
+    })),
+  );
 }
 
 export const discoveryEventFamilies = ['uniswap-v3:PoolCreated', 'uniswap-v4:Initialize'] as const;
@@ -167,6 +215,68 @@ export function buildDiscoveryFilterPlan(
   );
 }
 
+/** The distinct values of one protocol's pool identities, in the one order every request uses. */
+function identityValues<T extends string>(values: readonly T[]): readonly T[] {
+  return [...new Set(values)].sort();
+}
+
+/** The distinct, sorted pool identities one catalogue asks operations for. */
+export function operationFilterValues(
+  registrations: readonly PoolRegistration[],
+): OperationFilterValues {
+  return {
+    v3Addresses: identityValues(
+      registrations.flatMap((registration) =>
+        registration.pool.protocol === 'v3' ? [lower(registration.pool.address)] : [],
+      ),
+    ),
+    v4PoolIds: identityValues(
+      registrations.flatMap((registration) =>
+        registration.pool.protocol === 'v4' ? [lower(registration.pool.poolId)] : [],
+      ),
+    ),
+  };
+}
+
+/**
+ * Every operation request the given pool identities need, already split to the value limit.
+ *
+ * The returned shards carry no block range: a caller that keeps them can plan the same pools for a
+ * later range without sorting, deduplicating or re-reading the catalogue they came from.
+ */
+export function buildOperationShardFilters(
+  values: OperationFilterValues,
+  contracts: Pick<ProtocolDeployments, 'v4Manager'>,
+  maxFilterValues = 1_000,
+): readonly OperationShard[] {
+  ensureFilterValueLimit(maxFilterValues);
+  const shards: OperationShard[] = [];
+  if (values.v3Addresses.length > 0) {
+    shards.push({
+      id: 'operation-v3',
+      family: 'operation-v3',
+      filter: { address: values.v3Addresses, topics: [v3OperationTopics] },
+    });
+  }
+  if (values.v4PoolIds.length > 0) {
+    shards.push({
+      id: 'operation-v4',
+      family: 'operation-v4',
+      filter: {
+        address: [contracts.v4Manager.toLowerCase() as Address],
+        topics: [v4OperationTopics, values.v4PoolIds],
+      },
+    });
+  }
+  return shards.flatMap((shard) =>
+    partitionValues(shard.filter, maxFilterValues).map((filter) => ({
+      id: shard.id,
+      family: shard.family,
+      filter,
+    })),
+  );
+}
+
 export function buildOperationFilterPlan(
   registrations: readonly PoolRegistration[],
   contracts: Pick<ProtocolDeployments, 'v4Manager'>,
@@ -174,44 +284,18 @@ export function buildOperationFilterPlan(
   toBlock: bigint,
   maxFilterValues = 1_000,
 ): readonly PlannedFilter[] {
-  const v3Addresses = [
-    ...new Set(
-      registrations.flatMap((registration) =>
-        registration.pool.protocol === 'v3' ? [registration.pool.address] : [],
-      ),
-    ),
-  ].sort();
-  const v4PoolIds = [
-    ...new Set(
-      registrations.flatMap((registration) =>
-        registration.pool.protocol === 'v4' ? [registration.pool.poolId] : [],
-      ),
-    ),
-  ].sort();
-  const filters: PlannedFilter[] = [];
-  if (v3Addresses.length > 0) {
-    filters.push({
-      id: 'operation-v3',
-      family: 'operation-v3',
-      filter: {
-        fromBlock,
-        toBlock,
-        address: v3Addresses,
-        topics: [v3OperationTopics],
-      },
-    });
-  }
-  if (v4PoolIds.length > 0) {
-    filters.push({
-      id: 'operation-v4',
-      family: 'operation-v4',
-      filter: {
-        fromBlock,
-        toBlock,
-        address: [contracts.v4Manager.toLowerCase() as Address],
-        topics: [v4OperationTopics, v4PoolIds],
-      },
-    });
-  }
-  return partitionPlans(filters, maxFilterValues);
+  return buildOperationShardFilters(
+    operationFilterValues(registrations),
+    contracts,
+    maxFilterValues,
+  ).map((shard) => ({
+    id: shard.family,
+    family: shard.family,
+    filter: {
+      fromBlock,
+      toBlock,
+      address: shard.filter.address,
+      topics: shard.filter.topics,
+    },
+  }));
 }

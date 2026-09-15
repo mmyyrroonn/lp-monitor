@@ -7,9 +7,14 @@ import type { BlockAnchor } from '../domain/types.js';
 import { poolRegistrationId } from '../registry/pools.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
 import { encodeBatchReference, putPayload } from '../storage/payload-store.js';
-import { LiveProjectionStore, type LiveProjectionChanges } from '../storage/live-projection.js';
+import {
+  LiveProjectionStore,
+  type LiveProjectionChanges,
+  type RegistryEvidence,
+} from '../storage/live-projection.js';
 import { StaleMetricProjectionError } from '../storage/metric-store.js';
 import { SqliteProjectionStore } from '../storage/projection-store.js';
+import type { PreparedRegistry } from '../storage/registry-cache.js';
 import {
   buildMetricsReport,
   type MetricInput,
@@ -47,6 +52,12 @@ type Evidence = {
   events: Record<string, EvidenceItem>;
   closedCoverage: Record<string, EvidenceItem>;
   pools: Record<string, EvidenceItem>;
+  /**
+   * Present when `pools` is a bounded delta rather than the whole catalogue: it names the registry
+   * position the delta was taken from, and its presence is what tells `repairedFrom` to read the
+   * group that way. One change per identity, and only since the previous window.
+   */
+  registry?: { format: 'registry-evidence-v1'; revisionKey: string };
 };
 type Cursor = {
   config_hash: string;
@@ -187,7 +198,15 @@ export function retractSignals(
     return records;
   })();
 }
-function readEvidence(db: Database.Database, input: MetricInput, report: MetricsReport): Evidence {
+/** A pool the registry no longer holds, distinguished from every real registration digest. */
+const REMOVED_POOL_DIGEST = 'no-longer-registered';
+
+function readEvidence(
+  db: Database.Database,
+  input: MetricInput,
+  report: MetricsReport,
+  registry?: RegistryEvidence,
+): Evidence {
   const raw = new SqliteRangeStore(db);
   const bounds =
     report.liveSinceSec === null ? undefined : { sinceSec: Math.max(0, report.liveSinceSec - 120) };
@@ -254,16 +273,29 @@ function readEvidence(db: Database.Database, input: MetricInput, report: Metrics
         c.reasons.every((reason) => reason === 'watermark-partial'),
     };
   const pools: Evidence['pools'] = {};
-  for (const p of [...raw.pools(input.registryScopeId), ...raw.pools(input.scopeId)])
-    pools[poolRegistrationId(p)] = {
-      block: p.discoveredAt.blockNumber,
-      digest: digest(p),
-      poolIds: [poolRegistrationId(p)],
-    };
+  if (registry) {
+    // The live path never reads the catalogue here: the journal already named the identities that
+    // moved, and each one carries the registration it now holds (or nothing, when it is gone).
+    for (const change of registry.changes)
+      pools[change.poolId] = {
+        block: change.block,
+        digest: change.record ? digest(change.record) : REMOVED_POOL_DIGEST,
+        poolIds: [change.poolId],
+      };
+  } else
+    for (const p of [...raw.pools(input.registryScopeId), ...raw.pools(input.scopeId)])
+      pools[poolRegistrationId(p)] = {
+        block: p.discoveredAt.blockNumber,
+        digest: digest(p),
+        poolIds: [poolRegistrationId(p)],
+      };
   return {
     events,
     closedCoverage,
     pools,
+    ...(registry
+      ? { registry: { format: 'registry-evidence-v1' as const, revisionKey: registry.revisionKey } }
+      : {}),
     contextIncomplete: report.windowContextIncomplete,
     ...(bounds
       ? { sinceSec: bounds.sinceSec, ...(blockBounds ? { sinceBlock: blockBounds.fromBlock } : {}) }
@@ -281,7 +313,21 @@ function repairedFrom(
     for (const owner of owners ?? ['*']) affected.add(owner);
     if (from === null || block < from) from = block;
   };
+  // A live registry evidence group is a bounded delta, not a catalogue: it carries one entry per
+  // identity that moved since the previous window. An identity the previous window never reported
+  // is news only when it already existed at that window's tip; one it did report and that is absent
+  // now simply did not move again, which is not a removal.
+  const registryDelta = old.registry?.format === 'registry-evidence-v1';
   for (const group of ['events', 'pools', 'closedCoverage'] as const) {
+    if (group === 'pools' && registryDelta) {
+      for (const [id, item] of Object.entries(current.pools)) {
+        const before = old.pools[id];
+        if (before !== undefined && before.digest === item.digest) continue;
+        if (before === undefined && item.block > tip) continue;
+        add(item.block, item.poolIds);
+      }
+      continue;
+    }
     for (const [id, item] of Object.entries(old[group])) {
       const now = current[group][id];
       if (
@@ -435,7 +481,7 @@ export function projectSignals(
         !pendingRepair
       )
         return [];
-      const evidence = readEvidence(db, input, report);
+      const evidence = readEvidence(db, input, report, liveChanges?.registry);
       let repair: bigint | null = null;
       const affected = new Set<string>();
       let branchChanged = false;
@@ -634,7 +680,7 @@ export function commitAcceptedSignalBatch(
   input: MetricInput,
   config: SignalConfig,
   batch: RecordedRangeBatch,
-  options: { startNewSegment?: boolean; timings?: BatchTimings } = {},
+  options: { startNewSegment?: boolean; timings?: BatchTimings; registry?: PreparedRegistry } = {},
 ) {
   if (batch.scopeId !== input.scopeId) throw new Error('Signal batch scope mismatch');
   const { timings } = options;
@@ -646,7 +692,12 @@ export function commitAcceptedSignalBatch(
         new SqliteRangeStore(db).acceptRange(batch, { startNewSegment: options.startNewSegment }),
       );
       const liveChanges = measureStage(timings, 'projection', () =>
-        new LiveProjectionStore(db).sync(input.scopeId, input.registryScopeId, input.configVersion),
+        new LiveProjectionStore(db).sync(
+          input.scopeId,
+          input.registryScopeId,
+          input.configVersion,
+          options.registry,
+        ),
       );
       const alerts = projectSignals(
         db,

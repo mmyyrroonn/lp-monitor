@@ -7,6 +7,12 @@ export interface ReplayIssue {
   scopeId?: string;
   detail: string;
 }
+/**
+ * The strict entry: integrity re-derives coverage from the batch itself on every call, so it
+ * deliberately does not consult a stored coverage proof. A proof says the accepting transaction
+ * verified this batch; an audit asking whether the stored payload still supports that claim is
+ * the one caller that has to decode it.
+ */
 export function checkBatchIntegrity(batch: RecordedRangeBatch, timing = true): ReplayIssue[] {
   const issues: ReplayIssue[] = [];
   try {

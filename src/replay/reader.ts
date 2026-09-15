@@ -8,11 +8,38 @@ import { encodeJson } from '../domain/json.js';
 import type { AssetRegistration, AssetRegistry } from '../registry/assets.js';
 import type { MetricMetadata } from '../metrics/metadata.js';
 import { missingIntervals } from '../ops/history.js';
-import type { RecordedRangeBatch } from '../storage/manifest.js';
+import type { PersistedPoolRegistration, RecordedRangeBatch } from '../storage/manifest.js';
 import type { ReplayIssue } from './integrity.js';
 export const contentHash = (value: unknown) =>
   createHash('sha256').update(encodeJson(value)).digest('hex');
 const normalise = (value: string) => value.replace(/\\/g, '/');
+/** Where a catalogue snapshot came from, and whether its study-point availability is proven. */
+export interface ReplayCatalogueSource {
+  /** `local-pools` is a read of the recording database taken while the export ran. */
+  reader: 'local-pools' | 'provided';
+  /**
+   * `as-of` only when the source proves the catalogue was recorded no later than `asOfBlock`.
+   * A read taken while the export ran cannot: the database kept accepting batches after the study
+   * point, so a catalogue pool may have become known much later. It stays `retrospective` and must
+   * never be presented as evidence of what the study point knew.
+   */
+  availability: 'as-of' | 'retrospective';
+}
+
+/** The complete pool register, exported once instead of being repeated inside every batch. */
+export interface ReplayCatalogueSnapshot {
+  version: 1;
+  /** A pool registered under another scope does not belong to this catalogue. */
+  registryScopeId: string;
+  /** The asset version these registrations were decoded against. */
+  assetVersion: string;
+  /** Complete only through this height: a discovery above it was not knowable at the cutoff. */
+  asOfBlock: string;
+  source: ReplayCatalogueSource;
+  /** Includes the pools that never traded: silence is coverage, not absence. */
+  pools: PersistedPoolRegistration[];
+}
+
 export interface ReplayInputSnapshot {
   configVersion: string;
   usdg: Address;
@@ -20,6 +47,7 @@ export interface ReplayInputSnapshot {
   metadata: MetricMetadata;
   availableAtSec: number;
   cohortMode: 'as-of' | 'retrospective-cohort';
+  catalogue?: ReplayCatalogueSnapshot;
 }
 export interface ReplayBatchReference {
   id: string;
@@ -87,8 +115,89 @@ export function assetRegistry(snapshot: ReplayInputSnapshot): AssetRegistry {
     has: (a) => assets.some((x) => x.address.toLowerCase() === a.toLowerCase()),
   };
 }
-export function readReplayManifest(path: string) {
-  const directory = realpathSync(dirname(resolve(path)));
+/** Manifests are JSON: a height written by `encodeJson` arrives as a decimal string. */
+const height = (value: unknown): bigint | null =>
+  typeof value === 'bigint'
+    ? value
+    : typeof value === 'string' && /^\d+$/.test(value)
+      ? BigInt(value)
+      : typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
+        ? BigInt(value)
+        : null;
+export interface ReplayCatalogueRead {
+  /** The catalogue bounded by both its own cutoff and the export range. */
+  pools: readonly PersistedPoolRegistration[];
+  issues: ReplayIssue[];
+}
+/** Read the one-shot catalogue a replay relies on, or `undefined` when the dataset states none. */
+export function readCatalogue(
+  snapshot: ReplayInputSnapshot,
+  expected: { registryScopeId: string; assetVersion: string; cutoffBlock: bigint },
+): ReplayCatalogueRead | undefined {
+  const catalogue = snapshot.catalogue as ReplayCatalogueSnapshot | undefined;
+  if (catalogue === undefined || catalogue === null) return undefined;
+  const issues: ReplayIssue[] = [];
+  const asOf = height(catalogue.asOfBlock);
+  if (catalogue.version !== 1 || !Array.isArray(catalogue.pools) || asOf === null)
+    return {
+      pools: [],
+      issues: [
+        {
+          code: 'catalogue-snapshot-invalid',
+          detail: 'The exported catalogue snapshot is not a readable version 1 register',
+        },
+      ],
+    };
+  if (catalogue.registryScopeId !== expected.registryScopeId)
+    // Another scope's register is not this dataset's catalogue, and must not stand in for it.
+    return {
+      pools: [],
+      issues: [
+        {
+          code: 'catalogue-scope-mismatch',
+          detail: `The catalogue belongs to scope ${catalogue.registryScopeId}, not ${expected.registryScopeId}`,
+        },
+      ],
+    };
+  if (catalogue.assetVersion !== expected.assetVersion)
+    issues.push({
+      code: 'catalogue-asset-version-mismatch',
+      detail: 'The catalogue was decoded against a different asset version',
+    });
+  if (asOf > expected.cutoffBlock)
+    issues.push({
+      code: 'catalogue-cutoff-beyond-export',
+      detail: 'The catalogue claims completeness past the exported range and is read to the export cutoff',
+    });
+  if (catalogue.source?.availability === 'retrospective' && snapshot.cohortMode === 'as-of')
+    issues.push({
+      code: 'catalogue-not-as-of',
+      detail:
+        'The catalogue was read after the study point, so it cannot support an as-of claim about what was known then',
+    });
+  // The heights are read as heights, not as the decimal strings a manifest carries them as: a
+  // register is bounded by a comparison, and `'1200' < '600'` is a different question.
+  const pools: PersistedPoolRegistration[] = [];
+  for (const pool of catalogue.pools) {
+    const discoveredAt = height(pool?.discoveredAt?.blockNumber);
+    // Half a register would present itself as a whole one, so an unreadable row invalidates the
+    // catalogue rather than quietly dropping a pool out of it.
+    if (discoveredAt === null || typeof pool?.discoveredAt?.blockHash !== 'string')
+      return {
+        pools: [],
+        issues: [
+          {
+            code: 'catalogue-snapshot-invalid',
+            detail: 'The exported catalogue snapshot is not a readable version 1 register',
+          },
+        ],
+      };
+    pools.push({ ...pool, discoveredAt: { ...pool.discoveredAt, blockNumber: discoveredAt } });
+  }
+  const bound = asOf < expected.cutoffBlock ? asOf : expected.cutoffBlock;
+  return { pools: pools.filter((pool) => pool.discoveredAt.blockNumber <= bound), issues };
+}
+export function readReplayManifest(path: string) {  const directory = realpathSync(dirname(resolve(path)));
   const manifestText = readFileSync(path, 'utf8');
   const manifest = JSON.parse(manifestText) as ReplayManifest;
   if (

@@ -70,6 +70,39 @@ function equivalent(left: PoolRegistration, right: PoolRegistration): boolean {
   return encode(left) === encode(right);
 }
 
+/** Whether two records are the same stored bytes, so a caller can skip a write it already holds. */
+export function registrationsEqual(left: PoolRegistration, right: PoolRegistration): boolean {
+  return equivalent(left, right);
+}
+
+/**
+ * The one merge rule for a pool identity, shared by the batch preview and every live registry:
+ * a stored record stands unless the candidate is a different record with the same identity, in
+ * which case a seed record yields to a chain record and a chain record is kept as written.
+ *
+ * `changed` reports whether the stored record really moved. An equivalent rewrite keeps the record
+ * already held, so a caller caching by object identity is not invalidated by a re-encode.
+ */
+export function mergeRegistration(
+  existing: PoolRegistration | undefined,
+  candidate: PoolRegistration,
+): { changed: boolean; record: PoolRegistration } {
+  if (existing === undefined) return { changed: true, record: candidate };
+  if (equivalent(existing, candidate)) return { changed: false, record: existing };
+  const sameMetadata =
+    existing.token0 === candidate.token0 &&
+    existing.token1 === candidate.token1 &&
+    existing.feePips === candidate.feePips &&
+    existing.tickSpacing === candidate.tickSpacing &&
+    existing.hooks === candidate.hooks &&
+    existing.assetVersion === candidate.assetVersion;
+  if (!sameMetadata)
+    throw new Error(`Conflicting pool registration ${poolRegistrationId(candidate)}`);
+  if (existing.source !== 'seed-config' || candidate.source === 'seed-config')
+    return { changed: false, record: existing };
+  return { changed: true, record: candidate };
+}
+
 export class PoolRegistry {
   readonly #registrations = new Map<string, PoolRegistration>();
   constructor(seeds: readonly PoolRegistration[] = []) {
@@ -90,29 +123,33 @@ export class PoolRegistry {
       if (assetVersion !== undefined && candidate.assetVersion !== assetVersion) continue;
       const id = poolRegistrationId(candidate);
       const existing = merged.get(id);
-      if (existing !== undefined && !equivalent(existing, candidate)) {
-        const sameMetadata =
-          existing.token0 === candidate.token0 &&
-          existing.token1 === candidate.token1 &&
-          existing.feePips === candidate.feePips &&
-          existing.tickSpacing === candidate.tickSpacing &&
-          existing.hooks === candidate.hooks &&
-          existing.assetVersion === candidate.assetVersion;
-        if (!sameMetadata) throw new Error(`Conflicting pool registration ${id}`);
-        if (existing.source !== 'seed-config' || candidate.source === 'seed-config') continue;
-      }
-      merged.set(id, candidate);
+      const decision = mergeRegistration(existing, candidate);
+      if (decision.record !== existing) merged.set(id, decision.record);
     }
     return [...merged.values()].sort((left, right) =>
       poolRegistrationId(left).localeCompare(poolRegistrationId(right)),
     );
   }
+  /** O(1) lookup by `poolRegistrationId`. */
+  get(poolId: string): PoolRegistration | undefined {
+    return this.#registrations.get(poolId);
+  }
+  /** Merge one stored record in place under the shared rule; returns whether it moved. */
+  apply(candidate: PoolRegistration): boolean {
+    const normalized = normalizePoolRegistration(candidate);
+    const id = poolRegistrationId(normalized);
+    const decision = mergeRegistration(this.#registrations.get(id), normalized);
+    if (!decision.changed) return false;
+    this.#registrations.set(id, decision.record);
+    return true;
+  }
+  remove(poolId: string): boolean {
+    return this.#registrations.delete(poolId);
+  }
   registerAll(registrations: readonly PoolRegistration[]): void {
-    const merged = this.preview(registrations);
-    this.#registrations.clear();
-    for (const registration of merged) {
-      this.#registrations.set(poolRegistrationId(registration), registration);
-    }
+    // A union, not a replacement, and no full sort: the map carries no order, so the ordering
+    // preview applies to its returned array is only needed by callers that ask for an array.
+    for (const registration of registrations) this.apply(registration);
   }
   registerAccepted(batch: RecordedRangeBatch): void {
     if (batch.completeness !== 'complete') {
@@ -128,7 +165,7 @@ export class PoolRegistry {
         (discovery.blockNumber === anchor.number &&
           discovery.blockHash.toLowerCase() !== anchor.hash.toLowerCase())
       ) {
-        this.#registrations.delete(id);
+        this.remove(id);
       }
     }
   }

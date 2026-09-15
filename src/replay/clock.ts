@@ -101,6 +101,11 @@ export function mergeHistoricalBatches(batches: readonly RecordedRangeBatch[]): 
     boundaries: [...boundaries.values()],
     anchors: [...anchors.values()],
     poolRegistrations: [...pools.values()],
+    // Unioning partial registers cannot produce a complete one: if any input stated only the pools
+    // its own events touch, the merged array is still a dependency set, not the catalogue.
+    ...(batches.some((b) => b.registryMode === 'referenced-v1')
+      ? { registryMode: 'referenced-v1' as const }
+      : {}),
     manifest: { ...latest.manifest, expectedShardIds: shards.map((s) => s.shardId), shards },
   };
 }

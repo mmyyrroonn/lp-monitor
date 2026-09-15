@@ -291,6 +291,7 @@ function canonicalBatch(batch: RecordedRangeBatch): object {
     ...(batch.poolRegistrations === undefined
       ? {}
       : { poolRegistrations: batch.poolRegistrations }),
+    ...(batch.registryMode === undefined ? {} : { registryMode: batch.registryMode }),
   };
 }
 

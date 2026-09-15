@@ -11,7 +11,7 @@ import { readBatch } from '../storage/payload-store.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
 import { rawLogKey, type RecordedRangeBatch } from '../storage/manifest.js';
 import { checkBatchIntegrity } from './integrity.js';
-import type { ReplayInputSnapshot, ReplayManifestV2 } from './reader.js';
+import type { ReplayCatalogueSnapshot, ReplayInputSnapshot, ReplayManifestV2 } from './reader.js';
 
 const UNRESOLVED_TIME: LogTime = {
   minuteStartSec: null,
@@ -176,13 +176,49 @@ function relativeArtifact(output: string, path: string): void {
 
 function inputSnapshotMeta(snapshot: ReplayInputSnapshot | undefined) {
   if (!snapshot) return null;
+  const catalogue = snapshot.catalogue;
   return {
     configVersion: snapshot.configVersion,
     assetVersion: snapshot.assets.version,
     metadataVersion: snapshot.metadata.version,
     availableAtSec: snapshot.availableAtSec,
     cohortMode: snapshot.cohortMode,
+    // The register is stated once for the dataset and summarized here, so a reader can see its
+    // scope, cutoff, size and provenance without walking the pools.
+    ...(catalogue === undefined
+      ? {}
+      : {
+          catalogue: {
+            registryScopeId: catalogue.registryScopeId,
+            assetVersion: catalogue.assetVersion,
+            asOfBlock: catalogue.asOfBlock,
+            pools: catalogue.pools.length,
+            source: catalogue.source,
+          },
+        }),
     hash: sha256(Buffer.from(encodeJson(snapshot), 'utf8')),
+  };
+}
+
+/** The complete register travels once, instead of being repeated in every batch that touches a
+ *  pool. It is bounded by the export's own upper bound: a pool discovered later was not knowable
+ *  inside this range, so reading the catalogue whole would claim history the dataset cannot show. */
+function catalogueSnapshot(
+  store: SqliteRangeStore,
+  registryScopeId: string,
+  snapshot: ReplayInputSnapshot,
+  cutoffBlock: bigint,
+): ReplayCatalogueSnapshot {
+  return {
+    version: 1,
+    registryScopeId,
+    assetVersion: snapshot.assets.version,
+    asOfBlock: cutoffBlock.toString(),
+    // The read happens while the export runs, after the recording database has been accepting
+    // batches for however long it has. Nothing here proves the register was closed at the study
+    // point, so it is retrospective and must not be read as evidence of what was known then.
+    source: { reader: 'local-pools', availability: 'retrospective' },
+    pools: store.pools(registryScopeId).filter((pool) => pool.discoveredAt.blockNumber <= cutoffBlock),
   };
 }
 
@@ -215,6 +251,16 @@ export async function exportReplayDataset(
     sourceDb.exec('begin');
     const rows = batchRows(sourceDb, options);
     const store = new SqliteRangeStore(sourceDb);
+    const discoveryScope = options.discoveryScopeId ?? options.scopeId;
+    // A caller-supplied register is theirs and is carried verbatim; one the export fills in is
+    // read from this database here, once, rather than from the batches it is about to write.
+    const inputSnapshot =
+      options.inputSnapshot === undefined || options.inputSnapshot.catalogue !== undefined
+        ? options.inputSnapshot
+        : {
+            ...options.inputSnapshot,
+            catalogue: catalogueSnapshot(store, discoveryScope, options.inputSnapshot, options.toBlock),
+          };
     operationRows.push(...rows.filter((row) => row.scope_id === options.scopeId));
     const coverage = coverageFromRows(operationRows, options.fromBlock, options.toBlock);
     issues.push(
@@ -305,20 +351,19 @@ export async function exportReplayDataset(
       )
         issues.push('recorded-observed:observedAt-order-invalid');
     }
-    const discoveryScope = options.discoveryScopeId ?? options.scopeId;
     const manifest: ReplayManifestV2 = {
       version: 2,
       chainId: CHAIN_ID,
       scopeId: options.scopeId,
       discoveryScope,
-      configVersion: options.inputSnapshot?.configVersion,
-      assetVersion: options.inputSnapshot?.assets.version,
+      configVersion: inputSnapshot?.configVersion,
+      assetVersion: inputSnapshot?.assets.version,
       batches,
       segments,
-      replay: options.inputSnapshot
+      replay: inputSnapshot
         ? {
             version: 1,
-            input: options.inputSnapshot,
+            input: inputSnapshot,
             ...(options.codeHash ? { codeHash: options.codeHash } : {}),
             ...(options.abiHash ? { abiHash: options.abiHash } : {}),
           }
@@ -329,7 +374,7 @@ export async function exportReplayDataset(
         cohortMode: options.cohortMode,
         fromBlock: options.fromBlock.toString(),
         toBlock: options.toBlock.toString(),
-        inputSnapshot: inputSnapshotMeta(options.inputSnapshot),
+        inputSnapshot: inputSnapshotMeta(inputSnapshot),
         sourceHash: logicalSource.digest('hex'),
         coverage,
         timeQuality: {

@@ -13,6 +13,9 @@ import {
 import { fetchBoundedLogs, type FetchFragment, type FetchResult } from './fetch-range.js';
 import type { AssetRegistry } from '../registry/assets.js';
 import { PoolRegistry, type PoolRegistration } from '../registry/pools.js';
+import type { PreparedRegistry } from '../storage/registry-cache.js';
+import { referencedRegistrations } from './registry-dependencies.js';
+import type { OperationFilterIndex } from './operation-filter-index.js';
 import { discoverPools as discoverV3Pools } from '../protocols/uniswap-v3/discover.js';
 import { discoverPools as discoverV4Pools } from '../protocols/uniswap-v4/discover.js';
 import { classifyRpcError, RpcFailure } from '../rpc/errors.js';
@@ -32,7 +35,19 @@ export interface FetchRangeOptions extends ProtocolDeployments {
   readonly end: BlockAnchor;
   readonly previous?: BlockAnchor | null;
   readonly assets: AssetRegistry;
-  readonly pools: PoolRegistry;
+  /**
+   * The complete catalogue this batch is planned from, whose preview is carried in the batch. Its
+   * alternative is `registry`, and exactly one of them is required.
+   */
+  readonly pools?: PoolRegistry;
+  /**
+   * The registry context this batch is decoded against. With one, the batch carries only the
+   * registrations its own logs reference and is marked `referenced-v1`; the catalogue it was
+   * planned from is never materialized in the batch.
+   */
+  readonly registry?: PreparedRegistry;
+  /** The request templates this run plans its operations from; required with `registry`. */
+  readonly operationFilters?: OperationFilterIndex;
   readonly logResponseGuard?: number;
   readonly maxLogsPerResponse?: number | null;
   readonly maxFilterValues?: number;
@@ -201,7 +216,7 @@ function ensureObservedAssets(
   );
 }
 
-function validateRange(options: FetchRangeOptions): void {
+function validateRange(options: FetchRangeOptions, maxFilterValues: number): void {
   if (options.fromBlock < 0n || options.toBlock < options.fromBlock) {
     throw new RangeError('Invalid recording range');
   }
@@ -211,13 +226,29 @@ function validateRange(options: FetchRangeOptions): void {
   if (!Number.isSafeInteger(options.observedAtMs) || options.observedAtMs < 0) {
     throw new RangeError('observedAtMs must be a non-negative safe integer');
   }
+  if ((options.pools === undefined) === (options.registry === undefined)) {
+    throw new Error('A range is planned from a registry context or a catalogue, not both');
+  }
+  if (options.registry !== undefined && options.mode === 'operations') {
+    // The requests must be planned from the same registry the batch will be decoded against, and
+    // only an index holds the sorted values that planning must not re-derive for every batch.
+    const filters = options.operationFilters;
+    if (filters === undefined)
+      throw new Error('Operations mode needs operation filter templates with a registry context');
+    if (
+      filters.deployments.v4Manager !== options.v4Manager.toLowerCase() ||
+      filters.maxFilterValues !== maxFilterValues
+    )
+      throw new Error('Operation filter templates were built for another deployment or limit');
+  }
 }
 
 export async function fetchRange(
   reader: ChainReader,
   options: FetchRangeOptions,
 ): Promise<RangeRecordingBatch> {
-  validateRange(options);
+  const maxFilterValues = options.maxFilterValues ?? 1_000;
+  validateRange(options, maxFilterValues);
   const localGuard = options.logResponseGuard ?? 5_000;
   if (!Number.isSafeInteger(localGuard) || localGuard <= 0) {
     throw new RangeError('logResponseGuard must be a positive safe integer');
@@ -246,7 +277,6 @@ export async function fetchRange(
       : positiveBlocks(options.maxRangeBlocks, 1_000n);
   const errors: string[] = [];
   const failureKinds: string[] = [];
-  const maxFilterValues = options.maxFilterValues ?? 1_000;
   const discoveryPlan = buildDiscoveryFilterPlan(
     options.assets,
     deployments,
@@ -282,16 +312,29 @@ export async function fetchRange(
   let operationPlan: readonly PlannedFilter[] = [];
   let operation: Awaited<ReturnType<typeof executePlan>> | null = null;
   let candidateRegistrations: readonly PoolRegistration[] = [];
+  const referenced = options.registry !== undefined;
   try {
-    candidateRegistrations = options.pools.preview(staged, options.assets.version);
+    if (options.registry === undefined) {
+      candidateRegistrations = options.pools!.preview(staged, options.assets.version);
+    }
     if (options.mode === 'operations') {
-      operationPlan = buildOperationFilterPlan(
-        candidateRegistrations,
-        deployments,
-        options.fromBlock,
-        options.toBlock,
-        maxFilterValues,
-      );
+      if (options.registry === undefined) {
+        operationPlan = buildOperationFilterPlan(
+          candidateRegistrations,
+          deployments,
+          options.fromBlock,
+          options.toBlock,
+          maxFilterValues,
+        );
+      } else {
+        // This round's own discoveries join the templates before it is planned, so a pool created
+        // and swapped in the same block is asked for by the batch that found it. The index keeps
+        // the round outstanding until the caller settles it: the templates outlive the fetch, so
+        // the next batch reuses them rather than reading the catalogue again.
+        operationPlan = options
+          .operationFilters!.prepare(options.registry, staged)
+          .plan(options.fromBlock, options.toBlock);
+      }
       operation = await executePlan(
         reader,
         operationPlan,
@@ -311,6 +354,24 @@ export async function fetchRange(
   }
 
   const allLogs = deduplicateLogs([...discovery.logs, ...(operation?.logs ?? [])], errors);
+  if (referenced) {
+    try {
+      // Only the registered pools these logs touch travel with the batch. A log naming a pool the
+      // registry does not hold contributes nothing — the log itself is kept either way, and an
+      // unlisted pool is unknown to this batch rather than withdrawn from it.
+      candidateRegistrations = referencedRegistrations(
+        allLogs,
+        staged,
+        options.registry!.view,
+        deployments,
+      );
+    } catch (error) {
+      if (error instanceof ShutdownRequested) throw error;
+      complete = false;
+      errors.push(`registry-resolve:${error instanceof Error ? error.name : 'unknown'}`);
+      failureKinds.push('registry-resolve');
+    }
+  }
   const blockHashes = new Map<bigint, string>();
   for (const log of allLogs) {
     const prior = blockHashes.get(log.blockNumber);
@@ -392,6 +453,7 @@ export async function fetchRange(
     completeness,
     manifest,
     poolRegistrations: complete ? candidateRegistrations : [],
+    ...(referenced ? { registryMode: 'referenced-v1' as const } : {}),
     recordingErrors: [...new Set(errors)],
     recordingFailureKinds: [...new Set(failureKinds)],
   };
