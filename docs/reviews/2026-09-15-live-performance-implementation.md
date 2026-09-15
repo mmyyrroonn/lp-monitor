@@ -1762,7 +1762,7 @@
   8. **`pnpm lint` 仍是红的，只有 HEAD 起就红的那 8 个文件**（清单见 C5「未通过项」8）；D1 涉及的七个文件都不在其中。
   9. 真实浏览器检查与真实 80k/160k 运行库上的采样**未执行**（计划 05 的验收阶段）：本轮 80k 数据是内存构造的，不是真实目录。
 
-- Commit：待办——D1 与 D2/D3 同属子计划 04，按 01/02/03 的做法落在同一个 `perf:` 提交里，哈希在其后的小提交里补写。
+- Commit：`c40c0e82f711947d4fe9566c5fa08e46b9b3c3f3`（子计划 04 单一提交，D1+D2+D3 全部在内，22 文件 / +7899 −156，且**未**包含 00–05 计划、spec 与 review 这些输入文件，也**未**包含子计划 05 在飞的 E1–E3 文件）。本行哈希的补写位于其后的一个小提交（与子计划 01/02/03 同一做法）。
 
 #### D1 补记：同代重发时的缓存失效（D2 前置修正）
 
@@ -2033,7 +2033,7 @@
 
   13. **token 对 durable metadata revision 是盲的（复核发现的真实缺陷，已按主控裁决 (a) 落地修复）**。`buildMetricsReport` 每轮都会把 `token_metadata` 表的观察合并进估值用的 metadata（`src/storage/metric-store.ts:124`），而这张表的写只动 `metadata_revision`（migration 014），不动 token 里任何一项；token 里的 metadata 项是 init 那份**种子**的 `version`，在一个 reader 的生命里不可能变。可复现的后果：同一 watermark 下 metadata 观察被补齐（USDG `decimals` 6→8）后，legacy 快照的 USD 从 `8000000000` 变 `80000000`，worker 仍回 `unchanged`，页面继续显示旧估值直到链上随便来一批。候选修复（token 改看 `metadataJournalPresent(db) ? metadataRevision(db) : 种子 version`）已用临时补丁验证过 RED→GREEN，但**按主控「发现缺陷先停下、不要自行改行为」的要求当时没有落地**，证据与待裁决项见「D2 补记」。主控裁决 (a) 判定这是真实缺陷、不接受只写成边界：该修复已落地，那条临时用例已转正，逐行改动、变异证据与保留的边界见「D2 补记二」。
 
-- Commit：待办——D2 与 D1/D3 同属子计划 04，按 01/02/03 的做法落在同一个 `perf:` 提交里，哈希在其后的小提交里补写。
+- Commit：`c40c0e82f711947d4fe9566c5fa08e46b9b3c3f3`（子计划 04 单一提交，D1+D2+D3 全部在内，22 文件 / +7899 −156，且**未**包含 00–05 计划、spec 与 review 这些输入文件，也**未**包含子计划 05 在飞的 E1–E3 文件）。本行哈希的补写位于其后的一个小提交（与子计划 01/02/03 同一做法）。
 
 #### D2 补记：变更检测复核（M8 / M10b / M11 / MC1）
 
@@ -2287,7 +2287,7 @@ switch window { requests: [ '…/history?generation=gen-live',
   - 单点变异（锚点在 `server.ts` / `app.ts`）：M1 过期代际改 503、M2 批量路由改无界扇出、M3 不裁剪到最近 N 分钟、M4 单 token 失败被静默吞掉 → **4/4 CAUGHT，且还原后 sha256 与原文一致**。
   - **M5（`app.ts:617` 去掉 `snapshot.generation !== data.generation`）未被捕获**，已定界为「无自动化宿主」而非等价变异体：`app.ts` 全文没有测试宿主（`tests/dashboard/` 仅在 `pool-page.test.ts:29`、`snapshot-worker.test.ts:115` 按「逐字保留」引用其比较器，`server.test.ts:51` 只把它当静态资源）；而持久状态上，换代清理由三处独立守卫兜住——`syncSeries` 的 `seriesGeneration` 判重（645 行）与应答 payload 的 generation/controller 双重校验（665、676–677 行）、`syncDetail` 的 `candidate.generation === generation` 判重（753–757 行）、`stillCurrent` 的应答接受（791–793、836–840 行），均已逐条读过。变异真正消掉的是**换代瞬间到新 series 落地之间的一帧**：未变异画「空」（可见在加载），变异后画「上一代分钟」（静默陈旧），随后自愈。该帧在无浏览器宿主下无法自动验证 → **记录为未验证边界，不返工**，与本节「视觉检查未执行」同类；不写「等价变异体」，因为那一帧是真实差异。
 
-- Commit：待办
+- Commit：`c40c0e82f711947d4fe9566c5fa08e46b9b3c3f3`（子计划 04 单一提交，D1+D2+D3 全部在内，22 文件 / +7899 −156，且**未**包含 00–05 计划、spec 与 review 这些输入文件，也**未**包含子计划 05 在飞的 E1–E3 文件）。本行哈希的补写位于其后的一个小提交（与子计划 01/02/03 同一做法）。
 
 
 ### E1
