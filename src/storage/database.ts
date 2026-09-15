@@ -28,6 +28,8 @@ const migration = [
   '010-history-jobs.sql',
   '011-registry-changes.sql',
   '012-batch-coverage.sql',
+  '013-live-workset.sql',
+  '014-metadata-queue.sql',
 ]
   .map(loadMigration)
   .join('\n');

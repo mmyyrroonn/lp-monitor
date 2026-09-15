@@ -3,7 +3,8 @@ import { openDatabase } from '../../src/storage/database.js';
 import { SqliteRangeStore } from '../../src/storage/raw-store.js';
 import { SqliteProjectionStore } from '../../src/storage/projection-store.js';
 import { buildMetricsReport } from '../../src/storage/metric-store.js';
-import { batch, hotLogs, metricInput } from '../helpers/alert-fixture.js';
+import { decimalsAt } from '../../src/metrics/metadata.js';
+import { batch, hash, hotLogs, metricInput, rwa } from '../helpers/alert-fixture.js';
 
 describe('live bounded metrics', () => {
   it('matches offline five-minute results and reuses persisted minute contributions', () => {
@@ -33,6 +34,31 @@ describe('live bounded metrics', () => {
           )
           .all(),
       ).toEqual(first);
+    } finally {
+      db.close();
+    }
+  });
+
+  it('hands consecutive rounds the same metadata object, so one index serves the run', () => {
+    const db = openDatabase(':memory:');
+    try {
+      const b = batch('first', hotLogs());
+      b.previous = null;
+      new SqliteRangeStore(db).acceptRange(b);
+      new SqliteProjectionStore(db).rebuild('s', 's', 'c');
+      // One stored observation is what puts the report on the built cache rather than on the seed it
+      // was handed, and the built cache is the object a round has to hand back: were it rebuilt per
+      // round, `decimalsAt` would rebuild its index — a digest per entry — for every report.
+      db.prepare(
+        'insert into token_metadata(address,decimals,block_number,block_hash) values(?,?,?,?)',
+      ).run(rwa, 8, 10, hash(10));
+      const first = buildMetricsReport(db, metricInput, { live: { historyMinutes: 180 } });
+      const second = buildMetricsReport(db, metricInput, { live: { historyMinutes: 180 } });
+      // The height is one no stored anchor covers, so the seed's entries survive and the round has
+      // nothing to reconcile away.
+      expect(second.metadataConflicts).toEqual([]);
+      expect(second.metadata).toBe(first.metadata);
+      expect(decimalsAt(second.metadata, rwa, 10n)).toBe(8);
     } finally {
       db.close();
     }

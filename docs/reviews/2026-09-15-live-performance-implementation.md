@@ -743,3 +743,779 @@
   5. 真实 provider 验证、运行时迁移与生产切换均**未执行**（属验收阶段，见后续记录）。
 
 - Commit：`129d5b61d93abd2fd2bc6fd3001074eb8917a3b6`（子计划 02 单一提交，B1–B6 全部在内，36 文件 / +6836 −762，且**未**包含 00–05 计划、spec 与 review 这些输入文件）。本行哈希的补写位于其后的一个小提交（与子计划 01 同一做法）。
+
+### C1
+
+- 状态：完成
+
+- 修改文件：
+  - 新增 `src/storage/migrations/013-live-workset.sql`（20 行）：`live_signal_workset(scope_id TEXT, pool_id TEXT, PRIMARY KEY(scope_id,pool_id))` 与 `live_workset_state(scope_id TEXT PRIMARY KEY, seeded_at_ms INTEGER)`。前者只保存**有持续信号记忆**的池——冷池的证据是它的窗口事件，不是这张表；业务状态仍留在 `signal_snapshots`，本任务不新增第二份快照。后者的存在使「合法的空 workset」与「从未填充过」可区分，否则每次打开都会再扫一遍 `signal_snapshots`。
+  - 修改 `src/storage/database.ts`（+1）：迁移列表加入 `'013-live-workset.sql'`（001…013）。
+  - 新增 `src/storage/live-event-index.ts`（344 行）：`EventDelta` / `EventWindowBounds` / `LiveEventIndex` / `LiveEventIndexStore` / `eventIndexFor` / `reviveEvent`。三套索引：`#byKey`（rawLogKey→{poolId,event}）、`#keysByPool`（poolId→key 集合）、`#poolsByToken`（token→池集合，附 `#tokenRefs` 引用计数，使同一池的多个事件共享一个 token 时摘除才是对的）。原 `live-projection.ts` 的 `reviveEvent` 逐字搬来这里，后者改为 import（纯搬家，无行为改动）。
+  - 修改 `src/ops/work-counters.ts`（+8）：`WorkCounts` / `WORK_COUNTER_KEYS` / `emptyWorkCounts()` 三处各增 `liveEventRowsRead`（为推导窗口而解码的 `live_events` 行数）与 `evaluatedWorksetPools`（本轮选中的池数）。
+  - 修改 `src/storage/live-projection.ts`（+62 −18，其中 −14 是搬走的 `reviveEvent`）：`LiveProjectionChanges` 增加 `eventDelta?: EventDelta`（99 行）与 `coverageChanged?: boolean`（101 行），`repairFrom` / `affectedPoolIds` / `registry` 全部保留。458 行建立收集器；488 行在「这个 key 原先有事件、本轮不再有」处按旧 payload 取 `rawLogKey` 记入 `deletedKeys`；502 行在真实写入处记入 `upserts`；593 行 `events.mark(token)`、597 行 `events.apply(eventDelta)`，位置在游标写入之后、清 `live_dirty_logs` 之前。未变 token 的 no-op 分支（252-253 行）同样 `mark` + `apply` 一个空 delta，并返回显式空 delta 与 `coverageChanged:false`；强制重建分支则把同一个 `events` 句柄递归传回 `syncOnce`，使重建与普通轮次走同一条收尾。
+  - 新增 `tests/integration/live-event-index.test.ts`（351 行，9 用例）、`tests/integration/live-workset.test.ts`（377 行，8 用例）。既有测试文件一行未改（`git status` 中两个新文件之外无 `M`）。
+  - 未改：窗口/信号/指标公式、`PROJECTION_VERSION`、`acceptRange` 的接受与回滚语义、`live_events` / `live_inputs` / `raw_logs` 的任何写路径（C1 只在原有写点**顺手记下**已经要写的值，不新增读写）。唯一 schema 变化是 013。
+
+- RED（十个单点变异，每次只改一处、跑完即还原；失败文本为 vitest 原文）：
+
+  1. 「同 key 修订不摘旧贡献」。把 `install` 里的 `if (previous !== undefined) this.unlink(key, previous);` 整行换成注释，`pnpm exec vitest run tests/integration/live-event-index.test.ts`：
+     ```
+     × a revised registration moves the same key to its new tokens without leaving the old ones 10ms
+     AssertionError: expected Set{ '4663:v3:0x00000000000000000000…' } to deeply equal Set{}
+     ❯ tests/integration/live-event-index.test.ts:238:23
+     Test Files  1 failed (1)
+          Tests  1 failed | 8 passed (9)
+     ```
+     为什么是原问题：该用例先把注册的 `token0` 从 rwa 改成下一个资产再同步，同一个 rawLogKey 于是应当**只**属于新 token。少了「先摘旧贡献」，`RWA→池` 这条边永远留了下来（238 行断言的正是它）。token→池倒排是 C2 决定「哪些事件要因报价变化重算」的输入，一条不会被清理的陈旧边会让失效范围失真。变异下 `index.size` 与 `blocksOf(index)` 仍然正确（1 与 `[105]`），说明命中的正是「同一 key 换了归属」这条通道，而非整个安装逻辑。
+  2. 「删除分支整体消失」。删掉 `apply` 的 `for (const key of delta.deletedKeys) this.remove(key);`，`pnpm exec vitest run tests/integration/live-event-index.test.ts`：
+     ```
+     × a removal retires its key from the window, the pool index and the token index 9ms
+     × a window that outlived a rolled back round is derived again from the rows that survived 10ms
+     AssertionError: expected 1 to be +0 // Object.is equality        (live-event-index.test.ts:210)
+     AssertionError: expected [ 105, 110 ] to deeply equal [ 110 ]   (live-event-index.test.ts:345)
+     Test Files  1 failed (1)
+          Tests  2 failed | 7 passed (9)
+     ```
+     为什么是原问题：`deletedKeys` 是 delta 的另一半。第一条用例删掉 `active_logs` 的行再同步，窗口不移除该 key 就停在 `size=1`、token 倒排仍挂着该池（210 行）。第二条暴露得更彻底：批次 b 的 swap(110) 替换了 swap(105)，回滚后重放的 delta 里 105 正是被删的那个 key，移除分支没了就变成 `[105,110]` 两个事件并存——「重组后旧块的事件还在窗口里」是 live 路径最不能出错的地方。
+  3. 「窗口不再核对游标 token」。把 `ensureCurrent()` 的三行判断整体换成注释（函数变成空操作），同一命令：
+     ```
+     × a window that outlived a rolled back round is derived again from the rows that survived 12ms
+     AssertionError: expected +0 to be 1 // Object.is equality
+     ❯ tests/integration/live-event-index.test.ts:338:26
+     Test Files  1 failed (1)
+          Tests  1 failed | 8 passed (9)
+     ```
+     为什么是原问题：这是整段持久性设计的单点。回滚的事务没有留下它写过的游标（`live_projection_cursors.source_hash` 退回旧值），内存窗口却仍持有那次未提交写入的事件；下一次 `expire` 本应重新读行（`rows` 计 1）却直接沿用内存（`rows` 为 0），随后 `size` / `blocksOf` 一并失守。这条变异是十个里**唯一**能抓住 `ensureCurrent()` 的，即「事务回滚 ⇒ 窗口作废」这条防线目前只有回滚用例一处覆盖，而它是 `apply` / `eventsFor` / `poolsForToken` 三个入口共用的守卫，如实记录其覆盖只有单点。
+  4. 「首次装载忽略窗口」。把 `WINDOW_ROWS` 换成无界的 `select payload_json from live_events where scope_id=?`，同一命令：
+     ```
+     × the first load reads only the window rows and a later round reads none of them 33ms
+     AssertionError: expected 60 to be 20 // Object.is equality
+     ❯ tests/integration/live-event-index.test.ts:308:34
+     Test Files  1 failed (1)
+          Tests  1 failed | 8 passed (9)
+     ```
+     为什么是原问题：这是「有界」二字的字面检验。60 个事件分属 60 个不同分钟，`sinceSec=2520` 的窗口只应包含最后 20 个（同用例的 `blocksOf(index)[0] === 101` 一并固定了边界含义）。变异下 `countWork('liveEventRowsRead', …)` 立刻从 20 变 60，即首次装载的代价重新与 scope 的全部历史成正比。
+  5. 「无块边界时把未知时间事件丢弃」。把 `insideWindow` 的 `return bounds.sinceBlock === null || event.ref.blockNumber >= bounds.sinceBlock;` 改成 `return bounds.sinceBlock !== null && …`（即「没有边界就一定在窗外」），`pnpm exec vitest run tests/integration/live-event-index.test.ts tests/integration/live-workset.test.ts`：
+     ```
+     × an unknown-time event is held while no boundary can bound it, and the window says so 9ms
+     × a verified boundary releases the unknown-time event it can bound 6ms
+     AssertionError: expected Set{ '4663:v3:0x00000000000000000000…' } to deeply equal Set{}
+     ❯ tests/integration/live-event-index.test.ts:274:61
+     ❯ tests/integration/live-event-index.test.ts:287:61
+     Test Files  1 failed | 1 passed (2)
+          Tests  2 failed | 15 passed (17)
+     ```
+     为什么是原问题：未知时间的事件既没有分钟证据也没有块边界，只可能靠「接收时间」猜——而计划原文要求「不知道时间也不知道块边界时保留 `contextIncomplete`，不靠接收时间丢弃」。274 行断言有分钟的那条该走、无分钟的那条该留；287 行断言窗口必须回答 `windowContextIncomplete === true`。变异把两条都变成「静默丢弃一个可能在窗口内的事件」。
+  6. 「有记忆的池每轮都重评」。把 `if (!standing || input.coverageChanged) for (const poolId of this.members()) selected.add(poolId);` 截成无条件并入，`pnpm exec vitest run tests/integration/live-workset.test.ts`：
+     ```
+     × an empty round that advances the watermark still reconsiders the pools with signal memory 11ms
+     AssertionError: expected 8 to be 4 // Object.is equality
+     ❯ tests/integration/live-workset.test.ts:227:46
+     Test Files  1 failed (1)
+          Tests  1 failed | 7 passed (8)
+     ```
+     为什么是原问题：这个条件是「live 成本与活动量成正比」的另一半——没有它，任何带冷却/候选状态的池在水位线没有推进、输入根本没变的情况下每轮都会被重新求值。用例的 8/4/8/4 序列正是这条规则的四个观测点（首轮重评、常驻水位线不重评、水位线推进再重评、再次常驻）。
+  7. 「有记忆的池永不重评」。把同一行整行换成注释，同一命令：
+     ```
+     × an empty round that advances the watermark still reconsiders the pools with signal memory 11ms
+     × a reopened database selects the same cooling and candidate pools it did before 28ms
+     AssertionError: expected 4 to be 8 // Object.is equality        (live-workset.test.ts:226)
+     AssertionError: expected [ …(3) ] to deeply equal [ …(5) ]      (live-workset.test.ts:366)
+     Test Files  1 failed (1)
+          Tests  2 failed | 6 passed (8)
+     ```
+     为什么是原问题：反向的单点。首轮（`standing` 为假、水位线首次确立）必须并入 members，这正是进程重启后从 `signal_snapshots` 恢复冷却与候选状态的路径；重开用例显示少了它，新进程完全看不见 `cooling-a` / `candidate-b`（366 行）。**未**把 `#lastWatermarkSec` 的初值改成 0 之类的哨兵值来「顺手」实现首轮重评，因为水位线 0 是合法输入。
+  8. 「本轮读上一轮过期的结果，而不推进自己的窗口」。把 `select` 首行的 `const expired = this.events.expire(input.bounds);` 换成 `const expired = this.events.recentlyExpired;`，同一命令：
+     ```
+     × the last event leaving the window selects its pool once, and then the round has nothing to do 10ms
+     × an unknown-time event without a boundary keeps its pool in the round and says why 6ms
+     × a reopened database selects the same cooling and candidate pools it did before 30ms
+     AssertionError: expected 4 to be +0 // Object.is equality           (live-workset.test.ts:267)
+     AssertionError: expected false to be true // Object.is equality     (live-workset.test.ts:288)
+     AssertionError: expected [ 'candidate-b', 'cooling-a' ] to deeply equal [ …(5) ]
+     Test Files  1 failed | 1 passed (2)
+          Tests  3 failed | 14 passed (17)
+     ```
+     为什么是原问题：C1 把「推进窗口」并进 `select` 的第一步（`WorksetInput.bounds`），这条变异把它退回「读上一轮留下的结果」。三处失败各说明一半：窗口从未被推进（`size` 停在 4）、`windowContextIncomplete` 从未被算出、重开后窗口根本没被装载因而热池全不在选中集合里（只剩两个 members）。第三条的输出被 vitest 折叠成 `…(5)`，此处按原样引用。
+  9. 「记忆只认初始快照今天写明的字段」。把 `snapshotHasMemory` 的 `for (const key of new Set([...Object.keys(initial), ...Object.keys(stored)]))` 改成 `for (const key of Object.keys(initial))`，同一命令：
+     ```
+     × a snapshot counts as memory when any business field differs from the initial one 4ms
+     AssertionError: expected false to be true // Object.is equality
+     ❯ tests/integration/live-workset.test.ts:301:5
+     Test Files  1 failed (1)
+          Tests  1 failed | 7 passed (8)
+     ```
+     为什么是原问题：`initialSignalSnapshot()` 今天只列出 `state` / `episodeId` / `configVersion` / `lastAlertSec` / `lastAlertVolume` / `lastAlertScale` / `lastFiveEndSec` / `lowBuckets` / `entryThreshold` / `lastAlertKind` 十个字段，而状态机实际会写下的记忆不止这些——用例 300-301 行的 `candidateFingerprint` / `lastHeatSec`、312 行的 `candidateMinuteStartSec` 都不在这个列表里。只按 `Object.keys(initial)` 比较，就会把「候选指纹」「热标记」判成没有记忆，于是一个正在候选/冷却中的池会被移出 workset。并集比较是保守方向的选择：将来 `SignalSnapshot` 再加字段，旧快照一律算作有记忆，代价只是多评一轮，不会丢池。这也是为什么**没有**加一个「记忆字段清单」常量——清单短于状态机保存的状态时，丢池是静默的。
+  10. 「retain 只增不删」。删掉 `retain` 的 `for (const poolId of present) if (!next.has(poolId)) remove.run(this.scopeId, poolId);`，同一命令：
+      ```
+      × the first fill is a one-time scan, and a rolled back fill is a fill that never happened 11ms
+      AssertionError: expected Set{ 'hot-0', 'hot-1', 'hot-2' } to deeply equal Set{}
+      ❯ tests/integration/live-workset.test.ts:352:29
+      Test Files  1 failed (1)
+           Tests  1 failed | 7 passed (8)
+      ```
+      为什么是原问题：`retain` 是调用者宣告「这一轮之后还有哪些池携带记忆」的唯一出口，计划原文要求「只有确认不再有窗口输入、持久信号记忆或本轮修订时，下一轮才移出」。变异下 `retain([])` 之后成员仍在，即池永远不退出 workset、热池集合只增不减，回到「成本随历史增长」的老问题。用例后半段的 `seed` 断言（353-354 行）进一步固定「合法的空 workset 不是需要重新填充的 workset」。
+
+- GREEN：
+  - 计划命令 `pnpm exec vitest run tests/integration/live-event-index.test.ts tests/integration/live-workset.test.ts tests/integration/live-projection.test.ts tests/integration/live-faults.test.ts` → `Test Files 4 passed (4)`，`Tests 37 passed (37)`，退出码 0，3.88s。
+  - 十个变异逐一还原后复核：`pnpm typecheck`（`tsc --noEmit && tsc -p tsconfig.scripts.json`）→ 退出码 0；`pnpm test`（全套）→ `Test Files 124 passed (124)`，`Tests 1030 passed (1030)`，退出码 0，34.79s。B6 收尾为 122/1013，差值正好是 C1 新增的两个测试文件（9+8=17 条用例），既有测试文件一行未改、无一被削弱。
+  - 规模核验：`tests/integration/live-workset.test.ts` 的夹具是**真的 80k 行注册**（`with recursive` 批量插入 `pools`，断言 `select count(*) n from pools` 等于 80000）与 400 个有窗口事件的池；整个文件（含建库与五次全选）约 1.2s，因此计划要求的目录规模可以在常规测试里跑，不需要标 `skip`。
+  - 计数口径：用例断言的不是「感觉没扫」，而是 `openWorkCounts()` 包住一次选择后的 `registryRowsRead === 0` 与 `evaluatedWorksetPools === 400`；事件读取一律用 `liveEventRowsRead` 断言 0 或确切行数。所有「本应零读取」的回读都包在 `measured(...)` 里，避免 `ensureLoaded()` 的隐式装载把「索引维护正确」与「每次从磁盘重读一遍」混为一谈。
+
+- 行为差异：
+  - **窗口由 delta 推进，而不是「读完所有 `live_events` 再对比」**：`sync` 在真实 INSERT / UPDATE / DELETE 位置收集 `eventDelta`（488、502 行），三条路径（普通轮次、未变 token 的 no-op、强制重建）都返回一个显式的 delta，调用方永远不会看到 `undefined`。重建路径不再需要单独的「重新装载」——它的 delta 已经包含该 scope 的每一个事件，而 `apply` 对仍在窗外的事件走移除分支，所以重建过程中的窗口也始终有界。
+  - **回滚安全靠游标，而不靠额外记账**：每条可能产生非空 delta 的路径都会递增 `live_source_revisions.revision`，而 `syncOnce` 在 `old.source_hash === token` 时提前返回，因此 **delta ≠ ∅ ⟹ token ≠ 旧 `source_hash`**。窗口与游标由同一个事务写下，回滚的事务两个都没留下，`ensureCurrent()` 一次索引行读取就能发现分歧并重新推导。这条是 C1 唯一新增的持久性机制，没有新的表、没有版本号字段。
+  - **`expire` 的语义是「欠一次评估」而不是「删掉」**：首次调用用给定 bounds 装载并返回空集（此前的进程没有窗口，不欠任何池一次评估；进程重启后的恢复靠 `live_signal_workset` 与快照，不靠「上一轮过期」）。此后每次返回「因此不再有窗口内事件」的池，且每个池只在离开的那一刻出现一次——`recentlyExpired` 与新结果**求并**而非替换，故一轮读两次窗口不会丢掉第一次的过期池，多带一个池的代价也只是多评一次。
+  - **未知时间事件只在可验证边界之内退出**：`minuteStartSec !== null` 的事件按分钟离开；无分钟的只能在 `sinceBlock` 之前离开，而 `sinceBlock` 为 `null` 时一律保留并让 `windowContextIncomplete` 为真。这与 `read` 原有的规则同义（`contextIncomplete` 就是照抄 `read` 的判据：`sinceSec > 0 && sinceBlock === null && 存在 minute 为空的 live_events`）。
+  - **窗口推进是选择的第一步**：`WorksetInput.bounds` 是必填字段，`select` 的第一行就是 `expire`。原先把「先 expire 再 select」写成文档约定，热路径上没有任何东西强制它；现在调用者无法用一个窗口选择、再用另一个窗口评估。
+  - **常驻水位线与代次**：同一水位线下（且 `coverageChanged` 为假）不重评有记忆的池；水位线推进、coverage 变化、或窗口 `generation` 变化（重建代表「上一轮的评估不能假定仍然有效」）时并入整个 workset。首轮必然并入，因为 `#lastWatermarkSec` 初值为 `null`，没有用哨兵数值。
+  - **workset 的持久成员在调用者事务内维护**：`retain` 是差集插入/删除，`seed` 是显式的一次性扫描（返回填充数量并写 `live_workset_state`，二次调用返回 0）。仓库里没有任何路径会每轮扫描 `signal_snapshots`——`snapshotHasMemory` 只在 `seed` 里对快照做一次判断。
+  - `reviveEvent` 从 `live-projection.ts` 搬到 `live-event-index.ts`（`projection-store.ts` 里另有一个同名局部函数，与本任务无关，未动）。无窗口/信号公式改动、无配置默认值改动。
+
+- 未通过项 / 已记录的边界：
+  1. **本任务只建表与接口，`live_signal_workset` 的实际写入者尚未接入**。除测试外，`retain` / `seed` 目前没有生产调用方——按计划分工，同事务维护由 C3 负责。因此在 C2/C3 完成之前，一个全新数据库的 workset 实际只有「窗口内事件池」这一部分生效，重启后的冷却/候选恢复路径已实现且已被重开用例固定，但还没有接到实时轮次上。这是任务边界，不是缺口遗漏。
+  2. **`coverageChanged` 与 token 倒排索引目前只有生产侧的定义与测试侧的消费**。`LiveProjectionChanges.coverageChanged`（由 `coverageRepair !== undefined` 得出）与 `poolsForToken` 都要到 C2 才被真正读取；C1 只保证它们被正确地算出来并已被单测固定。
+  3. **`ensureCurrent()` 这条防线只有一条用例覆盖**（变异 3 是唯一抓到它的）。它在 `apply` / `eventsFor` / `poolsForToken` 三个入口共用，但可观察面目前只有「回滚轮次之后的一次 `expire`」。C2 接入真实调用路径后应会出现更多覆盖点，届时复核。
+  4. **`liveEventRowsRead` 只计窗口装载的行**（`reload()` 里 `WINDOW_ROWS` 的返回行数），不含 `cursorToken()`、`seeded()`、`members()` 这类单行索引读取，也不含 `live_signal_workset` 的读取。这是刻意的口径：它度量的是「为了得出窗口而解码了多少事件」，不是所有 SQLite 往返。
+  5. **80k 目录由测试自己批量插入**，不经 `reconcilePools`。因此该用例证明的是「选择不会去读目录」，而不是「真实注册路径能产出 80k 目录」；真实的 80k/160k 性能样本属子计划 05（E 系列）。
+  6. **`snapshotHasMemory` 的保守方向**：`initialSignalSnapshot()` 将来新增字段且默认值非 null 时，所有既有快照会被判为「有记忆」，workset 一次性变大直到这些池各自走完冷却。这是安全方向的选择，不额外做「记忆字段白名单」（变异 9 记录了白名单为何不可取）。
+  7. **窗口之外的估值报价不在本任务范围内**：计划要求「必要时按 token 索引取窗口之前最后一个合法 quote」，那属于 C2 的 quote 依赖与缓存键设计；C1 只提供 token→窗口内事件池的倒排。
+  8. 真实 provider 验证、运行时迁移与生产切换均**未执行**（属验收阶段，见后续记录）。
+
+- Commit：待子计划 03 提交后补写（与 01/02 同做法，单一提交 `perf: bound live evaluation and schedule metadata outside batch commits` 覆盖 C1–C5）。
+
+### C2
+
+- 状态：完成
+
+- 修改文件：
+  - 新增 `src/metrics/valuation-index.ts`（265 行）：`VALUATION_RULE_VERSION`、`eventRevision` / `metadataRevision` / `quoteRevision`、`valuationKey`、`ValuationIndex`（`size` / `lookup` / `invalidateQuotesAfter` / `clear` / `expireOutside`）、`valuationIndexFor`。`ValuationIndex` 持三样东西：`#byKey`（键→`{value, ref, minuteStartSec, blockNumber, tokens}`）、`#keysByToken`（token→键集合，失效用）。**类注释的核心是一句纠正**：正确性由键承担，不靠失效——调用方每轮都用 `findPrecedingQuote` 重新求出的 `preceding` 参与建键，所以「报价内容变了」必然是不同的键，「报价消失或离窗」根本不会再被查找；`invalidateQuotesAfter` / `clear` / `expireOutside` 全部只是「至多丢一条」的保守回收，丢掉的键下次仍按完整的键重算。`valuationIndexFor` 用 `WeakMap<Database, Map<scopeId, ValuationIndex>>`，同一数据库的两个 builder 共用一份、只读库各自持有一份内存实例（`db.readonly` 的调用方永远不会走到写路径）。
+  - 修改 `src/storage/metric-store.ts`（+216 −，见 `git diff --stat`）：本任务的全部接入点，逐条如下。
+    - `inSelection(event)`：`workset === null` 时恒真；`event.pool === null` 时恒假（`PoolEvent = Swap | LiquidityChange | AncillaryEvent`，只有 `AncillaryEvent` 的 `pool` 可空）。`registrationFor` 的形参从 `PoolEvent` 收窄为 `Swap`，因为只有 swap 走到它。
+    - 估值索引与失效（244-259 行）：`valuationIndex = workset ? valuationIndexFor(db, input.scopeId) : null`；`!changes || changes.eventDelta === undefined || changes.eventDelta.deletedKeys.length > 0` 时整表 `clear()`（**删除**是唯一键看不见的输入变化：一个被删掉的报价仍被用到它的估值写在自己的键里；同样地，一个没有 journal 可读的调用方也看不见报价的**到来**），否则只对 `eventDelta.upserts` 里的 swap 做 `invalidateQuotesAfter([tokenIn, tokenOut], ref)`；随后 `expireOutside({ sinceSec: sinceSec - 120, sinceBlock: null })`。
+    - 估值循环（298-394 行）：每个事件先取 `selected`；**未选中的池只发布报价**——`quoteFromRwaUsdgSwap` 命中就 `quotes.push` 然后 `continue`，它不进 `valuations` / `valuedByRwa` / `metricEvents` / `grossFees` / `recentLiquidityByPool` 中的任何一个。选中的池走 `valuationIndex.lookup(valuationKey({eventId: rawLogKey(event.ref), event, metadata, preceding}), [asset.address], event, compute)`，`compute` 仍是原来的 `cache.memo(...)` 或 `valueSwap(...)`；索引只是**坐在持久缓存前面**，命中时既不序列化输入也不解码 payload。`metricEvents.push` 前有 `if (!selected) continue;`，`recentLiquidityByPool` 的首条件加 `!inSelection(event) ||`，`grossFees` 的过滤器链前面加 `.filter(inSelection)`。
+    - `sourceHash` 的 `encodeJson({...})` 增加 `...(workset ? { selection: workset.poolIds } : {})`，返回值新增顶层 `selection`，`notes` 末尾增加两条有界报告专属说明（第一条恒定，第二条只在 `absentPoolIds.length > 0` 时出现并带真实分子/分母）。
+  - 新增 `tests/integration/live-metric-workset.test.ts`（435 行，5 用例）、`tests/unit/valuation-index.test.ts`（279 行，8 用例）。既有测试文件一行未改。
+  - **未修改 `src/storage/live-metric-cache.ts`**（本任务唯一「本该动而没动」的文件，理由见「未通过项 / 已记录的边界」第 8 条）。
+  - 未改：窗口/信号/指标公式、`PROJECTION_VERSION`、任何 schema、`acceptRange` 的接受与回滚语义、`{kind:'all'}` 路径的任何输出。
+
+- RED（八个单点变异，每次只改一处、跑完即还原到与 `git diff --stat` 一致的字节；失败文本为 vitest 原文）：
+
+  1. 「有界轮次不走内存索引，全量落到持久缓存」。把 `const side = valuationIndex ? valuationIndex.lookup(...) : compute();` 整段换成 `const side = valuationIndex ? compute() : compute();`（保留变量以免变成另一个变异），`pnpm exec vitest run tests/integration/live-metric-workset.test.ts`：
+     ```
+       × a repeated selection computes no valuation again and never touches the durable cache 12ms
+       × a window that advanced past the pool that priced the selection stops publishing its quote 16ms
+     AssertionError: expected [ [ …(4) ], [ …(4) ] ] to deeply equal []      (live-metric-workset.test.ts:330:86)
+     AssertionError: expected 0 to be greater than 0                          (live-metric-workset.test.ts:395:23)
+          Tests  2 failed | 3 passed (5)
+     ```
+     为什么是原问题：这是整段设计里**唯一**需要两个断言才能证明的点。第一轮已经把两条估值写进 `live_metric_cache`，所以第二轮即便完全绕过索引，`countWork('valuationComputes')` 依然是 0——区分「内存索引命中」与「持久缓存命中」的是 `LiveMetricCache.prototype.memo` 有没有被以 `valuation:` 前缀调用（330 行的 `durable.mock.calls.filter(...)` 断言它为空数组），变异下它收到两条 `valuation:4663:0x…65:…:…044d:0:…0011` / `120` / 完整 `{event, metadata, preceding}` 的调用记录，即第二轮仍然把输入序列化并解码了一遍。这正是计划原文「不能只用把代码移到 worker 或提高超时就宣称性能问题解决」要挡的那个偷懒答案。第二条失败（`:395`）是同一变异的连带面：索引不再持有任何东西，`afterSecond` 为 0。
+  2. 「未选中的池不再发布报价」。把 333-337 行的 `if (quote) quotes.push(quote);` 换成 `void quote;`（保留解构以免变成 TS 未使用变量），同一命令：
+     ```
+       × a selected report reproduces the full report for its pools from the pools that price them 34ms
+       × a window that advanced past the pool that priced the selection stops publishing its quote 7ms
+     AssertionError: expected [ { ref: { …(5) }, …(13) } ] to deeply equal [ { ref: { …(5) }, …(13) } ]
+     -     "quality": "usd-estimate",
+     -     "quoteEvidence": {
+     +     "quality": "unpriced",
+     +     "quoteEvidence": null,
+     -     "usdMicros": 3000000n,
+     +     "usdMicros": null,
+     ❯ tests/integration/live-metric-workset.test.ts:259:30
+     AssertionError: expected [] to have a length of 1 but got +0     (live-metric-workset.test.ts:369:24)
+     ```
+     为什么是原问题：选中池 `SELECTED` 的 token 是 STOCK_A / STOCK_B，自己一个 USDG 都不沾，所以它的价格**只可能**来自那个没被选中的 `QUOTE_POOL`。「只评选中池」的字面做法会把依赖池一起排除，于是选中池的估值静默退化成 `unpriced`——报告看起来仍然「成功」，只是所有 USD 金额变成 null。这是「有界化」最危险的失败形态，因此用例的置信点不是「快」，而是 `quality === 'usd-estimate'` 且 `usdMicros` 与全量路径**逐值相等**（269-271 行）。
+  3. 「`readSelected` 把 expire 挪到 events 之后」。把 `request.index.expire({...})` 整块移到 `const events = request.index.eventsFor(...)` 之后，同一命令：
+     ```
+       × a window that advanced past the pool that priced the selection stops publishing its quote 19ms
+     AssertionError: expected [ { …(8) } ] to deeply equal []      (live-metric-workset.test.ts:387:27)
+          Tests  1 failed | 4 passed (5)
+     ```
+     为什么是原问题：这条是「120 秒余量与顺序约束」的可观测面。可用报价必须满足 `upperAgeSec ≤ 60`，所以任何对窗内事件可用的报价都落在 `read` 的读窗口 `sinceSec - 120` 内；由此 `expire → poolsForToken → eventsFor` 这个顺序**不影响任何估值**，它唯一影响的是 `report.quotes` 这个被上报字段——没有先 expire，已经离窗的依赖池仍会被 `poolsForToken` 收进 `poolIds`，它的报价会被**第二次发布**。用例推进水位线三轮（block 101/minute 6060 → block 200/minute 12000 → block 300/minute 18000），第二轮起报价池已离窗，387 行断言 `advanced.quotes` 与独立 reference 库的全量路径 `full.quotes` 同时为空。**这一条是本次唯一一次「先写测试再被证明必要」的变异**：该用例是我第一次跑这个变异没被任何测试抓住之后补的（当时的失败是 `Tests 21 passed (21)`，见「未通过项 / 已记录的边界」第 1 条）。
+  4. 「索引只增不减（`expireOutside` 不接线）」。把 `if (sinceSec !== null) valuationIndex.expireOutside({ sinceSec: sinceSec - 120, sinceBlock: null });` 换成 `if (sinceSec !== null) void sinceSec;`，同一命令：
+     ```
+       × a window that advanced past the pool that priced the selection stops publishing its quote 24ms
+     AssertionError: expected 7 to be less than 5
+     ❯ tests/integration/live-metric-workset.test.ts:415:45
+          Tests  1 failed | 4 passed (5)
+     ```
+     为什么是原问题：这条变异清掉了**我自己引入的一个真实缺陷**。`expireOutside` 原本只被单测调用，生产路径上一次都没调过——正是计划原文禁止的「只导出一个未使用的优化函数给单测调用」。后果不是算错，是内存：内存索引在一条 7×24 小时的 live 轮次上只增不减，每一轮把所有曾经在窗内出现过的 (swap, 侧) 对永久留住。用例的第三轮把窗口推过第一批 swap 之后，有界版本回到 4 条（每个仍在读窗口内的 swap × 选中池的两个监测侧），无界版本是 7 = 5 + 2。断言写成 `toBeLessThan(afterSecond)` 与 `toBe(moved.valuations.length * WATCHED_SIDES)` 两条，都是**从窗口结构推出的**，没有手写理想值。
+  5. 「`metricEvents` 不再按选中过滤」。删掉 381-384 行的 `if (!selected) { continue; }` 整块，同一命令：
+     ```
+       × a selected report reproduces the full report for its pools from the pools that price them 26ms
+       × a repeated selection computes no valuation again and never touches the durable cache 8ms
+       × a window that advanced past the pool that priced the selection stops publishing its quote 6ms
+       × a selection names no window for a pool the registry does not have 6ms
+     TypeError: Cannot read properties of undefined (reading 'source')
+     ❯ src/storage/metric-store.ts:496:22
+          Tests  4 failed | 1 passed (5)
+     ```
+     为什么是原问题：这条变异的失败形态与其余八条不同——它**抛异常而非给出错值**，因为 `windows` 是从 `metricEvents` 推导的，而 `annotations` 又要为每个 window 取 `byId.get(w.poolId)!`（496 行）。有界读取根本没有带回未选中池的注册，于是「未选中的池进入 `metricEvents`」立刻变成「为一个没有注册的池组装窗口」。这比错值更好：它说明这道门不是防御性的，去掉它整个有界报告连组装都完不成。**如实记录其局限**：本变异给出的 RED 是崩溃而不是数值差异，因此它证明的是「这道门在真实路径上承重」，不能证明「去掉它会静默多算」——后者被第 6、7 条覆盖。
+  6. 「`grossFees` 不再按选中过滤」。把 `.filter(inSelection)` 换成 `.filter((e) => workset === null || true)`，同一命令：
+     ```
+       × a selected report reproduces the full report for its pools from the pools that price them 33ms
+     AssertionError: expected [ …(2) ] to deeply equal [ Array(1) ]
+     - Expected
+     + Received
+       [
+     +   "4663:0x0000000000000000000000000000000000000000000000000000000000000064:0x0000…044c:0",
+         "4663:0x0000000000000000000000000000000000000000000000000000000000000065:0x0000…044d:0",
+       ]
+     ❯ tests/integration/live-metric-workset.test.ts:279:51
+          Tests  1 failed | 4 passed (5)
+     ```
+     为什么是原问题：多出来的那条是 block `0x64` = 100，即**依赖池** `QUOTE_POOL` 的 swap。手续费估算 `estimateGrossSwapFee(s.amountIn, ...)` 是按事件逐个计的，一份「只覆盖选中池」的报告如果把依赖池的交易也计进去，费用口径就与它自己的窗口、计数和总和互相矛盾——一份**内部不一致**的报告比一份缺项的报告更难被发现。
+  7. 「`sourceHash` 不含 selection」。把 `...(workset ? { selection: workset.poolIds } : {})` 换成 `...(workset ? {} : {})`，同一命令：
+     ```
+       × a selected report reproduces the full report for its pools from the pools that price them 31ms
+       × selecting every pool reproduces the whole report and still bounds the valuation index 11ms
+     AssertionError: expected 'd044b1a706622fbfa941c91c346f11f928015…' not to be 'd044b1a706622fbfa941c91c346f11f928015…' //
+     Object.is equality                                                  (live-metric-workset.test.ts:266:34)
+     AssertionError: expected 'd044b1a706622fbfa941c91c346f11f928015…' not to be 'd044b1a706622fbfa941c91c346f11f928015…' //
+     Object.is equality                                                  (live-metric-workset.test.ts:312:35)
+          Tests  2 failed | 3 passed (5)
+     ```
+     为什么是原问题：`sourceHash` 的下游用途是「这份报告是不是同一份输入下的同一份报告」——缓存键、修复判据、审计对账都读它。两个**窗口不同**的报告哈希相同，等于宣称「选中池的子报告」与「全量报告」是同一份产物。第二条失败是更尖锐的一半：即使选中的是**全部三个池**、`windows` / `annotations` / `valuations` / `quotes` / `grossFees` / `rwa` 逐值相等（300-305 行全部通过），它仍然是一次有界轮次、仍然带着 `selection` 与两条额外 notes，因此哈希必须不同。
+  8. 「`invalidateQuotesAfter` 的边界从 `>` 放宽成 `>=`」。把 `comparePosition(held.ref, ref) > 0` 改成 `>= 0`，`pnpm exec vitest run tests/unit/valuation-index.test.ts`：
+     ```
+       × a revision drops only what comes after it, and only for the tokens it names 3ms
+     AssertionError: expected 3 to be 4 // Object.is equality
+     - Expected
+     + Received
+     - 4
+     + 3
+     ❯ tests/unit/valuation-index.test.ts:189:22
+          Tests  1 failed | 7 passed (8)
+     ```
+     为什么是原问题：失效的**方向**是这条规则的唯一内容。「一条在 `ref` 处新增或修订的报价，只可能被 `ref` 之后的 swap 读到」，所以 `ref` 位置上的 swap 必须留下；`>=` 会把它一起丢掉。这个方向错得**不可观测**（丢掉的键下次照原样重算，值仍然正确），只是把「保守回收」变成「每次修订都白丢一条」——所以它只能靠单测固定，这也正是它被放在单测而不是集成用例里的原因。
+
+- GREEN：
+  - 计划命令 `pnpm exec vitest run tests/integration/live-metric-workset.test.ts tests/unit/valuation-index.test.ts tests/integration/live-metrics.test.ts tests/integration/live-metric-cache.test.ts tests/integration/metrics-repair.test.ts tests/integration/metrics-chain.test.ts` → `Test Files 6 passed (6)`，`Tests 40 passed (40)`，退出码 0，1.27s。
+  - 九个变异逐一还原后复核：`pnpm typecheck`（`tsc --noEmit && tsc -p tsconfig.scripts.json`）→ 退出码 0；`pnpm test`（全套）→ `Test Files 126 passed (126)`，`Tests 1043 passed (1043)`，退出码 0，34.69s。C1 收尾为 124/1030，差值正好是 C2 新增的两个测试文件（5+8=13 条用例），既有测试文件一行未改、无一被削弱。
+  - 全量路径未被拖慢或改义：`tests/integration/metrics-repair.test.ts:174` 对整份报告做 `toEqual` 深比较，其中新增的顶层 `selection` 字段在 `{kind:'all'}` 两侧都存在（恒为 `{kind:'all'}`），因此该断言是逐字节等价的——这条是「`{kind:'all'}` 路径不变」的机器证据，不是我的判断。
+  - 调试残留已清：`grep -n "console.log\|VALUATION_DEBUG" src/metrics/valuation-index.ts tests/integration/live-metric-workset.test.ts` 无输出；`workset === null || true` 之类的变异中间态同样无残留（`git diff` 与本记录描述一致）。
+
+- 行为差异：
+  - **估值的内存索引坐在持久缓存前面，而不是替换它**：命中路径不序列化 `{event, metadata, preceding}`、不解码 payload；未命中路径逐字仍是原来的 `cache.memo('valuation:' + rawLogKey(event.ref) + ':' + asset.address, ...)`。因此索引是**纯加速层**：进程重启后 `WeakMap` 为空，行为退回 C1 的持久缓存，值不变。这也是为什么第 1 条变异必须用 `memo` 的调用记录来取证——`valuationComputes` 为 0 在两个层次上都成立。
+  - **正确性由键承担，失效只是保守回收**：`valuationKey` = 规则版本 + `rawLogKey(event.ref)` + `eventRevision`（事件自身逐字段，含 `tokenIn`/`tokenOut`/两个 raw amount/`amountIn`/`amountOut`/`sqrtPriceX96After`/`liquidityAfter`/`tickAfter`/`effectiveSwapFeePips`/`poolPart`/`refPart`/`timePart`）+ `metadataRevision`（两侧 token 的地址/精度/角色、`rwa`、`usdg`、`usdgDecimals`、`maxQuoteAgeSec`）+ `quoteRevision`（`preceding` 的身份与内容，或字面量 `none`）。`eventRevision` 是 `valueSwap` 实际读取范围的**故意超集**：只流进返回值的字段也算，因为两个在这个串上不同的输入不允许共享一个结果。`SEPARATOR` 取 ``，而每个 part 都是地址、计数或十进制数，都不含它。这套键使「报价内容变了」必然是不同的键、「报价消失/离窗」根本不会再被查找，因此 `invalidateQuotesAfter` / `clear` / `expireOutside` 全部只是至多丢一条的回收，丢掉的键下次仍按完整的键重算——**它们从不承担正确性**。类注释与单测 5 的措辞都是按这个纠正后的因果关系写的。
+  - **失效的两种来源被分开处理，因为它们的可见性不同**：`changes.eventDelta.deletedKeys.length > 0` 或「调用方没有 journal 可读」（`changes === undefined`）→ 整表 `clear()`，代价是重算整个窗口；否则只对 delta 里的 swap 按 `(tokenIn, tokenOut)` 做 `invalidateQuotesAfter`。前者的理由是键**看不见输入的消失**（被删掉的报价仍被用到它的估值写在自己键里），后者的理由是键**看不见输入的到来**（没有 journal 就无从知道某个报价刚刚出现，而它可能让一个原本 `unpriced` 的估值变成有价）。两者都是「最多丢一条」方向。
+  - **`expireOutside` 的界是读窗口的下界 `sinceSec - 120`，不是 `sinceSec`**：读取用的是 `sinceSec! - 120`，所以位于 `[sinceSec - 120, sinceSec)` 的事件**会被读进来并参与估值**（`inWindow` 用 `minuteStartSec >= sinceSec` 判定，它们不上报，但它们为窗内事件提供报价）。用 `sinceSec` 作界会把它们连同它们的报价一起丢掉，让下一轮立刻重算一遍——不是错，是白干。`sinceBlock` 传 `null`：本路径没有可用的块下界，且读路径本身对无分钟事件就是用 `null` 处理的（见「未通过项 / 已记录的边界」第 2 条）。
+  - **依赖池只发布报价**：`inSelection` 为假的池在估值循环里只做一件事——`quoteFromRwaUsdgSwap` 命中就 `quotes.push` 然后 `continue`。它不进 `valuations`（383 行的 `continue` 在 `metricEvents.push` 之前）、不进 `valuedByRwa`、不进 `grossFees`（额外一次 `.filter(inSelection)`）、不进 `recentLiquidityByPool`（首条件 `!inSelection(event) ||`）。这些门是冗余的（`metricEvents` 那道门就足以撑住 `windows`，变异 5 显示没有它直接抛异常），保留是因为它们各自守着不同的下游字段，而变异 6 证明 `grossFees` 那道门确实独立可观测。
+  - **`EXPECTED` 与 `ACTUAL` 的对照是「独立 reference 库」而不是「有界路径自己的输出」**：第一个用例建了第三个 in-memory 数据库，只播种选中池真正需要的两个池，跑**未经改动的全量路径**，然后把有界结果与它逐值比较。这样「有界路径等于全量路径」这句话不是自证。
+  - **`sourceHash` 把 selection 纳入身份，即使选的是全部池**：`...(workset ? { selection: workset.poolIds } : {})` 在 `workset` 非空时恒加键，所以「选中全部三个池」与「全量报告」即使每个值都相等，哈希也不同（变异 7 第二条）。**没有**采用「只在选中的池少于全部时才加键」的写法——那会让同一份有界报告的哈希随 scope 中池的总数漂移，而哈希的用途是身份而不是内容摘要。
+  - **`selection` 是顶层新字段，`notes` 是有条件的**：`{kind:'all'}` 报告带 `selection: {kind:'all'}`；有界报告带 `{kind:'pools', poolIds}`（`resolveWorkset` 用 `[...requested].sort()`，与 `PoolRegistry.snapshot()` 的 `poolRegistrationId` 排序、`buildRollingMetrics` 的 `poolId` 排序同一口径，因此全选时有界报告的 `poolIds` 顺序与全量的 `windows` 顺序一致）。notes 第一条恒定出现，第二条只在确有缺失池时出现并带真实分子分母（`1 of 2 requested pools are absent from the registry and contribute no window.`）。
+  - 无窗口/信号/指标公式改动、无 schema 改动、无配置默认值改动；`POP` 与任何既有输出字段的语义未变。
+
+- 未通过项 / 已记录的边界：
+  1. **`expire` 在 `readSelected` 里的位置只有「挪到 `eventsFor` 之后」这一种变异被抓得住**。我最初跑的变异是把 `expire` 挪到 `poolsForToken` **之后**、`eventsFor` **之前**，结果是 `Test Files 3 passed (3)` / `Tests 21 passed (21)`——**没有任何测试抓住它**。分析后确认这不可观测：该顺序只会让 `poolIds` 成为一个超集，而一个已经离窗的池在 `eventsFor` 的窗口过滤下不会有任何事件留下，于是输出逐值相同。换句话说 `expire → poolsForToken` 这个先后关系目前**只有文档与注释在守**，测试守不住。我没有删掉这个顺序，也没有为它造一个能抓住的用例（那样的用例必须构造「池的事件刚好横跨窗口边界」的精确夹具，而它证明的仍然只是报告里的 `quotes` 字段），仅在此如实记录其覆盖度。
+  2. **`expireOutside` 传 `sinceBlock: null`，因此无分钟的事件在索引里不按块界回收**。`readSelected` 路径没有暴露 `windowOf` 算出的 `cutoff`（它留在 `LiveProjectionStore` 内部），把它接出来要动 `LiveProjection` / `StoredProjection` 的公开形状。当前语义与持久缓存一致：`LiveMetricCache.expireBefore` 也是 `delete ... where minute_start_sec<?`，而缓存的 `memo` 从不存 null 分钟（无分钟事件被写成 tip 的分钟）。**索引与缓存的这点差异是已知的**：缓存那侧不会留下无分钟的行，索引这侧会。影响面是「时间预言机无法定位块」这一降级场景下索引缓慢增长；该场景本身已被 `windowContextIncomplete` / `unknown-time-window-boundary` 标记上报。没有为此引入新字段。
+  3. **`eventRevision` 是 `valueSwap` 读取范围的超集，这个「超集」由人工维护**。将来 `Swap` 新增字段或 `valueSwap` 开始读取新字段时，`VALUATION_RULE_VERSION` 必须跟着改（单测 8 把 `'valuation-v1'` 钉死了，改它必须是有意的）。这是本模块唯一需要人记住的约定，已写进类注释第一段。
+  4. **依赖池的报价依赖集来自「选中池的注册 token0/token1」**，而不是「哪些池的报价被真正读到」。因此 `request.tokens` 可能包含一个没有任何依赖池的 token（多查一次倒排），也可能——**如果某个选中池的注册缺失**——漏掉它本该提供的 token。后者与 `absentPoolIds` 是同一件事的两面：注册缺失的池本来就没有窗口，不上报，也不提供依赖。这是「选择」与「注册」的一致性由 `resolveWorkset` 的 `registry.get(poolId)` 守住。
+  5. **有界报告的三条断言依赖夹具里「选中池恰好有两个监测侧」**（`WATCHED_SIDES = 2`，即 STOCK_A 与 STOCK_B 都在 `input.assets` 里）。这不是手写理想值：`2` 是 `SELECTED` 池注册的 token0/token1 中命中 `input.assets` 的个数，与 `related.length` 同义。但它确实是夹具性质，换一个只有单侧被监测的池就需要改这个常量。
+  6. **`valuationIndexFor` 的共享范围是 `(db, scopeId)`，`WeakMap` 的键是 `Database` 对象而不是文件路径**。因此同一个文件被打开两次（两个 `Database` 句柄）时得到两份索引：只读句柄那份纯粹是内存缓存，不会污染写路径；写句柄那份跨 builder 复用。这是刻意的（`openDatabase` 的调用方在测试与 CLI 里都会重复打开同一路径），但它意味着「索引命中率」在双句柄场景下低于理论值。无正确性影响。
+  7. **`metricEvents` 那道门的 RED 是崩溃而不是数值差异**（变异 5），因此它只证明这道门承重，不证明去掉它会静默多算。静默多算的那一面由变异 6（`grossFees`）覆盖。如实记录两者的覆盖差别。
+  8. **`src/storage/live-metric-cache.ts` 一行未改，这是有意的**。计划原文要求「持久缓存作为恢复层保留」。C2 的新增路径是「索引命中 → 直接返回」，未命中 → `cache.memo(...)`；所以持久缓存在有界路径上仍然是**唯一的重启恢复机制**，且它在 C1 已被 `tests/integration/live-metric-cache.test.ts` 完整覆盖。删掉它或把它降级成纯哈希表都会让重启后第一轮重新估值整个窗口，而这一轮的成本没有测量数据支持。**如果审查者认为索引使持久缓存变成死代码，请指出**——我的判断是它在冷启动与跨进程场景下不可替代，但这一点没有独立的性能样本佐证（属子计划 05）。
+  9. 真实 provider 验证、运行时迁移与生产切换均**未执行**（属验收阶段，见后续记录）。
+
+- Commit：待子计划 03 提交后补写（同 C1，单一提交 `perf: bound live evaluation and schedule metadata outside batch commits` 覆盖 C1–C5）。
+
+
+### C3
+
+- 状态：完成
+
+- 修改文件：
+  - 修改 `src/signals/project.ts`（本任务的全部接入点）：
+    - 新增导出 `SignalSelectionContext = { registry?: PreparedRegistry }`，并作为 `projectSignals` 的第七个可选参数。它只承载**本批次已 prepare 的注册视图**：`recorder.ts` 在提交批次时把本批发现的注册 stage 进 prepared 视图而不是共享缓存，所以在这一批里重新 `prepare()` 的视图**看不见它们**（同批新池会被选中、然后被判定为「无注册」）。生产路径的 `registryContext` 非空当且仅当 `metricInput && options.signalConfig`，与 `commitAcceptedSignalBatch` 的调用条件是同一个条件，因此生产上这个参数**恒有值**。
+    - 新增模块私有 `selectWorkset()`：算 `branchMoved`（同一高度换 hash，或高度回退）、`coverageChanged`、`bounds = { sinceSec: sinceSec - 120, sinceBlock: null }`，并把 `seeded()` / `seed()` 的一次性初始化放在这里（旧库首次扫描 `signal_snapshots`）。
+    - `tip` / `sinceSec` / `eventIndex` / `workspace` / `registry` 全部在 `buildMetricsReport` **之前**算好。`sinceSec` 与 `metric-store.ts` 是同一表达式、同一个 `acceptedTip`，所以「选」与「读」是同一个窗口——C1 用 `WorksetInput.bounds` 必填防的那件事，这里靠同源表达式而不是靠约定。
+    - `selectionCursor` / `selectionRepair` 是**选择专用的独立读取**（`signal_cursors`、`live_pending_signal_repairs`）：报告自己还会 sync 一次，读在其后可能拿到本轮还没走到的修复，读在其前只会让带记忆的池被多评一次，是唯一不会丢提醒的方向。
+    - `buildMetricsReport` 的 `live` 增加 `poolIds`（=`selected`）、`registry`、`eventIndex`、`changes: liveChanges`。`changes` 是本批自己那次 `sync` 的 delta：报告若自己再 sync 一次，日志那时已经空了。
+    - 循环体内第一行 `evaluatedPoolIds.push(w.poolId)`；循环之后按**持久快照重新读**决定 `retain`（不是用 `decision.nextSnapshot`：分支变更时 `previous` 被当作初始快照、存储行并未被覆盖）。
+    - `claimed` 标志 + `arm(watermarkSec | null)`：`workspace` 非空的每一轮都 arm，`selected === null` 的那轮 arm `null`（清掉前一次尝试留下的待定值）。`.immediate()` 之后 `if (claimed && !db.inTransaction) commit()`。
+    - `commitAcceptedSignalBatch` 在 `.immediate()` 之后 `if (!db.inTransaction) commit()`：`projectSignals` 是在它的事务里跑的，所以不能自己提交，这一行才是「这一轮落地了」的落点。
+  - 修改 `src/storage/live-workset.ts`：`LiveWorkset` 接口从 `select` 单方法变为 `select` / `arm` / `commit`（取代此前设计里写的 `commit(watermarkSec)`）。`select` 只读不写水位线；`arm(watermarkSec | null)` 记下本轮「对着哪个水位线选的」；`commit()` 在 armed 非 null 时把它变成常驻值。
+  - 新增 `tests/integration/signal-workset-equivalence.test.ts`（3 个用例）：12 池 14 批 + 一次完整重取（去掉 alpha 的 burst 触发修复与撤回）的 golden 样本，冻结 alert 的 kind/revision/status/poolLabel/atBatchId/logicalTimeSec/historical/reasons、alert `id` 与 `episodeId`、撤回 reasons、每池 `SignalSnapshot` 业务字段、liquidity 计数（alpha 0/0/0 对 bravo 1/1/0）、outbox 状态计数（`pending 6 / superseded 6`）。**全部字面量由真实运行读出，没有一条手写**；9 个静默池的快照用 `.map` 推导。另加两个用例：`a live batch evaluates the pools it has input for, not the catalogue it was registered in`（400 条静默注册，见 RED 变异 1）与 `a branch replaced at the same height reconsiders the pool whose only input is its memory`。
+  - 修改 `tests/integration/live-workset.test.ts`：新增 `a round that rolled back leaves no standing watermark for its retry to trust`（该文件现 9 个用例），`round()` 辅助函数末尾改为 `arm` + `commit`。
+  - 修改 `tests/integration/live-registry-incremental.test.ts`：`zero registry change over a large catalogue costs nothing in the sync path` 的两条成本断言随 C3 更新（见「行为差异」第 2 条）。
+
+- RED（每条都是单点变异，逐字输出）：
+
+  1. **选择门**（`project.ts` 的 `const selected =` 条件前插入 `false &&`，即本轮永不咨询 workset）：
+     ```
+     FAIL  tests/integration/signal-workset-equivalence.test.ts > a live batch evaluates the pools it has input for, not the catalogue it was registered in
+     AssertionError: expected +0 to be 12 // Object.is equality
+     - Expected  + Received
+     - 12  + 0
+      ❯ tests/integration/signal-workset-equivalence.test.ts:882:46
+      Test Files  1 failed (1)  Tests  1 failed | 1 passed (2)
+     ```
+     同一变异下把该行临时换成 `evaluatedPools` 探针（只为读出全量路径的真实值）：
+     ```
+     AssertionError: expected 412 to be -1 // Object.is equality
+      ❯ tests/integration/signal-workset-equivalence.test.ts:882:39
+     ```
+     为什么是原问题：12 是这一轮真有输入的池，412 = 12 + 400 条静默注册；静默注册确实进了注册表、全量路径确实会为它们逐条组装窗口。选出 0 而评了 412，正是「选择没接到真实调用路径」的样子。
+  2. **水位线的提交拆分**（在 `live-workset.ts` 的 `select` 末尾恢复 `this.#lastWatermarkSec = input.watermarkSec;`）：
+     ```
+     FAIL  tests/integration/live-workset.test.ts > a round that rolled back leaves no standing watermark for its retry to trust
+     AssertionError: expected 4 to be 6 // Object.is equality
+     - Expected  + Received
+     - 6  + 4
+      ❯ tests/integration/live-workset.test.ts:258:22
+      Test Files  1 failed (1)  Tests  1 failed | 8 passed (9)
+     ```
+     为什么是原问题：4 = 只有窗口内的四池，6 = 那四池加两个 cooling 池。失败的那次尝试选了它们、arm 了新水位线、然后整个事务回滚；重试少掉的正是这两个 cooling 池——它们既没有窗口事件、又被错误地当作「上一轮已经评过」，那一轮欠它们的重新评估被静默吞掉。这正是计划 bullet 9「失败后重试同 batch 与连续运行等价」。
+  3. **记忆判定收窄**（`snapshotHasMemory` 的 `Object.keys` 并集改为只比较 `'state'`）：
+     ```
+     FAIL  tests/integration/live-workset.test.ts > a snapshot counts as memory when any business field differs from the initial one
+     AssertionError: expected false to be true // Object.is equality
+     - Expected  + Received
+     - true  + false
+      ❯ tests/integration/live-workset.test.ts:333:5
+      Test Files  1 failed (1)  Tests  1 failed | 8 passed (9)
+     ```
+     为什么是原问题：`candidateFingerprint` 在候选态、`lastAlertScale` 在冷却态、`entryThreshold` 在热态，各自都可能**单独**是那池唯一的记忆。少算任何一个字段，该池就会在下一轮被移出 workset，而它的冷却/到期再也不会被推进。
+  4. **分支回退的加宽**（`const branchMoved = false && …`）：`pnpm exec vitest run tests/integration/signal-workset-equivalence.test.ts tests/integration/alert-reorg.test.ts tests/integration/alert-recorder.test.ts tests/integration/rolling-replay.test.ts` → `Test Files 4 passed (4)` / `Tests 35 passed (35)`。**无 RED**，见「未通过项」第 6 条。
+  5. **coverage 加宽**（`selectWorkset` 的 `coverageChanged` 整段前置 `false &&`）：同上再加 `alert-reorg` → `Test Files 2 passed (2)` / `Tests 27 passed (27)`。**无 RED**，见「未通过项」第 6 条。
+
+- GREEN：
+  - golden/等价性文件单独跑：
+    ```
+    pnpm exec vitest run tests/integration/signal-workset-equivalence.test.ts
+    → Test Files 1 passed (1)  Tests 3 passed (3)
+    ```
+    这一条通过本身就是本任务要的非语义性证据：alert `id` 与 `episodeId` 由 `hash([pool.chainId, poolRegistrationId(pool), version, episodeId, kind])` 与 `hash([epoch, version, poolRegistrationId(pool), currentMinute|latest.endSec, kind])`（`engine.ts`）决定，**两者都不读 `report.sourceHash`**；而 C2 已把选择并进 `sourceHash`，所以有界轮次的 `sourceHash` 与全量轮次不同却不会改变任何一条 alert 的身份。这是 C3 能成立的前提，不是巧合。
+  - 提醒路径 7 个文件：
+    ```
+    pnpm exec vitest run tests/integration/signal-workset-equivalence.test.ts tests/integration/alert-recorder.test.ts tests/integration/alert-recorder-review.test.ts tests/integration/alert-reorg.test.ts tests/integration/alert-new-pool.test.ts tests/integration/alert-outbox.test.ts tests/integration/rolling-replay.test.ts
+    → Test Files 7 passed (7)  Tests 58 passed (58)
+    ```
+  - 本任务验证集 9 个文件（再加上 `live-workset.test.ts` 与 `live-registry-incremental.test.ts`）：
+    ```
+    → Test Files 9 passed (9)  Tests 77 passed (77)
+    ```
+  - `pnpm typecheck` → 退出码 0。接线中途出现过真实报错 `src/signals/project.ts(444,14): error TS2304: Cannot find name 'LiveWorksetStore'`，补 `type LiveWorksetStore` 导入后消失；记录在此以免被误读为「一次通过」。
+  - 全量：`pnpm test` → `Test Files 127 passed (127)` / `Tests 1047 passed (1047)`，退出码 0。改动前基线 126 文件 / 1043 用例；差值为 golden 文件本身与它的两个新用例、以及 `live-workset.test.ts` 的回滚用例。
+
+- 行为差异：
+  1. **语义：零差异**，且不是「测出来没差异」而是有上界的：有界轮次与全量轮次唯一可能不同的是 `report.windows` 的**集合**，而 alert 身份与状态机输入都不读选择；golden 的冻结表（含 `episodeId`、`revision`、`status`、reasons、outbox 顺序、快照业务字段）逐条不变即为证。
+  2. **成本：一处上限变紧，是刻意的**。`live-registry-incremental.test.ts` 的 `zero registry change over a large catalogue costs nothing in the sync path` 原断言 `registryRowsRead === 2 * size`，现在为 `0`：有界轮次的注册数据来自它选择时所依据的那个视图（`metric-store.ts` 的注释就是这条），目录行一条不读。该测试保留 `expect(size).toBeGreaterThan(SCALE_POOLS)` 作为对照，并保留 `registryChangesRead === 0` 与后续 `liveSync` 三计数为 0、`changes` 为 `[]` 的断言。**这不是把断言放宽**：`0` 比 `8002` 更严，且「全量路径仍会读目录」由同一文件 `:376` 的 `expect(sync.counts.registryRowsRead).toBe(catalogue(db, 's').length)` 继续钉住。代价：这条测试不再能同时证明「目录读被压到一次」，那一面改由 C2 的记录与 `metric-store.ts` 的边界承担。
+  3. **重复读取**：`signal_cursors` 与 `live_pending_signal_repairs` 每轮各被读两次（一次为选择、一次为既有的短路判定）。两条都是 `scope_id` 主键点查、量级为 1 行，未合并以免改动既有短路逻辑。
+  4. **`retain` 只在 `selected !== null` 时执行**：走全量路径的轮次不动成员表（保守方向）。
+  5. **每次有界轮次多一次 `signal_snapshots` 的点查/池**（`retain` 的判据），复用一条 prepared statement。
+
+- 未通过项 / 已记录的边界：
+  1. **`liquidity-watch` 无法被样本覆盖**：`AlertKind` 有它、消息格式有它，但 `evaluateSignal` 从不产生它（只有 candidate/hot/reheat/cooling）。造样本时遇到这条并**正确地停下来**而不是伪造一个，改为钉 `expect(records(db).map(r => r.kind)).not.toContain('liquidity-watch')`。将来若真加了规则，这条断言会先失败，而不是让样本悄悄变宽。
+  2. **config hash 在同水位线下的变化会迟一轮**：`selectWorkset` 读的是**上一轮**的 `signal_cursors.config_hash`（它属于短路判定，写在报告之后），所以「配置变了但这个水位线没动」的加宽要靠下一轮的 `repair` 分支。计划 bullet 7 要求「目录、coverage、metadata 或报价在同 watermark 下修订必须打破 source hash 短路」——短路确实被打破了（`report.sourceHash` 变），但**选择的加宽**迟一轮。若审查者认为必须同轮，需要把 configHash 的计算提到选择之前（会牵动 `report.version` 的读取顺序）。
+  3. **成员集是单调的**：`initialSignalSnapshot` 含 `lastAlertScale` / `lastAlertSec` 等，一个曾经提醒过的池即使回到 `state: 'watch'` 也仍有记忆（golden 里 alpha 的终态就是 `watch` 且在成员表内）。这是刻意的保守（`snapshotHasMemory` 的注释写了「发明一个比状态机实际保留的更短的记忆会丢掉冷却中的池」），代价是成员集只增不减，除非该池的快照逐字段回到初始值。
+  4. **`metricSourceHash` 随选择变化 / `commitSignalDecision` 用 `isDeepStrictEqual` 判重**：理论上「选择变了 → `metricSourceHash` 变 → 同快照也可能被当成新 revision」。实测未发生（golden 的 revision 计数与 `pending 6 / superseded 6` 都没动），且同一批次的 `sourceHash` 在一次重放里稳定。**没有独立测试钉住它**，属已知风险。
+  5. **`generation` 重置不参与回滚拆分**：`live-event-index.ts` 的窗口代际直接写在内存里。它只在「窗口被重新推导」时变化，本身不携带轮次语义，所以没有事务语义可拆；若审查者认为它也需要回滚语义，这里要重新讨论。
+  6. **`coverageChanged` 与 `branchMoved` 没有端到端 RED**：变异 4 与变异 5 都是全过。原因是我在变异 5 之后才确认：分支替换会让事件索引**重新推导窗口**（`ensureCurrent` → `reload` → `generation++`），而 `select` 一见代际变化就作废常驻水位线，于是成员集在同一场景里被重新考虑——两条路殊途同归，测不出是哪条起的效。**保留这两个条件**（只会加宽、不会减少评估，且计划 bullet 7 点名要求），但记录为「无独立 RED」。`coverageChanged` 的**规则本身**在 store 层有 RED：`live-workset.test.ts` 的 `an empty round that advances the watermark still reconsiders the pools with signal memory` 末尾 `expect(round(workset, WATERMARK_SEC + 60, { coverageChanged: true }).size).toBe(8)`。
+  7. **`changes: liveChanges` 没有 RED**：把它换成 `undefined` 后该文件的用例全过。本样本里报告自己那次 sync 与「交给它的 delta」结果一致。这个参数是为**修订/撤回**场景准备的，本样本没有把它区分开。
+  8. **启动路径的 arm 不 commit**：`recorder.ts` 的重投影分支在自己的事务里直接调 `projectSignals`，事务提交后没有人调 `commit()`。后果只有一个方向：水位线不成为常驻值，下一轮会把带记忆的池**多评一次**（不会漏）。补一行 `commit()` 需要改 `recorder.ts`，本次未改。
+  9. **12 池样本每一轮的选择都等于全部 12**：历史窗口（180 分钟 = 10800 块）比整个样本（约 8700 块）还长，样本里没有「选择小于目录」的轮次；那一面由新增的 400 注册用例承担，不是由 golden 样本承担。
+  10. 本节引用的 `file:line` 取自当前工作树。前六份记录是分阶段写的，行号以各自当时为准；C1/C2 一节里对 `live-workset.ts` 接口的描述（`select` 单方法、`commit(watermarkSec)`）已被本次的 `arm` / `commit` 拆分取代，以代码为准。
+
+- Commit：待子计划 03 提交后补写（同 C1/C2，单一提交 `perf: bound live evaluation and schedule metadata outside batch commits` 覆盖 C1–C5）。
+
+
+### C4
+
+- 状态：完成
+
+- 修改文件：
+  - 新增 `src/metrics/metadata-index.ts`（130 行）：`buildMetadataIndex(entries): MetadataIndex`。按 `address.toLowerCase()` 分组，组内按高度升序**稳定**排序，查找是组内二分（`decimalsAtOrBelow`），所以一次查找是 O(log n) 且与缓存总条数无关。`revisionFor(address)` 是该地址锚点集的 sha256（元素为 `[observedAtBlock, decimals, blockHash]`，先按 `compareAnchors` 规范化排序），空锚点集返回 `digest([])`——它是**任意进程都能独立推导的内容摘要**，不是构建计数器、也不是对象身份；地址本身不进摘要（两个锚点相同的地址共享一个 revision，注释里写明要用时得配地址）。摘要覆盖 `blockHash.toLowerCase()`，而 `observedAtBlock` 原样进摘要（换一种拼写就是新内容）。
+  - 新增 `src/storage/metadata-queue.ts`（342 行）：`DemandQueue implements MetadataQueue`。`enqueue` / `lease` / `stats` / `settle` 全部在**调用方的事务里**执行，自己从不 BEGIN（嵌套事务会把 accepted batch 写坏，或留下恢复进程看不见的租约）。附 journal 读取侧：`metadataRevision`、`metadataJournalPresent`、`metadataAddressChanges`、`pruneJournal`，常量 `METADATA_LEASE_MS = 30_000`、`METADATA_REVISION_JOURNAL_LIMIT = 256`、`UNNAMED_CHANGE = '*'`。
+  - 新增 `src/storage/migrations/014-metadata-queue.sql`（98 行）：`metadata_demand`（主键 `(scope_id,address)`，列 `needed_block` / `priority` / `next_retry_ms` / `lease_id` / `lease_owner` / `lease_until_ms` / `updated_at_ms`）、索引 `(scope_id,priority,next_retry_ms)`、`metadata_revision`（`id=0` 单行计数器）、`metadata_address_changes`（journal），以及 `token_metadata` 的 INSERT/UPDATE/DELETE 与 `token_metadata_invalid_anchors` 的 INSERT/DELETE 五个触发器。
+  - 新增 `tests/unit/metadata-index.test.ts`（295 行 / 5 用例）：与**逐字保留的旧实现** `legacyDecimalsAt` 逐值对照（带种子的生成语料：60 地址 × 1–6 个锚点、重复高度、三种大小写拼写；另一条 4000 地址 / 20000 条目 / 4000 次查找，120s 超时）；用 Proxy 统计属性读取次数钉住「同一对象只建一次索引」；`revisionFor` 的等价/不等价矩阵。
+  - 新增 `tests/integration/metadata-queue.test.ts`（529 行 / 26 用例）。
+  - 修改 `src/metrics/metadata.ts`：`decimalsAt` 增加 `WeakMap<MetricMetadata, MemoizedIndex>`（以条目数组身份 + 长度为守卫）；`reconcileMetricMetadata` 在无冲突时**返回入参本身**。
+  - 修改 `src/storage/token-metadata.ts`：`readCachedMetricMetadata` 按 `(db, seed 身份, seed.version, seed.entries.length, metadata revision)` 记忆化；新增 `DEFAULT_METADATA_SCOPE_ID = 'live'`、`METADATA_RETRY_MS = 60_000`、`TokenMetadataTarget.priority?: 0|1|2`、`TokenMetadataUpdate{attempted,resolved,failed,eligible,retryWaiting,inflight}`；新增 `lookupMetadata`（纯网络：锚前检查 → eth_call → 锚后检查）与 `applyMetadataLookup`（同步落库 + settle，跑在调用方事务里）；`refreshTokenMetadata` 改为队列驱动。
+  - 修改 `src/storage/database.ts`：迁移清单加 `013-live-workset.sql` 与 `014-metadata-queue.sql`。
+  - 修改 `src/ops/recorder.ts`：`refreshMetadata` 传 `scopeId` 与 `owner: id`；启动预热 `priority: 2`、批次内 USDG `priority: 1`、批次内池 token `priority: 0`。
+  - 修改 `tests/integration/token-metadata.test.ts`（13 用例，+5）、`tests/unit/metric-metadata.test.ts`（6 用例，恒等契约）、`tests/integration/live-metrics.test.ts`（6 用例，+1，见 RED 5）。
+
+- RED（每条都是单点变异，逐字输出）：
+
+  1. **lease 排序**（`metadata-queue.ts` 的 `order by priority, next_retry_ms, needed_block, address` 去掉 `next_retry_ms`）：
+     ```
+     FAIL  tests/integration/metadata-queue.test.ts > a never-attempted demand is leased before demands whose retry deadline already passed
+     AssertionError: expected [ …(3) ] to deeply equal [ …(3) ]
+
+     - Expected
+     + Received
+
+       [
+     -   "0x0000000000000000000000000000000000000003",
+         "0x0000000000000000000000000000000000000001",
+         "0x0000000000000000000000000000000000000002",
+     +   "0x0000000000000000000000000000000000000003",
+       ]
+
+      ❯ tests/integration/metadata-queue.test.ts:185:17
+     Test Files  1 failed (1)  Tests  1 failed | 25 passed (26)
+     ```
+     为什么是原问题：`3` 从未被尝试（deadline = 入队时的 `nowMs` = 0），`1` 与 `2` 刚失败过（deadline = `now-100` / `now-1`）。排序里不带 deadline，就变成「谁的高度小谁先被租」，一个刚失败的地址抢在一个从没人看过的地址前面——这正是旧实现里 `failed tokens cannot starve a previously unseen token` 那条用例守的性质，在队列层必须有同一条守卫。
+  2. **settle 的覆盖谓词**（`row.needed_block >= Number(outcome.anchorBlock)` 反向成 `<=`）：
+     ```
+     FAIL  tests/integration/metadata-queue.test.ts > a demand that arrives at an earlier height while a lease is out stays queued
+     TypeError: Cannot read properties of undefined (reading 'needed_block')
+      ❯ tests/integration/metadata-queue.test.ts:252:15
+      Test Files  1 failed (1)  Tests  1 failed | 25 passed (26)
+     ```
+     为什么是原问题：租约是在高度 100 上取的，期间有一个高度 40 的需求合并进来，结果 `40 <= 100` 被判为「已覆盖」于是整行删除，`row()` 直接返回 `undefined`。100 的读数对 40 什么也没说（`decimalsAt` 取的是「at or below」的最后一个锚），删掉就等于谎报已解决：该池在 40 的估值会一直是 unpriced，而那一批早已过去、不会再有谁来重新提出这个需求。这就是计划里「旧结果仅完成它实际覆盖的需求，不按地址粗暴删除」。
+  3. **无效锚点的未具名标记**（014 的 `token_metadata_invalid_anchor_insert` 删掉 `'*'` 那条 INSERT）：
+     ```
+     FAIL  tests/integration/metadata-queue.test.ts > an invalid anchor names the rows at that height and admits the seed may be affected
+     AssertionError: expected true to be false // Object.is equality
+      ❯ tests/integration/metadata-queue.test.ts:437:28
+     FAIL  tests/integration/metadata-queue.test.ts > a real anchor check names the addresses stored at the height it invalidated
+     AssertionError: expected true to be false // Object.is equality
+      ❯ tests/integration/metadata-queue.test.ts:477:28
+      Test Files  1 failed (1)  Tests  2 failed | 24 passed (26)
+     ```
+     为什么是原问题：被作废的高度上，`token_metadata` 的行能被 SQL 点到名，**seed 文件里同样位于该高度的那条凭空消失**——它的地址不在任何表里，触发器无从写出来。少了这个标记，`complete` 会报 `true`，读者就会把重建窄化到那张地址清单上，于是 seed 条目的失效被静默漏掉。两条用例分别覆盖「无效锚点插入」和「真实 `validateTokenMetadata` 路径」，我把它们的期望从 `true` 改成 `false`：旧期望是本任务之前子代理写下的乐观假设。
+  4. **命中缓存的目标不再入队**（`refreshTokenMetadata` 里删掉 `decimalsAt(cached, demand.address, demand.blockNumber) === null` 过滤，即所有目标都入队）：
+     ```
+     FAIL  tests/integration/token-metadata.test.ts > discovers different token decimals, persists per address and skips cached RPC
+     AssertionError: expected "vi.fn()" to be called 2 times, but got 4 times
+      ❯ tests/integration/token-metadata.test.ts:51:23
+     FAIL  tests/integration/token-metadata.test.ts > verified configuration seeds avoid duplicate RPC lookups
+     AssertionError: expected "vi.fn()" to not be called at all, but actually been called 1 times
+     Received:
+       1st vi.fn() call:
+         Array [ "eth_call", Array [ Object { "data": "0x313ce567", "to": "0x0000000000000000000000000000000000000001" }, "0xa" ] ]
+     Number of calls: 1
+      Test Files  1 failed (1)  Tests  5 failed | 8 passed (13)
+     ```
+     为什么是原问题：「目标」不是工作清单，是需求：一个已经有锚点覆盖该高度的地址根本不该被排队，否则每一轮都把它重新查一遍，`maxTokens` 的额度就会被已经知道答案的地址吃掉（第 1 条用例从 2 次请求涨到 4 次就是这么来的）。这一条正是 review 里 `deferred:62552` 的根：旧实现把「全部未知地址」当成每轮待办。
+  5. **无冲突时的恒等返回**（`reconcileMetricMetadata` 的 `if (conflicts.length === 0) return { metadata: cache, conflicts };` 注释掉，恢复成恒返回 `{ ...cache, entries }`）：
+     ```
+     FAIL  tests/unit/metric-metadata.test.ts > retains absent-height entries only as the existing historical carry-forward assumption
+     AssertionError: expected { version: 'test-v1', …(3) } to be { version: 'test-v1', …(3) } // Object.is equality
+     Compared values have no visual difference.
+      ❯ tests/unit/metric-metadata.test.ts:78:27
+     FAIL  tests/unit/metric-metadata.test.ts > reconciling the same cache twice hands the live path one object to index
+     AssertionError: expected { version: 'test-v1', …(3) } to be { version: 'test-v1', …(3) }
+      ❯ tests/unit/metric-metadata.test.ts:89:60
+     FAIL  tests/integration/live-metrics.test.ts > live bounded metrics > hands consecutive rounds the same metadata object, so one index serves the run
+     AssertionError: expected { version: 'test+onchain-v1', …(3) } to be { version: 'test+onchain-v1', …(3) } // Object.is equality
+      ❯ tests/integration/live-metrics.test.ts:60:31
+      Test Files  2 failed (2)  Tests  3 failed | 20 passed (23)
+     ```
+     为什么是原问题：`metric-store.ts:211` 每轮把 `reconcileMetricMetadata(...).metadata` 交给 `decimalsAt`，而 `decimalsAt` 的索引按**对象身份**记忆化。逐字相同的副本每轮一次，就是每轮重建一次整张索引（一次排序 + 每个地址一次 sha256），计划门槛「无逐轮完整 metadata 候选构造」要挡的正是这笔开销。失败输出里的 `version: 'test+onchain-v1'` 同时证明走到的是**构建出来的**缓存而不是原样返回的 seed。
+  6. **记忆化的复用**（`readCachedMetricMetadata` 的命中条件前置 `false &&`，即永远重建）：
+     ```
+     FAIL  tests/integration/token-metadata.test.ts > an unchanged cache comes back as the same object and a write is visible on the next read
+     AssertionError: expected { version: 'test+onchain-v1', …(3) } to be { version: 'test+onchain-v1', …(3) }
+      ❯ tests/integration/token-metadata.test.ts:144:46
+     FAIL  tests/integration/live-metrics.test.ts > live bounded metrics > hands consecutive rounds the same metadata object, so one index serves the run
+      ❯ tests/integration/live-metrics.test.ts:60:31
+      Test Files  2 failed (2)  Tests  2 failed | 17 passed (19)
+     ```
+     为什么是原问题：没有记忆化，`metric-store.ts:124` 与 `refreshTokenMetadata` 每次都从 `token_metadata` 全表重建一个新对象，恒等链在**上游**就断了——第 5 条的修好了也白搭。两条断言分别钉「同一个 db + 同一个 seed」在缓存层与报告层的同一性。
+  7. **记忆化的失效**（`metadataJournalPresent(db) ? metadataRevision(db) : null` 改成 `? 0 : null`）：
+     ```
+     FAIL  tests/integration/token-metadata.test.ts > forked configuration seed is excluded durably and queried again
+     AssertionError: expected null to be 6 // Object.is equality
+      ❯ tests/integration/token-metadata.test.ts:117:73
+     FAIL  tests/integration/token-metadata.test.ts > an unchanged cache comes back as the same object and a write is visible on the next read
+     AssertionError: expected null to be 6
+      ❯ tests/integration/token-metadata.test.ts:145:43
+     FAIL  tests/integration/token-metadata.test.ts > demands a round does not reach stay queued for the next one
+      Test Files  1 failed (1)  Tests  3 failed | 10 passed (13)
+     ```
+     为什么是原问题：这里要如实说明一件我预判错的事——我原以为这个变异会让第 6 条的性能断言失败，实测 `live-metrics.test.ts` 全过：revision 恒为 0 时命中条件仍然成立，记忆化照旧返回同一个对象。它真正的失效面是**失效语义**：写入之后读回来的还是旧对象（`null` 就是旧缓存里没有这个地址的读数）。所以「记忆化存在」与「记忆化会失效」是两个可独立观测的命题，我分别用变异 6 与变异 7 取证，没有让一个变异同时代表两件事。
+
+- GREEN：
+  - 本任务验证集（计划的运行行）：
+    ```
+    pnpm exec vitest run tests/unit/metadata-index.test.ts tests/integration/metadata-queue.test.ts tests/unit/metric-metadata.test.ts tests/integration/token-metadata.test.ts
+    → Test Files 4 passed (4)  Tests 50 passed (50)
+    ```
+    50 = metadata-index 5 + metadata-queue 26 + metric-metadata 6 + token-metadata 13。
+  - 报告路径的恒等断言（不在计划运行行内，是第 5/6 条的第二个见证）：
+    ```
+    pnpm exec vitest run tests/integration/live-metrics.test.ts
+    → Test Files 1 passed (1)  Tests 6 passed (6)
+    ```
+  - 全量：`pnpm exec vitest run` → `Test Files 129 passed (129)` / `Tests 1085 passed (1085)`，34.93s。C3 结束时是 127 文件 / 1047 用例，本任务 +2 文件 / +38 用例，正好等于 metadata-index 5 + metadata-queue 26 + token-metadata 5 + metric-metadata 1 + live-metrics 1。
+  - `pnpm typecheck` → `tsc --noEmit && tsc -p tsconfig.scripts.json`，退出码 0。
+
+- 行为差异：
+  1. **`deferred` 改名 `retryWaiting`，而且语义变了**：旧字段是「本轮没轮到、或还在退避里被跳过的目标数」——review 记的 `attempted:16,resolved:16,failed:0,deferred:62552` 就是「全部未知地址被当成本轮待办」的样子；新字段只数「本 scope 队列里 `next_retry_ms` 还没到的真实需求」。仓库内没有消费者（只有 `recorder.ts` 打一行 `event: 'token-metadata'` 日志），但仓库外读这行日志的分析要跟着改口径。
+  2. **每 token 两次 `getAnchor`**：实测 4 个 token 同一高度 → 8 次 `eth_getBlockByNumber` + 4 次 `eth_call` = 12 次请求；改动前同一场景是「每高度组 2 次 anchor + 每组 k 次 call」= 6 次。这些请求走的是同一个 150 次总预算与 5rps / 2 并发限流，所以这是**关键路径上真实增加的请求数**（C5 会把这条路整体挪出关键路径，C5 之前它确实更贵）。可以在不削弱保护的前提下把它降回 `k+1`：相邻 lease 在**同一高度**时，把前一个 lease 的锚后观测当作后一个 lease 的锚前观测——每个 token 的调用仍被该高度的两次不同观测夹住，期间换分支必被它自己的锚后检查抓住。这属于改保护逻辑的粒度，我没有自行实施，留给审查者裁决。
+  3. **写库事务粒度**：旧实现每个高度组一次事务；新实现每个 lease 一次（`applyMetadataLookup` 设计成跑在调用方事务里，兼容路径自己起一个）。C5 会把 apply 放进 accepted batch 的事务内。
+  4. **排队语义**：同一地址跨轮重复 enqueue 只合并 `needed_block`（取更早）与 `priority`（取更急），既不重置 `next_retry_ms`、也不打扰在飞租约；失败后至少 60s 退避，`priority` 0 也不能绕过。
+  5. **`readCachedMetricMetadata` 现在可能返回同一个对象**，这正是它的目的；调用方若原地改返回值里的 `entries`，就会污染缓存。契约写进了 `decimalsAt` 的注释（长度守卫能挡住追加/截断，挡不住同长度替换）。
+  6. **history 路径不命中记忆化**：`options.metadata ?? loadMetricMetadata('config/metric-metadata.json')` 在调用方没传 metadata 时每次都重新 load，seed 身份不固定 → 每轮重建。该路径是批处理，不在 live 关键路径上，行为与改动前一致（改动前也每轮重建），只是没拿到这次的新收益。
+  7. 无 schema 变更（`token_metadata` / `token_metadata_failures` / `token_metadata_invalid_anchors` 三张表的形状与语义未动，014 只加新表）；窗口/信号/指标公式未动；`token_metadata` 的读写口径（`decimalsAt` 的「at or below」语义）未动。
+
+- 未通过项 / 已记录的边界：
+  1. **`metadataAddressChanges` 与 `MetadataIndex.revisionFor` 目前没有生产消费者**，只有测试在用。计划的意图是「供 C2/D2 低成本失效」：C2 最终用窗口代际做失效，没有接 journal；D2 还没开始。这是「所有新模块要接入真实调用路径」这条要求下**唯一未闭合**的接口，我不在 C4 里替 D2 造功能，明确列在这里：若 D2 也不接，应当连同 014 里的 journal 表一起删，而不是留着只给单测调用。（`metadataRevision` / `metadataJournalPresent` 是有真实消费者的：缓存记忆化的键，以及上面第 5/6 条那条恒等链。）
+  2. **队列不随 reorg 回退裁剪**：`recorder.ts` 的 `recover()` 删 `token_metadata where block_number>?`、清空 `token_metadata_failures`，但**不动 `metadata_demand`**。后果有界且方向保守：位于回退高度之上的需求留在队列里，按自己的 `next_retry_ms` 被租出去，查询会失败（`anchor-missing` 一类）并再退避 60s，直到有更早的需求合并进来（`enqueue` 取 min 高度，于是 `settle` 的覆盖谓词随之下移并把它删掉）。不会写错值——落库的永远是刚刚读到的那个分支上的锚点与哈希。同时这也是「`recover()` 清空了 failures，而队列行的 deadline 还在」的一处短暂不一致，同样只影响等待时长，不影响取值。
+  3. **记忆化的两个前提**：键含 seed 的**对象身份**与 `entries.length`，所以同长度原地改 seed 不会被发现（`decimalsAt` 的注释已写明这条契约）；每个 db 只有一个记忆槽，同一个 db 上交替使用两个不同 seed 会互相击穿（生产上每个 db 只有一个 seed，reporter 与 refresh 用的是同一个 `options.metricMetadata` 对象）。
+  4. **`settle` 不校验 owner，只认 leaseId**：这是「租约过期后另一个进程/owner 可以接管」的实现方式，也就意味着计划里写的「owner 为 runId」是**标识**而不是鉴权；同一 owner 可以同时持有多个 lease（兼容路径顺序单飞、C5 的 worker 自己保证单飞）。
+  5. **本节的 RED 里有三条是我发现子代理产出缺陷后补的**（排序、覆盖谓词、未具名标记），另外四条（命中过滤、恒等、记忆化复用、记忆化失效）是我自己写的改动的取证。分工如实说明，便于审查者分配信任权重：`metadata-queue.test.ts` 的 26 条里 23 条出自子代理，我逐条读过并跑过；`metadata-index.*` 全部出自子代理，我用「与逐字保留的旧实现对照」这一形式验收——它的等价性不依赖我对索引实现的理解。
+  6. **「无逐轮完整 metadata 候选构造」是链式证据，不是单条端到端断言**：`metadata-index.test.ts`（同一对象只建一次索引，用 Proxy 读计数取证）、`token-metadata.test.ts::an unchanged cache comes back as the same object…`（缓存对象跨轮同一）、`live-metrics.test.ts::hands consecutive rounds the same metadata object…`（报告路径上两次 build 拿回同一对象）。三条都是点测试；没有一条端到端驱动 recorder 多轮循环并统计索引重建次数，`evaluatedWorksetPools` / `valuationComputes` 那类端到端计数在 C2 的记录里。
+  7. 真实 provider 验证、运行时迁移与生产切换均**未执行**（属验收阶段，见后续记录）。
+
+- Commit：待子计划 03 提交后补写（同 C1–C3，单一提交 `perf: bound live evaluation and schedule metadata outside batch commits` 覆盖 C1–C5）。
+
+### C5
+
+- 状态：完成（两处计划外补充、一处必须留白的 shutdown 语义、一处兼容导出的去向待裁决，见「未通过项」1–5）
+
+- 修改文件：
+  - 新增 `src/ops/metadata-worker.ts`（188 行）：`createMetadataWorker`。`kick()` 在调用方的安全点**同步**取第一个租约再立刻返回（不等网络），`run()` 的循环每轮先问 `canStart()`、再 `lease`、再 `lookupMetadata`，结果只写内存 ready buffer（`Map<seq, …>`，键是自增序号而不是数组下标）。单飞由 `chain !== null` 保证：一个 token 的网络序列在飞时任何 kick 都只是返回，链尾的 `finally` 清空 `chain`。`attempted()` 在**查询发出处**计数（不是落库处）；`fatalError()` 保存 run 级错误，`stop()` 只等已经发出去的那一次。模块自己不开 client、不开事务、不写库。
+  - 新增 `tests/integration/metadata-worker.test.ts`（679 行 / 12 用例）。计划矩阵逐条对应：慢 metadata 不拖 accepted commit（用例 1）、两批同地址仅一次 inflight（2）、更早需求插队（5）、lookup 中发生 reorg（4）、DB 提交失败后重试（6）、无新块补齐（8）、故意 evidence-write 失败可见（9）、shutdown 关闭无未处理 Promise（10）、不通知模式不产生 sink 写入（11）、队列不留残余需求（12）。另外两条（3、7）是我发现断言空转后补的，见「未通过项」6。
+  - 修改 `src/ops/recorder.ts`：
+    - 建 worker（324–331）：`reader: metadataReader`（既有的那个把两个方法包进 `meter.withPurpose('metadata', …)` 的 reader，C5 没有为 worker 新开 client，也没有引入全局 purpose 字段）、`canStart: () => ingestDepth === 0`、`isStopping: () => shutdown.requested`。
+    - `demandMetadata(targets)`（333–337）：`enqueueTokenMetadata` + `kick()`，不 await。「主采集有请求在发时暂停派发」是 `canStart` 与 `ingestDepth` 的组合，不是 setInterval。
+    - 启动预热（585–596）：`if (options.command === 'follow')` 只入队（priority 2），不再 await 195 个地址。
+    - 批内（1245）：`demandMetadata(targets)`（池 token priority 0、USDG priority 1）。
+    - accepted 事务（1258–1289）：提交前 `prepareDrain()` 取快照，在 `commitAcceptedSignalBatch` 的 `applyMetadata` 回调里同步落库；没有 signal 事务时退化成提交后的一个短事务；成功 `ack()`、抛错 `rollback()`。
+    - `onWait`（1030–1037）：`maintainMetadata()`（短事务 apply + 修复受影响池）+ `kick()`。
+    - 批的 `finally`（1369–1371）：`ingestDepth--` 之后才 `kick()` —— 一轮运行里第一次真正的 lookup 常常在这里发出（批内那次 kick 因 `canStart` 为假而作罢）。
+    - 收尾（1440–1446）：`drain` → `stop` → `flushMetadata()` → `reader.close?.()`。
+    - 日志行（360–381）：新增 `stale` 与 `activeMissing` 字段。
+  - 修改 `src/storage/metadata-queue.ts`：新增 `activeMissing(scopeId)`（该 scope 里 `priority = 0` 的仍未知需求数），供上面那行日志；`holdsLease` 是 C4 的租约门，C5 让 worker 路径也走同一扇门（落库点从 `refreshTokenMetadata` 内挪到 recorder 的事务里，门没换）。
+  - 修改 `src/storage/token-metadata.ts`：三步拆分的**调用者**换了（生产路径改为 `enqueueTokenMetadata` + worker + `applyMetadataLookup`），`refreshTokenMetadata` 原样保留——它现在的调用者只有测试，见「未通过项」4。
+
+- RED（每条都是单点变异，逐字输出。变异在仓库外由脚本施加，改完立即按字节还原并逐个 sha256 校验：`src/ops/recorder.ts`、`src/ops/metadata-worker.ts`、`src/storage/metadata-queue.ts`、`tests/integration/metadata-worker.test.ts` 四个文件在整轮 8 次变异前后的哈希一致）：
+
+  1. **批次内换回 C5 之前的同步路径**（`src/ops/recorder.ts:1245` 的 `demandMetadata(targets)` 换回 `await refreshTokenMetadata(db, metadataReader, targets, { seed: seedMetadata, scopeId })`，连同一处临时 import）：
+     ```
+      ❯ tests/integration/metadata-worker.test.ts (12 tests | 1 failed) 5052ms
+        × a slow metadata lookup never delays the batch that demanded it 5049ms
+      Test Files  1 failed (1)
+           Tests  1 failed (12)
+     ⎯⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯
+      FAIL  tests/integration/metadata-worker.test.ts > a slow metadata lookup never delays the batch that demanded it
+     Error: condition was never reached
+      ❯ until tests/integration/metadata-worker.test.ts:65:38
+          63|   const deadline = Date.now() + ms;
+          64|   while (!predicate()) {
+          65|     if (Date.now() > deadline) throw new Error('condition was never re…
+            |                                      ^
+          66|     await new Promise((resolve) => setTimeout(resolve, 5));
+          67|   }
+      ❯ tests/integration/metadata-worker.test.ts:193:5
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+     ```
+     为什么是原问题：193 行等的就是 `batch-timing` 那行日志——一批提交的凭据。把 metadata 查回批内同步路径，gate 不开、批就不提交，5 秒预算内一行都不打。这就是 review 里「accepted commit 被 provider 拖住」的最小复现，也正是计划 C5 第一条 RED 要挡的形状。
+  2. **运行结束时的 drain 短路**（`src/ops/recorder.ts` 收尾 `if (!shutdown.requested) await metadataWorker.drain();` 改成 `if (false && …)`）：
+     ```
+      ❯ tests/integration/metadata-worker.test.ts (12 tests | 1 failed) 760ms
+        × a slow metadata lookup never delays the batch that demanded it 758ms
+      Test Files  1 failed (1)
+           Tests  1 failed (12)
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯
+      FAIL  tests/integration/metadata-worker.test.ts > a slow metadata lookup never delays the batch that demanded it
+     AssertionError: expected [ { …(2) } ] to deeply equal [ { …(2) }, { …(2) } ]
+     - Expected
+     + Received
+       [
+         {
+           "address": "0x05a3d1cd21d0c88145e82600e62e7e496e0f222b",
+           "decimals": 18,
+         },
+     -   {
+     -     "address": "0x5fc5360d0400a0fd4f2af552add042d716f1d168",
+     -     "decimals": 6,
+     -   },
+       ]
+      ❯ tests/integration/metadata-worker.test.ts:204:93
+         202|   // And the observation is not lost: it is stored by the run's last c…
+         203|   // the valuation depends on is the one that had to land.
+         204|   expect(db.prepare('select address, decimals from token_metadata orde…
+            |                                                                                             ^
+         205|     [
+         206|       { address: AMC, decimals: 18 },
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+     ```
+     为什么是原问题：少掉的是 USDG——**估值真正依赖的那个报价资产**，它的查询在这批提交之后才发出去。没有收尾这一次 drain，一次性运行的最后一个观测永远不会被任何事务收集，于是「钱已经花了、结果永远丢了」。这条同时钉住收尾顺序（drain 必须在 `stop()` 之前，否则 stop 会把链上唯一在飞的那次也结束掉）。
+  3. **`kick` 不再拒绝已在跑的链**（`src/ops/metadata-worker.ts:134` 去掉 `|| chain !== null`）：
+     ```
+      ❯ tests/integration/metadata-worker.test.ts (12 tests | 1 failed) 738ms
+        × a batch that asks while one lookup is out waits its turn instead of opening a second 18ms
+      Test Files  1 failed (1)
+           Tests  1 failed | 2 passed (12)
+     ⎯⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯
+      FAIL  tests/integration/metadata-worker.test.ts > a batch that asks while one lookup is out waits its turn instead of opening a second
+     AssertionError: expected { Object (eligible, retryWaiting, ...) } to deeply equal { eligible: 1, retryWaiting: +0, …(1) }
+     - Expected
+     + Received
+       {
+     -   "eligible": 1,
+     -   "inflight": 1,
+     +   "eligible": 0,
+     +   "inflight": 2,
+         "retryWaiting": 0,
+       }
+      ❯ tests/integration/metadata-worker.test.ts:269:33
+         267|   worker.kick();
+         268|   expect(gate.started()).toBe(1);
+         269|   expect(queue.stats(SCOPE, 0)).toEqual({ eligible: 1, retryWaiting: 0…
+            |                                 ^
+         270|   gate.open();
+         271|   // Once the chain is free the queued demand is the run's next query,…
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+     ```
+     为什么是原问题：两个不同地址同时被租出去（`inflight: 2`），而计划要求「轮次只在单飞 worker 空闲时 lease 下一项，不会自己重复租赁正在处理的 token」——单飞一旦不成立，第二节点的请求就会挤占第一节点的限流与预算，`canStart` 的「采集优先」也随之失效。第一次做这条变异时它是**存活**的（原用例只重复了同一地址，第二次 kick 恰好被队列租约挡住），所以我把该用例补上 kick，另加了一条不同地址的用例。
+  4. **`holdsLease` 恒真**（`src/storage/metadata-queue.ts:163` 的 `return row?.lease_id === leaseId;` 改成 `return true;`）：
+     ```
+      ❯ tests/integration/metadata-worker.test.ts (12 tests | 1 failed) 793ms
+        × a batch that fails to commit keeps its results, and the retry is refused once its lease is gone 20ms
+      Test Files  1 failed (1)
+           Tests  1 failed | 5 passed (12)
+     ⎯⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯
+      FAIL  tests/integration/metadata-worker.test.ts > a batch that fails to commit keeps its results, and the retry is refused once its lease is gone
+     AssertionError: expected { resolved: 2, failed: +0, stale: +0 } to deeply equal { resolved: 1, failed: +0, stale: 1 }
+     - Expected
+     + Received
+       {
+         "failed": 0,
+     -   "resolved": 1,
+     -   "stale": 1,
+     +   "resolved": 2,
+     +   "stale": 0,
+       }
+      ❯ tests/integration/metadata-worker.test.ts:396:34
+         394|   expect(second.results).toHaveLength(2);
+         395|   expect(gate.started()).toBe(2);
+         396|   expect(apply(db, second, now)).toEqual({ resolved: 1, failed: 0, sta…
+            |                                  ^
+         397|   expect(db.prepare('select address, decimals from token_metadata').al…
+         398|     { address: addr(1), decimals: 6 },
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+     ```
+     为什么是原问题：第一次的结果因为那批事务回滚而**留在 buffer 里**（既没 ack 也没写库，租约也没被 settle），租约到期后需求被重新租出去；门一撤，第二次 apply 就会把「上一轮租约读到的观测」也算成自己的结果落库（`resolved: 2`），于是同一个高度写两遍、旧租约的读数覆盖新租约的读数。这条是 worker 路径（事务回滚后重试）对 C4 那扇门的取证，不是新增门。
+  5. **`run()` 的 catch 吞掉错误**（`src/ops/metadata-worker.ts:129` 的 `fatal = error;` 改成 `void error;`）：
+     ```
+      ❯ tests/integration/metadata-worker.test.ts (12 tests | 1 failed) 3704ms
+        × an evidence-write failure stops the worker and is never read as a token without decimals 7ms
+      Test Files  1 failed (1)
+           Tests  1 failed | 8 passed (12)
+     ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯
+      FAIL  tests/integration/metadata-worker.test.ts > an evidence-write failure stops the worker and is never read as a token without decimals
+     AssertionError: expected null to be Error: RPC evidence-write { …(4) } // Object.is equality
+     - Expected:
+     RpcFailure {
+       "message": "RPC evidence-write",
+       "kind": "evidence-write",
+       "status": "unknown",
+       "retryable": false,
+       "evidenceFailure": undefined,
+     }
+     + Received:
+     null
+      ❯ tests/integration/metadata-worker.test.ts:531:31
+         529|   // The error belongs to the run, not to the token: it is kept for th…
+         530|   // worker starts nothing more.
+         531|   expect(worker.fatalError()).toBe(failure);
+            |                               ^
+         532|   expect(worker.attempted()).toBe(1);
+         533|   expect(worker.prepareDrain().results).toEqual([]);
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+     ```
+     为什么是原问题：evidence-write 失败意味着「证据没有落盘」，把它当成一次普通的 token 失败吞掉，run 会继续用一个已经不可信的 provider 采集下去，而计划要求这类 critical 必须「传回主循环并终止/清理，不能当token失败吞掉」。`fatalError()` 为 null 就是这条被吞掉的直接证据；同一条用例还钉住「失败的那次不算 token 没有小数」。
+  6. **`onWait` 里去掉 `maintainMetadata()`**（`src/ops/recorder.ts:1036`）：
+     ```
+      ❯ tests/integration/metadata-worker.test.ts (12 tests | 1 failed) 5756ms
+        × metadata that lands with no new block repairs the pools it re-priced, without a new range 4932ms
+      Test Files  1 failed (1)
+           Tests  1 failed | 7 passed (12)
+     ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯
+      FAIL  tests/integration/metadata-worker.test.ts > metadata that lands with no new block repairs the pools it re-priced, without a new range
+     AssertionError: expected 0 to be greater than 0
+      ❯ tests/integration/metadata-worker.test.ts:501:5
+         499|   expect(
+         500|     count(db, "select count(*) as n from signal_evaluations where batc…
+         501|   ).toBeGreaterThan(0);
+            |     ^
+         502|   expect(
+         503|     count(db, "select count(*) as n from accepted_ranges where batch_i…
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+     ```
+     为什么是原问题：没有新块时 follow 循环唯一的安全点就是轮询间隙。少了这次 maintenance，metadata 补齐后**没有任何一轮重算那些池**——估值停在 unpriced，信号不撤回也不新发，链不推进就永远不修。这就是计划里「没有新块时，也要在现有follow轮询安全点做短maintenance transaction」那一条，且 5 秒预算内 `signal_evaluations` 一行都没有，说明它不是「慢」而是根本没发生。
+  7. **`ack` 清空整个 ready buffer**（`src/ops/metadata-worker.ts:170-172` 换成 `ack: () => ready.clear(),`）：
+     ```
+      ❯ tests/integration/metadata-worker.test.ts (12 tests | 1 failed) 815ms
+        × an ack removes the snapshot it was handed and not what completed beside it 18ms
+      Test Files  1 failed (1)
+           Tests  1 failed | 6 passed (12)
+     ⎯⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯
+      FAIL  tests/integration/metadata-worker.test.ts > an ack removes the snapshot it was handed and not what completed beside it
+     AssertionError: expected [] to deeply equal [ Array(1) ]
+     - Expected
+     + Received
+     - [
+     -   "0x0000000000000000000000000000000000000002",
+     - ]
+     + []
+      ❯ tests/integration/metadata-worker.test.ts:448:86
+         446|   // stored is still there for the next one: a buffer cleared wholesal…
+         447|   // and with it a query the run has already paid for.
+         448|   expect(worker.prepareDrain().results.map((result) => result.lease.de…
+            |                                                                                      ^
+         449|     addr(2),
+         450|   ]);
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+     ```
+     为什么是原问题：第二条结果是在第一份快照被取走之后、事务提交之前完成的。整表清空把它一起删了，而它对应的查询**已经花掉**——这一次的运行里再没有任何人会看到它，需求也已经从队列里删除（resolved 才删），于是这个地址在这一轮永远是 unpriced。计划原话：「buffer条目用唯一结果ID，ack只移除本次快照，不移除处理期间新完成的结果」。
+  8. **启动预热后 await 一次 drain**（`src/ops/recorder.ts:596` 之后插入 `if (options.command === 'follow') await metadataWorker.drain();`）：
+     ```
+      ❯ tests/integration/metadata-worker.test.ts (12 tests | 1 failed) 5912ms
+        × metadata that lands with no new block repairs the pools it re-priced, without a new range 5033ms
+      Test Files  1 failed (1)
+           Tests  1 failed | 7 passed (12)
+     ⎯⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯
+      FAIL  tests/integration/metadata-worker.test.ts > metadata that lands with no new block repairs the pools it re-priced, without a new range
+     Error: condition was never reached
+      ❯ until tests/integration/metadata-worker.test.ts:65:38
+          63|   const deadline = Date.now() + ms;
+          64|   while (!predicate()) {
+          65|     if (Date.now() > deadline) throw new Error('condition was never re…
+            |                                      ^
+          66|     await new Promise((resolve) => setTimeout(resolve, 5));
+          67|   }
+      ❯ tests/integration/metadata-worker.test.ts:483:5
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+     ```
+     为什么是原问题：483 行等的是这一轮 follow 的 `batch-timing`。启动预热只要被 await，195 个地址就会挡在第一批前面，follow 循环迟迟进不去——这正是旧行为的一个可观测形态，也正是计划「启动资产metadata获取改为入队后kick，不await全195个token」要改掉的。注意这条变异**不是**把第一处探针卡住（那是测试 fixture 的问题，见「未通过项」7），而是把「入队不 await」改回「入队后 await」，两者失败形态相同、根因不同。
+
+- GREEN：
+  - 计划的运行行（同一命令连跑两次一致）：
+    ```
+    pnpm exec vitest run tests/integration/metadata-worker.test.ts tests/integration/token-metadata.test.ts tests/integration/shutdown.test.ts tests/integration/follow-latest.test.ts tests/integration/alert-recorder-review.test.ts tests/unit/recorder-deadline.test.ts
+    → Test Files  6 passed (6)  Tests  44 passed (44)
+    ```
+    44 = metadata-worker 12 + token-metadata 16 + alert-recorder-review 8 + follow-latest 4 + shutdown 2 + recorder-deadline 2（按 `--reporter=json` 的逐文件计数，不是估算）。
+  - 全量：`pnpm exec vitest run` → `Test Files 130 passed (130)  Tests 1100 passed (1100)`（35s）。
+  - `pnpm typecheck` → `$ tsc --noEmit && tsc -p tsconfig.scripts.json`，无输出、退出码 0。
+  - 本次新增/修改文件的格式：`prettier --check` 逐个通过；`pnpm lint` 整体仍红，原因见「未通过项」8。
+
+- 行为差异：
+  1. **批不再等 metadata**：旧路径在批内同步 lease 并查最多 16 个 token 之后才提交；现在批只提交它**已经拿到**的结果，批内新提出的需求由 `finally` 里那次 kick 交给后台。
+  2. **启动预热不再 await**：195 个地址降级为“最冷的工作”进队列（priority 2），批内真需要的地址会在同一行需求上合并并提高到更高优先级。这改变了「run 开始时哪些 token 已有 decimals」的时点：第一批可能仍有 unpriced 池，由后续轮次补齐——这是计划明确的取舍。
+  3. **`token-metadata` 日志行的口径变了**（仓库外若有解析这行日志的分析要跟着改）：`attempted` 现在累计「worker 已发出的查询数」且行里打的是**增量**；`resolved`/`failed` 只在实际持久化之后计（事务提交后才算数），因此不再有「先报 resolved 再回滚」的窗口；新增 `stale`（租约已易主的丢弃数）与 `activeMissing`（priority 0 的仍未知需求数）。`attempted` 与 `resolved + failed + stale` 的差额就是「在飞或已丢弃」，不是丢失。
+  4. **无新块也有工作**：`onWait` 的 maintenance 事务会 apply 已完成的观测并修复受影响的池（估值与信号），链的 watermark 不动、不发新范围、不产生新的 accepted range。
+  5. **运行结束多一步**：非 shutdown 结束时先 `drain` 再 `flushMetadata`——一次性 ingest 在最后一批之后完成的观测因此会落库（见 RED 2）。
+  6. **shutdown 期间的语义**：见「未通过项」1。
+  7. 窗口/信号/指标公式未动；`token_metadata` 的读写口径（`decimalsAt` 的“at or below”）未动；`metadata_demand`/journal 的表形状未动（C5 没有新增迁移）。
+
+- 未通过项 / 已记录的边界：
+  1. **shutdown 会丢弃恰好“在飞”的一次观测**：`metadataReader` 的 `getAnchor`/`request` 都在入口 `shutdown.throwIfRequested()`，lookup 的**锚后检查**用的正是这个方法，所以停止信号到达时在飞的那次查询会在锚后检查处抛出 → `critical()` 原样抛出 → worker 记 `fatal` → 观测被丢弃：不落库、不写失败、需求留在队列。依据是计划 03 第 181–182 行（ShutdownRequested 保持 critical 并把错误传回主循环）与「未落库ready结果可丢弃但租约可恢复，不能声称resolved已持久化」。用例 10 因此写的是**诚实契约**：什么都没存、什么都没失败、一条租约仍在、过了 `METADATA_LEASE_MS` 可被下一个持有者租到、run 结束后 `gate.started()` 仍是 1。我第一次写下的是「在飞结果应当落库」的期望，实测失败后按上面两条计划条文重写了用例——若审查者认为正确做法是「stop 时把已读到的结果也落库」或「停止时把租约立即 requeue 而不是等它过期」，那是改保护逻辑粒度，我没有自行实施。
+  2. **计划外补充：`drain()` 与 `METADATA_DRAIN_LIMIT = 256`**（计划只在 shutdown 条目里写「在现有总体 drain deadline 内等待已发请求」，没有要求一个“收尾收集”入口）。理由：一次性运行（`command: 'ingest'`，以及 follow 自然结束）没有第二个安全点，最后一批不可能收集在它之后才完成的观测，而这笔查询已经付过钱（RED 2 就是它的变异）。边界写进注释与代码：它不是无限等待——三种情况立即返回（`stoppingNow()`、`fatal !== null`、一次 kick 什么也没租到），且不新增等待语义（复用 reader 自身的 budget/deadline）。`METADATA_DRAIN_LIMIT` 是背压而不是预算：队列一行一个地址、本身有界，这个数只挡「队列被反复填满」的病态情形。
+  3. **ready buffer 的 ack 按结果 id 而不是位置**：计划第 178 行原文要求如此（RED 7 取证）。代价是 buffer 的键是进程内自增序号——它只在一次运行内唯一，不跨进程；这是有意的，ready buffer 本身就是内存态、随进程结束消失。
+  4. **`refreshTokenMetadata` 现在只有测试调用者**（25 处，全在 `tests/integration/token-metadata.test.ts`），生产路径改走 `enqueueTokenMetadata` + worker + `applyMetadataLookup`。计划第 155 行明说保留它「供兼容调用/旧测试使用」，所以我没有删；但按「所有新模块要接入真实调用路径，不能只导出给单测调用」这条口径，它是一个**只在测试里被调用的导出**，请审查者裁决是否连同那批老用例一起改写或删掉。C5 新增的导出（`createMetadataWorker`、`MetadataDrain`、`activeMissing`）都确认有生产调用者。
+  5. **C4/C5 的任务归属有一处记不干净**：计划 C5 条目把「拆出纯网络 lookup 与同步 apply」列为 C5 的工作，而 C4 的记录里已经列了 `lookupMetadata`/`applyMetadataLookup`；`metadata-queue.ts` 的 `activeMissing`（C5 条目点名）与 `enqueueTokenMetadata` 的拆分同样无法用 git 证据分离——C1–C5 全部未提交、同一工作树、最终落在同一个提交里。C5 能确证的是这两个 API 的**真实调用者**都在 C5 新增/改写的代码里（`activeMissing` → `recorder.ts` 的 `token-metadata` 日志行 374 行；`enqueueTokenMetadata` → `demandMetadata` 335 行）。
+  6. **两条用例是我发现断言空转后补的**：原用例 3 只重复了同一地址，第二次 kick 因租约冲突而本就什么都不会发生，于是「单飞」这条断言是空的（RED 3 第一次跑时变异存活）；用例 7 原本断言的是结果**数量**而不是**身份**，`ready.clear()` 这种整表清空能穿透。我补了不同地址的单飞用例与按地址取身份的 ack 用例，并把 RED 3/7 重跑成 RED。这属于「补覆盖」，不是计划矩阵里的条目，如实列出。
+  7. **测试的 gate 必须按 purpose 判别，不能只按 selector**：`0x313ce567`（`decimals()`）在仓库里有三个发出点——`src/storage/token-metadata.ts:229`（本任务要拦的那个）、`src/ops/capabilities.ts:197`（CLI 能力探针）、`src/registry/identity.ts:150`（`erc20Abi` 的 `decimals`，由 `verifyIdentity` 在**启动**时调用）。只按 selector 卡的 gate 会连启动探针一起卡住：实测 `batch-timing` 被推迟到第 3.6 秒，5 秒预算的 `until` 已经贴边（慢一点的机器就是假失败）。fixture 因此用 `reader.meter.currentPurpose === 'metadata'` 判别——这恰好是计划里「AsyncLocalStorage 隔离 purpose，不能用全局可变 purpose 字段」这条要求（03 第 176 行）在测试侧的直接体现。同时注意 `verifyIdentity` 跑在 `withBackfill(...)` 里，那里 `currentPurpose` 是 `undefined`，所以判别式必须写成「等于 metadata」而不是「不是 backfill」。
+  8. **`pnpm lint` 整体是红的（HEAD 起就红，与本任务无关）**：`src/metrics/coverage.ts`、`src/replay/export.ts`、`src/replay/reader.ts`、`src/replay/runner.ts`、`src/storage/batch-coverage.ts`、`tests/integration/batch-coverage-cache.test.ts`、`tests/integration/referenced-batch-replay.test.ts`、`tests/unit/operation-filter-index.test.ts` 八个文件不过 `prettier --check`；这八个都不在本次改动列表里（`git status` 可核），我没有为了跑绿而重排它们的格式。`node scripts/check-scripts.mjs` 一节通过。
+  9. 真实 provider 的端到端验证、运行时迁移与生产切换均**未执行**（属验收阶段，见后续记录）。
+
+- Commit：待子计划 03 提交后补写（同 C1–C4，单一提交 `perf: bound live evaluation and schedule metadata outside batch commits` 覆盖 C1–C5）。

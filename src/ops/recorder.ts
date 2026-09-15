@@ -1,8 +1,12 @@
 import {
-  refreshTokenMetadata,
+  applyMetadataLookup,
+  enqueueTokenMetadata,
   validateTokenMetadata,
+  type MetadataLookupResult,
   type TokenMetadataTarget,
 } from '../storage/token-metadata.js';
+import { metadataQueueFor } from '../storage/metadata-queue.js';
+import { createMetadataWorker } from './metadata-worker.js';
 import type { MetricInput } from '../storage/metric-store.js';
 import { ConfigError } from '../config/env.js';
 import type { SignalConfig } from '../signals/config.js';
@@ -311,13 +315,138 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       return reader.meter.withPurpose('metadata', () => reader.request(method, params));
     },
   };
-  const refreshMetadata = async (targets: readonly TokenMetadataTarget[], maxTokens = 16) => {
-    const update = await refreshTokenMetadata(db, metadataReader, targets, {
-      maxTokens,
-      seed: seedMetadata,
-    });
-    if (update.attempted)
-      console.log(encodeJson({ event: 'token-metadata', runId: id, ...update }));
+  // The metadata lookups this run has in flight, and the results waiting for a transaction of the
+  // run's own to become durable in. `ingestDepth` is what keeps them off the acquisition path: a
+  // batch that is being fetched or committed pauses the chain between tokens, while the request
+  // already in flight is allowed to finish. Nothing here awaits the worker — a slow provider costs
+  // metadata, never a batch.
+  let ingestDepth = 0;
+  const metadataWorker = createMetadataWorker({
+    db,
+    reader: metadataReader,
+    scopeId,
+    owner: id,
+    canStart: () => ingestDepth === 0,
+    isStopping: () => shutdown.requested,
+  });
+  const metadataApplied = { attempted: 0, resolved: 0, failed: 0, stale: 0 };
+  const demandMetadata = (targets: readonly TokenMetadataTarget[]) => {
+    countWork('metadataCandidates', targets.length);
+    enqueueTokenMetadata(db, targets, { nowMs: Date.now(), seed: seedMetadata, scopeId });
+    metadataWorker.kick();
+  };
+  /**
+   * Store what the worker finished, inside the caller's transaction.
+   *
+   * The counts come back to the caller instead of being added here: a transaction that rolls back
+   * persisted nothing, and `resolved` only becomes a fact once the outermost commit of this write
+   * has landed.
+   */
+  const storeReadyMetadata = (results: readonly MetadataLookupResult[]) => {
+    const counts = { resolved: 0, failed: 0, stale: 0 };
+    for (const result of results) {
+      const outcome = applyMetadataLookup(db, scopeId, result, Date.now());
+      if (outcome === 'resolved') counts.resolved++;
+      else if (outcome === 'failed') counts.failed++;
+      else counts.stale++;
+    }
+    return counts;
+  };
+  const countMetadata = (counts: { resolved: number; failed: number; stale: number }) => {
+    metadataApplied.resolved += counts.resolved;
+    metadataApplied.failed += counts.failed;
+    metadataApplied.stale += counts.stale;
+  };
+  const logMetadata = () => {
+    const attempts = metadataWorker.attempted();
+    const stats = metadataQueueFor(db).stats(scopeId, Date.now());
+    const outstanding = stats.eligible + stats.retryWaiting + stats.inflight;
+    if (attempts === metadataApplied.attempted && outstanding === 0) return;
+    // Attempts and outcomes are what happened since the previous line; the queue counts are what
+    // the database holds right now. A result that is still in flight is an attempt without an
+    // outcome, which is why the first number is the sum of the other two plus whatever is out.
+    const update = {
+      attempted: attempts - metadataApplied.attempted,
+      resolved: metadataApplied.resolved,
+      failed: metadataApplied.failed,
+      stale: metadataApplied.stale,
+      ...stats,
+      activeMissing: metadataQueueFor(db).activeMissing(scopeId),
+    };
+    metadataApplied.attempted = attempts;
+    metadataApplied.resolved = 0;
+    metadataApplied.failed = 0;
+    metadataApplied.stale = 0;
+    console.log(encodeJson({ event: 'token-metadata', runId: id, ...update }));
+  };
+  const throwIfMetadataFatal = () => {
+    const fatal = metadataWorker.fatalError();
+    if (fatal !== null) throw fatal;
+  };
+  /**
+   * Store what the worker finished after the last safe point, without starting a round.
+   *
+   * A one-shot run reaches no poll gap, and its last batch cannot store an observation that was
+   * still in flight when it committed — the same is true of the batches a run ends on. The
+   * observations are paid for either way, so they are stored; the repair they imply is left to a
+   * later round, which reconciles it through the source hash the metadata is part of rather than
+   * through a round started while the run is already leaving.
+   */
+  const flushMetadata = () => {
+    const drain = metadataWorker.prepareDrain();
+    if (drain.results.length === 0) return;
+    let counts = { resolved: 0, failed: 0, stale: 0 };
+    try {
+      counts = db.transaction(() => storeReadyMetadata(drain.results))();
+    } catch (error) {
+      drain.rollback();
+      throw error;
+    }
+    drain.ack();
+    countMetadata(counts);
+    logMetadata();
+  };
+  /**
+   * Apply what finished while the run was idle, and repair the pools whose valuation it changed.
+   *
+   * Called at the follow loop's poll gap — the one safe point a run without new blocks still has —
+   * in one short transaction that moves no chain watermark: no range is accepted here, so the round
+   * it evaluates is the same round, recomputed against metadata it did not have before. What it
+   * does move is the evidence: the event digests carry the valuations, so the pools holding a
+   * re-priced swap are named and their signals are re-issued from the block that changed.
+   */
+  const maintainMetadata = () => {
+    throwIfMetadataFatal();
+    const drain = metadataWorker.prepareDrain();
+    if (drain.results.length === 0) return;
+    const counts = { resolved: 0, failed: 0, stale: 0 };
+    try {
+      db.transaction(() => {
+        Object.assign(counts, storeReadyMetadata(drain.results));
+        // Nothing a round could repair: a failure and a lease that moved are not observations.
+        if (counts.resolved === 0 || !metricInput || !options.signalConfig) return;
+        const liveChanges = new LiveProjectionStore(db).sync(
+          scopeId,
+          discoveryScope,
+          config.version,
+        );
+        projectSignals(
+          db,
+          metricInput,
+          options.signalConfig,
+          { batchId: 'metadata-' + randomUUID(), observedAtMs: Date.now(), captureMode: 'live' },
+          liveChanges,
+        );
+      })();
+      drain.ack();
+    } catch (error) {
+      // The results are not lost: their demands are still queued, and the same snapshot is offered
+      // to the next attempt.
+      drain.rollback();
+      throw error;
+    }
+    countMetadata(counts);
+    logMetadata();
   };
   const batchRecords: {
     id: string;
@@ -454,12 +583,16 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     if (!identity.requiredPassed) throw new RpcFailure('identity-unverified');
     await validateTokenMetadata(db, metadataReader, seedMetadata);
     if (options.command === 'follow')
-      await refreshMetadata(
+      // The startup warmup is queued, not awaited: 195 addresses used to hold the live loop before
+      // its first block, and a provider slow enough to matter held it for as long as it took. The
+      // queue keeps them as the run's coldest work — a batch that really needs one merges into the
+      // same demand at a higher priority — and the worker walks through them between batches.
+      demandMetadata(
         [config.tokens.USDG, ...assets.addresses].map((address) => ({
           address,
           blockNumber: initial.number,
+          priority: 2 as const,
         })),
-        assets.addresses.length + 1,
       );
     const verifiedDeployments = [identity.deployments.v3Factory, identity.deployments.v4Manager];
     const floor = verifiedDeployments.every((d) => d.firstCodeBlock !== null)
@@ -895,7 +1028,14 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         deploymentFloor: floor,
         shouldStop: () => shutdown.requested,
         sleep: (ms) => shutdown.wait(ms),
-        onWait: (ms) => telemetry.addWait(ms),
+        onWait: (ms) => {
+          telemetry.addWait(ms);
+          // The poll gap is the one safe point a run without new blocks still reaches: apply what
+          // the worker finished and repair the pools whose valuation it changed, then let the
+          // worker start the next token now that the wire is free.
+          maintainMetadata();
+          metadataWorker.kick();
+        },
         onStateChange: (state) => {
           if (telemetry.transition(state))
             console.log(encodeJson({ event: 'health-change', runId: id, state }));
@@ -917,6 +1057,9 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         },
         recordRange: async (from, end, previous, head, acquisitionStartedAtMs) => {
           shutdown.throwIfRequested();
+          // The acquisition side owns the wire for as long as this batch is being fetched and
+          // stored: the metadata chain pauses between tokens, and a request already out finishes.
+          ingestDepth++;
           const phase =
             options.command === 'ingest' || end.number !== head.number || end.hash !== head.hash
               ? 'backfill'
@@ -939,6 +1082,9 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
               : null;
           const prepared = registryContext?.prepare() ?? null;
           try {
+            // A worker stopped by a critical error reports it here, at the next safe point, rather
+            // than leaving the run to continue with metadata it will never get.
+            throwIfMetadataFatal();
             // Only a run without a registry context still needs the whole catalogue in memory; the
             // referenced path plans its requests from the shared templates instead.
             const pools =
@@ -1081,7 +1227,9 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
               // this batch is exactly the metadata this batch needs, and no other pool's tokens are.
               const registered = timings.measure('registry', () => batch.poolRegistrations ?? []);
               const targets: TokenMetadataTarget[] = [
-                { address: config.tokens.USDG, blockNumber: from },
+                // The quote asset is the one decimals every valuation depends on, so it is queued as
+                // a quote dependency rather than as the valuation this batch is missing.
+                { address: config.tokens.USDG, blockNumber: from, priority: 1 },
               ];
               // A new pool may contain a token deployed after the range start.
               for (const pool of registered) {
@@ -1089,10 +1237,12 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
                   pool.discoveredAt.blockNumber > from ? pool.discoveredAt.blockNumber : from;
                 if (height <= end.number)
                   for (const address of [pool.token0, pool.token1])
-                    targets.push({ address, blockNumber: height });
+                    targets.push({ address, blockNumber: height, priority: 0 });
               }
-              countWork('metadataCandidates', targets.length);
-              await refreshMetadata(targets);
+              // Queued and kicked rather than awaited: this batch commits with whatever decimals
+              // the cache already answers, and the tokens it could not price are priced by a later
+              // round instead of by this batch's latency.
+              demandMetadata(targets);
             }
 
             await timings.measureAsync('commitOther', async () => reader.flush?.());
@@ -1103,18 +1253,43 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
             // `stage` is what puts the batch's registrations in the view the projection decodes
             // against; the batch's round is published only after it commits.
             prepared?.stage(timed.poolRegistrations ?? []);
-            const changes: RangeChangeSet =
-              metricInput && options.signalConfig
-                ? signalStage('accepted-batch', () =>
-                    commitAcceptedSignalBatch(db, metricInput, options.signalConfig!, timed, {
-                      startNewSegment: latestStart && from === start,
-                      timings,
-                      registry: prepared ?? undefined,
-                    }),
-                  ).changes
-                : store.acceptRange(timed, { startNewSegment: latestStart && from === start });
+            // The snapshot is taken before the transaction and acked only after it commits: what
+            // completes while this batch is being stored stays in the buffer for the next one.
+            const metadataDrain = metadataWorker.prepareDrain();
+            const metadataCounts = { resolved: 0, failed: 0, stale: 0 };
+            let changes: RangeChangeSet;
+            try {
+              changes =
+                metricInput && options.signalConfig
+                  ? signalStage('accepted-batch', () =>
+                      commitAcceptedSignalBatch(db, metricInput, options.signalConfig!, timed, {
+                        startNewSegment: latestStart && from === start,
+                        timings,
+                        registry: prepared ?? undefined,
+                        applyMetadata: () =>
+                          Object.assign(metadataCounts, storeReadyMetadata(metadataDrain.results)),
+                      }),
+                    ).changes
+                  : (() => {
+                      const accepted = store.acceptRange(timed, {
+                        startNewSegment: latestStart && from === start,
+                      });
+                      // No signal transaction to hang the write on: without a metric input there is
+                      // no round to read it, so the observation lands in a short transaction of its
+                      // own, one commit after the range that was missing it.
+                      Object.assign(metadataCounts, storeReadyMetadata(metadataDrain.results));
+                      return accepted;
+                    })();
+            } catch (error) {
+              metadataDrain.rollback();
+              throw error;
+            }
+            metadataDrain.ack();
+            countMetadata(metadataCounts);
+            logMetadata();
             prepared?.publish();
             operationFilters.publish();
+            throwIfMetadataFatal();
             const outboxDurableAtMs = metricInput ? Date.now() : null;
             const writeLatencyMs = rawWriteMs + Date.now() - commitAt;
             if (metricInput) telemetry.markProjectionFresh();
@@ -1189,6 +1364,11 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
             // `publish` is already settled and does nothing, so the success path is untouched.
             prepared?.discard();
             operationFilters.discard();
+            ingestDepth--;
+            // Back to a safe point with an idle acquisition side: the metadata chain may pick up
+            // where it left off, and whatever it produced for a batch it could not catch is
+            // already out of the buffer.
+            if (ingestDepth === 0 && !shutdown.requested) metadataWorker.kick();
           }
         },
         onProgress: (health) => {
@@ -1251,6 +1431,19 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
   } finally {
     closeBatchWorkCounts();
     try {
+      // A run that ends on its own first finishes the metadata it queued: a one-shot ingest reaches
+      // no poll gap, and its last batch committed before the lookups it kicked were even out, so the
+      // observations it paid for would never land. A run that is stopping does not — a prompt exit
+      // is the point of a stop, and a demand left queued is still leasable by the next run — and a
+      // drain the reader's own deadline or budget ends stops on its own terms, without turning a
+      // finished run into a failed one.
+      if (!shutdown.requested) await metadataWorker.drain();
+      // Stop asking for new tokens first, then wait for the one already in flight — bounded by the
+      // reader's own deadline, the same one the rest of the run drains under — then store what it
+      // produced, and only then close the reader. Anything whose lease moved is refused by the
+      // write itself, so what is dropped is dropped on the queue's terms and stays leasable.
+      await metadataWorker.stop();
+      flushMetadata();
       await reader.close?.();
     } catch (error) {
       const failure = classifyRpcError(error);

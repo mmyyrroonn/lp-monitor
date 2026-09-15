@@ -38,9 +38,13 @@ const anchor = (number: bigint, blockHash: Hex): BlockAnchor => ({
 
 test('excludes cache entries with a conflicting known hash at their observation height', () => {
   const first = entry('1');
-  const result = reconcileMetricMetadata(cache([first]), [anchor(100n, hash('b'))]);
+  const input = cache([first]);
+  const result = reconcileMetricMetadata(input, [anchor(100n, hash('b'))]);
 
   expect(result.metadata.entries).toEqual([]);
+  // An exclusion is a real change to the cache, so this is the one path that must hand back a
+  // different object: the entries array it drops from is not the caller's to edit.
+  expect(result.metadata).not.toBe(input);
   expect(result.conflicts).toEqual([
     {
       address: first.address,
@@ -70,8 +74,20 @@ test('retains absent-height entries only as the existing historical carry-forwar
 
   expect(result.metadata.entries).toEqual([first]);
   expect(result.metadata.source).toBe('historical-identity-snapshot');
-  expect(result.metadata).not.toBe(input);
+  // Absence is not a conflict: nothing was dropped, so the cache passes through as itself.
+  expect(result.metadata).toBe(input);
   expect(result.conflicts).toEqual([]);
+});
+
+test('reconciling the same cache twice hands the live path one object to index', () => {
+  const input = cache([entry('1'), entry('2')]);
+  const anchors = [anchor(100n, hash('a'))];
+  // Every round reconciles the same seed against the same evidence. As long as no entry is excluded,
+  // the round gets the very object `decimalsAt` already indexed, instead of a content-identical copy
+  // that would rebuild the index — a digest per entry — once per report.
+  const first = reconcileMetricMetadata(input, anchors).metadata;
+  expect(reconcileMetricMetadata(input, anchors).metadata).toBe(first);
+  expect(decimalsAt(reconcileMetricMetadata(input, anchors).metadata, address('2'), 100n)).toBe(18);
 });
 
 test('reports every distinct known hash and preserves stable cache order', () => {

@@ -2,6 +2,7 @@ import { CHAIN_ID } from '../domain/chain.js';
 import { loadValidatedJson } from '../config/json-file.js';
 import { z } from 'zod';
 import { ConfigError } from '../config/env.js';
+import { buildMetadataIndex, type MetadataIndex } from './metadata-index.js';
 const schema = z.strictObject({
   version: z.string().min(1),
   chainId: z.literal(CHAIN_ID),
@@ -22,17 +23,35 @@ export function loadMetricMetadata(path: string): MetricMetadata {
     throw new ConfigError('Invalid metric metadata cache: duplicate entries.address');
   return data;
 }
-/** Cached decimals are a documented carry-forward assumption from this anchor.
- * A snapshot does not establish decimals for earlier blocks or unknown tokens. */
+type MemoizedIndex = {
+  entries: MetricMetadata['entries'];
+  length: number;
+  index: MetadataIndex;
+};
+
+/** One index per cache object, reused by every lookup against it. */
+const indexes = new WeakMap<MetricMetadata, MemoizedIndex>();
+
+/**
+ * Cached decimals are a documented carry-forward assumption from this anchor.
+ * A snapshot does not establish decimals for earlier blocks or unknown tokens.
+ *
+ * A `MetricMetadata` object is treated as immutable: its index is built on the first lookup and
+ * every later lookup answers from it, which is what turns the per-swap scan on the live path into a
+ * binary search. Every producer in this repo — `loadMetricMetadata`, `reconcileMetricMetadata` and
+ * `readCachedMetricMetadata`, which returns a seed it has nothing to add to unchanged — hands back
+ * an object it does not go on to mutate. The memo also re-checks the entries array identity and its
+ * length, so a rebuilt cache is never answered by a stale index. Mutating a cache
+ * in place is not part of that contract: replacing or editing an entry inside the same array at the
+ * same length is not detected, and the next lookup keeps answering from the index built before it.
+ */
 export function decimalsAt(cache: MetricMetadata, address: string, block: bigint): number | null {
-  const entry = cache.entries
-    .filter((e) => e.address === address.toLowerCase() && BigInt(e.observedAtBlock) <= block)
-    .reduce<MetricMetadata['entries'][number] | undefined>(
-      (latest, e) =>
-        !latest || BigInt(e.observedAtBlock) >= BigInt(latest.observedAtBlock) ? e : latest,
-      undefined,
-    );
-  return entry && BigInt(entry.observedAtBlock) <= block ? entry.decimals : null;
+  const memo = indexes.get(cache);
+  if (memo !== undefined && memo.entries === cache.entries && memo.length === cache.entries.length)
+    return memo.index.decimalsAt(address, block);
+  const index = buildMetadataIndex(cache.entries);
+  indexes.set(cache, { entries: cache.entries, length: cache.entries.length, index });
+  return index.decimalsAt(address, block);
 }
 
 export type MetricMetadataConflict = {
@@ -77,6 +96,13 @@ export function reconcileMetricMetadata(
     }
     entries.push(entry);
   }
+
+  // Nothing was excluded, so the result *is* the cache: the same entries, in the same order, under
+  // the same version. Handing back a content-identical copy instead would be a different object, and
+  // `decimalsAt` memoizes its index per object — the live path reconciles, then asks per swap, so a
+  // fresh copy per report is a full index rebuild (one digest per entry) per report, which is the
+  // per-round work bounded evaluation exists to stop paying. Callers treat the result as immutable.
+  if (conflicts.length === 0) return { metadata: cache, conflicts };
 
   return {
     metadata: { ...cache, entries },

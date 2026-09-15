@@ -1,8 +1,10 @@
 import { afterEach, expect, test, vi } from 'vitest';
-import { toHex } from 'viem';
+import { toHex, type Address } from 'viem';
 import { openDatabase } from '../../src/storage/database.js';
 import { decimalsAt } from '../../src/metrics/metadata.js';
+import { metadataQueueFor, type MetadataLease } from '../../src/storage/metadata-queue.js';
 import {
+  applyMetadataLookup,
   refreshTokenMetadata,
   readCachedMetricMetadata,
   validateTokenMetadata,
@@ -133,4 +135,198 @@ test('failed tokens cannot starve a previously unseen token across slow batches'
   await refreshTokenMetadata(db, rpc, targets, { nowMs: 0, maxTokens: 16 });
   await refreshTokenMetadata(db, rpc, targets, { nowMs: 60000, maxTokens: 16 });
   expect(decimalsAt(readCachedMetricMetadata(db, seed), addr(17), 10n)).toBe(18);
+});
+test('an unchanged cache comes back as the same object and a write is visible on the next read', async () => {
+  const db = setup(),
+    rpc = reader();
+  // One seed object for the whole run, the way the live path reads it: that identity is what makes
+  // the built cache reusable, and the durable revision is what retires it.
+  await refreshTokenMetadata(db, rpc, [{ address: addr(1), blockNumber: 10n }], { nowMs: 0, seed });
+  const first = readCachedMetricMetadata(db, seed);
+  expect(readCachedMetricMetadata(db, seed)).toBe(first);
+  expect(decimalsAt(first, addr(1), 10n)).toBe(6);
+  await refreshTokenMetadata(db, rpc, [{ address: addr(2), blockNumber: 10n }], { nowMs: 1, seed });
+  const third = readCachedMetricMetadata(db, seed);
+  expect(third).not.toBe(first);
+  expect(decimalsAt(third, addr(1), 10n)).toBe(6);
+  expect(decimalsAt(third, addr(2), 10n)).toBe(18);
+  // A different seed is a different cache: the version it carries is the seed's, not the memo's.
+  expect(readCachedMetricMetadata(db, { ...seed, version: 'other' }).version).toBe(
+    'other+onchain-v1',
+  );
+});
+test('an address the cache already answers is never queued', async () => {
+  const db = setup(),
+    rpc = reader();
+  const known = {
+    ...seed,
+    entries: [{ address: addr(1), decimals: 8, observedAtBlock: '5', blockHash: hash(5) }],
+  };
+  const update = await refreshTokenMetadata(db, rpc, [{ address: addr(1), blockNumber: 10n }], {
+    nowMs: 0,
+    seed: known,
+  });
+  expect(rpc.request).not.toHaveBeenCalled();
+  expect(update).toEqual({
+    attempted: 0,
+    resolved: 0,
+    failed: 0,
+    eligible: 0,
+    retryWaiting: 0,
+    inflight: 0,
+  });
+  expect(db.prepare('select count(*) as n from metadata_demand').get()).toEqual({ n: 0 });
+});
+test('a failed lookup leaves its demand waiting out the backoff in the queue', async () => {
+  const db = setup(),
+    rpc = reader();
+  rpc.request.mockResolvedValueOnce('0x');
+  const targets = [{ address: addr(1), blockNumber: 10n }];
+  expect(await refreshTokenMetadata(db, rpc, targets, { nowMs: 0 })).toEqual({
+    attempted: 1,
+    resolved: 0,
+    failed: 1,
+    eligible: 0,
+    retryWaiting: 1,
+    inflight: 0,
+  });
+  expect(db.prepare('select address,next_retry_ms from token_metadata_failures').all()).toEqual([
+    { address: addr(1), next_retry_ms: 60000 },
+  ]);
+  // The wait is real, and the demand it belongs to is still this scope's work rather than work the
+  // round deferred away: a second round inside the cooldown spends nothing and queues nothing new.
+  expect(await refreshTokenMetadata(db, rpc, targets, { nowMs: 1 })).toEqual({
+    attempted: 0,
+    resolved: 0,
+    failed: 0,
+    eligible: 0,
+    retryWaiting: 1,
+    inflight: 0,
+  });
+  expect(rpc.request).toHaveBeenCalledTimes(1);
+  expect(await refreshTokenMetadata(db, rpc, targets, { nowMs: 60000 })).toEqual({
+    attempted: 1,
+    resolved: 1,
+    failed: 0,
+    eligible: 0,
+    retryWaiting: 0,
+    inflight: 0,
+  });
+  expect(decimalsAt(readCachedMetricMetadata(db, seed), addr(1), 10n)).toBe(6);
+  expect(db.prepare('select count(*) as n from token_metadata_failures').get()).toEqual({ n: 0 });
+  expect(db.prepare('select count(*) as n from metadata_demand').get()).toEqual({ n: 0 });
+});
+test('a missing valuation is leased before a monitored-asset warmup', async () => {
+  const db = setup(),
+    rpc = reader();
+  rpc.request.mockResolvedValue('0x');
+  const update = await refreshTokenMetadata(
+    db,
+    rpc,
+    [
+      { address: addr(1), blockNumber: 10n, priority: 2 },
+      { address: addr(2), blockNumber: 10n, priority: 0 },
+    ],
+    { nowMs: 0, maxTokens: 1 },
+  );
+  expect(rpc.request.mock.calls[0]![1][0]).toEqual({ to: addr(2), data: '0x313ce567' });
+  expect(update).toEqual({
+    attempted: 1,
+    resolved: 0,
+    failed: 1,
+    eligible: 1,
+    retryWaiting: 1,
+    inflight: 0,
+  });
+  // Both demands keep the priority they were given: the warmup one was never reached, and the
+  // valuation one is waiting out the cooldown its own failure set.
+  expect(db.prepare('select address,priority from metadata_demand order by address').all()).toEqual(
+    [
+      { address: addr(1), priority: 2 },
+      { address: addr(2), priority: 0 },
+    ],
+  );
+});
+const scope = 'live';
+function demand(n: number) {
+  return { address: addr(n) as Address, blockNumber: 10n, priority: 0 as const };
+}
+function lookup(lease: MetadataLease, decimals: number | null, failure: string | null = null) {
+  return {
+    lease,
+    anchor: decimals === null ? null : { number: 10n, hash: hash(10), timestampSec: 100 },
+    decimals,
+    failure,
+  };
+}
+test('a result whose lease was superseded is never written to the cache', () => {
+  const db = setup(),
+    queue = metadataQueueFor(db);
+  queue.enqueue(scope, [demand(1)], 0);
+  const superseded = queue.lease(scope, 0, 'run')!;
+  // The holder stalls past its lease, so another holder takes the same demand and is answered.
+  queue.settle(scope, superseded.leaseId, 0, { kind: 'requeue' });
+  const current = queue.lease(scope, 0, 'other')!;
+  expect(applyMetadataLookup(db, scope, lookup(superseded, 6), 1)).toBe('stale-lease');
+  // Nothing landed, and nothing was settled either: the demand is still the live lease's.
+  expect(db.prepare('select count(*) as n from token_metadata').get()).toEqual({ n: 0 });
+  expect(queue.stats(scope, 1)).toEqual({ eligible: 0, retryWaiting: 0, inflight: 1 });
+  expect(applyMetadataLookup(db, scope, lookup(current, 6), 1)).toBe('resolved');
+  expect(decimalsAt(readCachedMetricMetadata(db, seed), addr(1), 10n)).toBe(6);
+});
+test('a superseded lease cannot write a backoff against the holder that owns the demand', () => {
+  const db = setup(),
+    queue = metadataQueueFor(db);
+  queue.enqueue(scope, [demand(1)], 0);
+  const superseded = queue.lease(scope, 0, 'run')!;
+  queue.settle(scope, superseded.leaseId, 0, { kind: 'requeue' });
+  const current = queue.lease(scope, 0, 'other')!;
+  expect(applyMetadataLookup(db, scope, lookup(superseded, null, 'timeout'), 1)).toBe(
+    'stale-lease',
+  );
+  expect(db.prepare('select count(*) as n from token_metadata_failures').get()).toEqual({ n: 0 });
+  // The live lease runs out on its own terms, not with a deadline a stranger handed it.
+  expect(applyMetadataLookup(db, scope, lookup(current, 6), 1)).toBe('resolved');
+  expect(decimalsAt(readCachedMetricMetadata(db, seed), addr(1), 10n)).toBe(6);
+});
+test('a result anchored where the durable record sees another branch is requeued, not written', () => {
+  const db = setup(),
+    queue = metadataQueueFor(db);
+  queue.enqueue(scope, [demand(1)], 0);
+  const lease = queue.lease(scope, 0, 'run')!;
+  db.prepare('insert into token_metadata_invalid_anchors(block_number,block_hash) values(?,?)').run(
+    10,
+    hash(9),
+  );
+  const forked = { ...lookup(lease, 6), anchor: { number: 10n, hash: hash(9), timestampSec: 100 } };
+  expect(applyMetadataLookup(db, scope, forked, 1)).toBe('stale-branch');
+  expect(db.prepare('select count(*) as n from token_metadata').get()).toEqual({ n: 0 });
+  // The lease was thrown away rather than held to its 30s expiry: the demand is leasable at once.
+  expect(queue.stats(scope, 1)).toEqual({ eligible: 1, retryWaiting: 0, inflight: 0 });
+  const again = queue.lease(scope, 1, 'run')!;
+  expect(applyMetadataLookup(db, scope, lookup(again, 6), 1)).toBe('resolved');
+  expect(decimalsAt(readCachedMetricMetadata(db, seed), addr(1), 10n)).toBe(6);
+});
+test('demands a round does not reach stay queued for the next one', async () => {
+  const db = setup(),
+    rpc = reader();
+  const targets = [addr(1), addr(2), addr(3)].map((address) => ({ address, blockNumber: 10n }));
+  expect(await refreshTokenMetadata(db, rpc, targets, { nowMs: 0, maxTokens: 1 })).toEqual({
+    attempted: 1,
+    resolved: 1,
+    failed: 0,
+    eligible: 2,
+    retryWaiting: 0,
+    inflight: 0,
+  });
+  expect(await refreshTokenMetadata(db, rpc, targets, { nowMs: 1, maxTokens: 2 })).toEqual({
+    attempted: 2,
+    resolved: 2,
+    failed: 0,
+    eligible: 0,
+    retryWaiting: 0,
+    inflight: 0,
+  });
+  expect(rpc.request).toHaveBeenCalledTimes(3);
+  expect(decimalsAt(readCachedMetricMetadata(db, seed), addr(3), 10n)).toBe(18);
 });

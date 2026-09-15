@@ -498,12 +498,14 @@ test('zero registry change over a large catalogue costs nothing in the sync path
   const accepted = countsFor(() =>
     commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, second),
   );
-  // The metric stage still merges the catalogue once for its own attribution, reading both scope
-  // names (C1 bounds that cost); the registry delta and the evidence built from it add no read and
-  // no comparison on top of it. Were the evidence taken from the catalogue, both counts would be
-  // twice this.
-  expect(accepted.counts.registryRowsRead).toBe(2 * size);
-  expect(accepted.counts.registryRowsSerialized).toBe(2 * size);
+  // A selected round attributes its events through the view it selected from, so it reads no
+  // catalogue row at all: the two scope reads this test used to bound at `2 * size` (C1) are now the
+  // zero the selection exists to make them, for a catalogue of this many registrations. `size` is
+  // what each of those reads was worth. What the test still holds the sync path to is the rest of
+  // it: the registry delta and the evidence built from it add no read and no comparison of their own.
+  expect(size).toBeGreaterThan(SCALE_POOLS);
+  expect(accepted.counts.registryRowsRead).toBe(0);
+  expect(accepted.counts.registryRowsSerialized).toBe(0);
   expect(accepted.counts.registryChangesRead).toBe(0);
 
   // And the sync a later reader runs over the same state costs nothing at all: the delta is empty

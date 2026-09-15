@@ -12,9 +12,15 @@ import {
   type LiveProjectionChanges,
   type RegistryEvidence,
 } from '../storage/live-projection.js';
+import { eventIndexFor } from '../storage/live-event-index.js';
+import {
+  liveWorksetFor,
+  snapshotHasMemory,
+  type LiveWorksetStore,
+} from '../storage/live-workset.js';
 import { StaleMetricProjectionError } from '../storage/metric-store.js';
 import { SqliteProjectionStore } from '../storage/projection-store.js';
-import type { PreparedRegistry } from '../storage/registry-cache.js';
+import { registryCacheFor, type PreparedRegistry } from '../storage/registry-cache.js';
 import {
   buildMetricsReport,
   type MetricInput,
@@ -36,6 +42,20 @@ export interface SignalBatchContext {
   observedAtMs: number;
   captureMode: CaptureMode;
 }
+/**
+ * What a round selects against, when the caller already prepared it.
+ *
+ * The registry view has to be the caller's own. A batch stages the pools it discovers on the
+ * prepared view before it commits, and a view built here instead would not hold them — so a pool
+ * this very batch discovered would be selected and then found to have no registration, and would
+ * contribute no window at all. Absent, the shared cache is prepared here, which is what a direct
+ * caller with nothing new to publish gets.
+ */
+export interface SignalSelectionContext {
+  registry?: PreparedRegistry;
+}
+/** Quote dependencies are inputs to a valuation, not pools to evaluate. */
+const NO_POOLS: ReadonlySet<string> = new Set();
 type EvidenceItem = {
   minuteStartSec?: number | null;
   block: bigint;
@@ -412,6 +432,52 @@ function presentationIndex(report: MetricsReport, input: MetricInput) {
     };
   };
 }
+/**
+ * The pools one live round has to evaluate.
+ *
+ * The memory-bearing pools are reconsidered whenever the history under them moved: coverage, a
+ * branch to recover, a repair this round owes, a branch that went backwards. A pool with no memory
+ * is not one any of those can turn into a reminder — `retractSignals` only ever withdraws an active
+ * alert, and an active alert is memory — so leaving those out is the same answer, not a shorter one.
+ *
+ * The window bound is the read's own lower bound, not `sinceSec`: the read reaches two minutes
+ * further back than it reports, and a pool whose only event sits in that margin is still a pool
+ * whose valuation this round computed.
+ */
+function selectWorkset(args: {
+  workspace: LiveWorksetStore;
+  context: SignalBatchContext;
+  liveChanges: LiveProjectionChanges;
+  changedPoolIds: ReadonlySet<string>;
+  cursor: Cursor | undefined;
+  repair: { min_block: number } | undefined;
+  tip: BlockAnchor;
+  sinceSec: number;
+}): ReadonlySet<string> {
+  const { workspace, context, liveChanges, changedPoolIds, cursor, repair, tip, sinceSec } = args;
+  // A database that recorded signals before this table existed has no members yet; the scan that
+  // fills it happens once and is remembered, so a legitimately empty workset is not a missing one.
+  if (!workspace.seeded()) workspace.seed(context.observedAtMs);
+  const evidence = cursor ? decodeSignalState<Evidence>(cursor.evidence_json) : undefined;
+  const branchMoved =
+    cursor !== undefined &&
+    (tip.number < BigInt(cursor.block_number) ||
+      (tip.number === BigInt(cursor.block_number) && tip.hash !== cursor.block_hash));
+  return workspace.select({
+    changedPoolIds,
+    // A quote dependency is an input to a valuation, not a pool to evaluate: the report resolves
+    // them from the selected pools' own token lists.
+    dependencyPoolIds: NO_POOLS,
+    watermarkSec: tip.timestampSec,
+    coverageChanged:
+      liveChanges.coverageChanged === true ||
+      repair !== undefined ||
+      liveChanges.repairFrom != null ||
+      evidence?.branchRecovery === true ||
+      branchMoved,
+    bounds: { sinceSec: sinceSec - 120, sinceBlock: null },
+  });
+}
 export function projectSignals(
   db: Database.Database,
   input: MetricInput,
@@ -419,8 +485,10 @@ export function projectSignals(
   context: SignalBatchContext,
   liveChanges?: LiveProjectionChanges,
   timings?: BatchTimings,
+  selection?: SignalSelectionContext,
 ): AlertRecord[] {
-  return db
+  let claimed = false;
+  const records = db
     .transaction(() => {
       if (
         !liveChanges &&
@@ -452,10 +520,64 @@ export function projectSignals(
           config.cooling.buckets * 5 + 10,
         ),
       );
+      // Selecting here rather than inside the build is what keeps the selection and the read on one
+      // window: `sinceSec` is the same expression over the same accepted tip that the build derives
+      // its own lower bound from, so a pool the workset keeps is a pool the report can still see
+      // events for, and one it retires is one the read already stopped returning.
+      const tip = liveChanges ? new SqliteRangeStore(db).acceptedTip(input.scopeId) : null;
+      const sinceSec = tip ? Math.floor(tip.timestampSec / 60) * 60 - historyMinutes * 60 : null;
+      const eventIndex = liveChanges ? eventIndexFor(db, input.scopeId) : null;
+      const workspace = eventIndex ? liveWorksetFor(db, input.scopeId, eventIndex) : null;
+      const registry = workspace
+        ? (selection?.registry?.view ??
+          registryCacheFor(db, input.registryScopeId, input.scopeId).prepare().view)
+        : null;
+      // Read for the selection alone. The build runs a sync of its own, so a read taken after it
+      // could name a repair this round has not reached yet; reading before it errs towards
+      // reconsidering the pools with memory, which is the direction that cannot lose a reminder.
+      const selectionCursor = statement(db, 'select * from signal_cursors where scope_id=?').get(
+        input.scopeId,
+      ) as Cursor | undefined;
+      const selectionRepair = statement(
+        db,
+        'select min_block from live_pending_signal_repairs where scope_id=?',
+      ).get(input.scopeId) as { min_block: number } | undefined;
+      const selected =
+        liveChanges && workspace && eventIndex && registry && tip && sinceSec !== null
+          ? selectWorkset({
+              workspace,
+              context,
+              liveChanges,
+              changedPoolIds:
+                selection?.registry?.changedPoolIds ?? new Set(liveChanges.affectedPoolIds),
+              cursor: selectionCursor,
+              repair: selectionRepair,
+              tip,
+              sinceSec,
+            })
+          : null;
       const report = buildMetricsReport(
         db,
         input,
-        liveChanges ? { live: { historyMinutes }, timings } : { timings },
+        liveChanges
+          ? {
+              live: {
+                historyMinutes,
+                ...(selected && registry && eventIndex
+                  ? {
+                      poolIds: selected,
+                      registry,
+                      eventIndex,
+                      // The round that accepted this batch already moved the window. Handing back its
+                      // own delta is what lets the report invalidate a quote it revised instead of
+                      // reading the sync it runs itself, which sees an empty journal by then.
+                      changes: liveChanges,
+                    }
+                  : {}),
+              },
+              timings,
+            }
+          : { timings },
       );
       const configHash = digest({
         signal: signalConfigVersion(config),
@@ -546,8 +668,10 @@ export function projectSignals(
       // One measured stage around the real per-pool evaluation and outbox work; the
       // report's own stages (registry/coverage/valuation/windows) are measured
       // separately inside buildMetricsReport, so no interval is counted twice.
+      const evaluatedPoolIds: string[] = [];
       const evaluateWindows = () => {
         for (const w of report.windows) {
+          evaluatedPoolIds.push(w.poolId);
           const row = statement(
             db,
             'select payload_json from signal_snapshots where scope_id=? and pool_id=?',
@@ -657,6 +781,31 @@ export function projectSignals(
         }
       };
       measureStage(timings, 'signals', evaluateWindows);
+      if (workspace && selected !== null) {
+        // Membership is a claim about the durable snapshots, not about what this round reached: a
+        // pool keeps its place while the state machine still has something to read back. The
+        // snapshot is re-read here rather than taken from the decision, because a branch change
+        // evaluates every pool from the initial state and leaves the stored one untouched.
+        const retained = new Set(workspace.members());
+        const stored = statement(
+          db,
+          'select payload_json from signal_snapshots where scope_id=? and pool_id=?',
+        );
+        for (const poolId of evaluatedPoolIds) {
+          const row = stored.get(input.scopeId, poolId) as { payload_json: string } | undefined;
+          if (row && snapshotHasMemory(decodeSignalState<SignalSnapshot>(row.payload_json)))
+            retained.add(poolId);
+          else retained.delete(poolId);
+        }
+        workspace.retain(retained);
+      }
+      // Armed for every round that has a workset, `null` included: a round that selected nothing
+      // has to clear whatever an earlier attempt left armed, or it would answer for a round that
+      // never committed. What is armed here becomes standing only once the round is durable.
+      if (workspace) {
+        claimed = true;
+        workspace.arm(selected !== null ? (tip?.timestampSec ?? null) : null);
+      }
       statement(
         db,
         `insert into signal_cursors(scope_id,config_hash,source_hash,epoch,block_number,block_hash,evidence_json) values(?,?,?,?,?,?,?)
@@ -674,18 +823,40 @@ export function projectSignals(
       return records;
     })
     .immediate();
+  // The standing watermark may only move for a round whose work is durable, so it moves here and
+  // not inside the transaction. Called from inside a larger one — the recorder's, which also writes
+  // the accepted range and the projection cursor — this waits for that transaction's own commit
+  // instead, and the store is the same shared one the round selected through.
+  if (claimed && !db.inTransaction)
+    liveWorksetFor(db, input.scopeId, eventIndexFor(db, input.scopeId)).commit();
+  return records;
 }
 export function commitAcceptedSignalBatch(
   db: Database.Database,
   input: MetricInput,
   config: SignalConfig,
   batch: RecordedRangeBatch,
-  options: { startNewSegment?: boolean; timings?: BatchTimings; registry?: PreparedRegistry } = {},
+  options: {
+    startNewSegment?: boolean;
+    timings?: BatchTimings;
+    registry?: PreparedRegistry;
+    /**
+     * Store the metadata that finished while this batch was being acquired, before anything reads.
+     *
+     * It runs inside this transaction and before the round's own reads, so a decimals observation
+     * that arrived just in time is used by the valuation that needs it rather than by the next
+     * round's; and because it is the same transaction as the batch, a rollback takes the
+     * observation back with the range instead of leaving a cache entry no cursor accounts for. The
+     * caller owns the ack: this only calls it.
+     */
+    applyMetadata?: () => void;
+  } = {},
 ) {
   if (batch.scopeId !== input.scopeId) throw new Error('Signal batch scope mismatch');
   const { timings } = options;
   return db
     .transaction(() => {
+      options.applyMetadata?.();
       // The accepted-range write and the live-cursor sync are the projection stage;
       // projectSignals measures its own leaves separately.
       const changes = measureStage(timings, 'projection', () =>
@@ -714,6 +885,13 @@ export function commitAcceptedSignalBatch(
       return { changes, alerts };
     })
     .immediate();
+  // This is the transaction `projectSignals` ran inside, so this is where the round it selected
+  // becomes durable and its watermark may stand. Doing it any earlier — from inside the round —
+  // would let a rolled back batch answer for a watermark it never got to evaluate against. A
+  // caller that nests this inside a bigger transaction is that transaction's to report, and the
+  // round stays armed until it does.
+  if (!db.inTransaction)
+    liveWorksetFor(db, input.scopeId, eventIndexFor(db, input.scopeId)).commit();
 }
 
 /** Content-addressed objects may be shared by batches and evaluations in any

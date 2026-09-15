@@ -11,13 +11,15 @@ import type Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import type { Address } from 'viem';
 import type { AssetRegistry } from '../registry/assets.js';
-import { PoolRegistry, poolRegistrationId } from '../registry/pools.js';
+import { PoolRegistry, poolRegistrationId, type PoolRegistration } from '../registry/pools.js';
 import { SqliteRangeStore } from './raw-store.js';
 import { SqliteProjectionStore, type StoredProjection } from './projection-store.js';
-import { LiveProjectionStore } from './live-projection.js';
+import { LiveProjectionStore, type LiveProjectionChanges } from './live-projection.js';
+import type { RegistryView } from './registry-cache.js';
+import type { LiveEventIndex } from './live-event-index.js';
 import { LiveMetricCache } from './live-metric-cache.js';
 import { encodeJson } from '../domain/json.js';
-import type { LiquidityChange, QuoteObservation } from '../domain/types.js';
+import type { LiquidityChange, PoolEvent, QuoteObservation, Swap } from '../domain/types.js';
 import { comparePosition } from '../state/observations.js';
 import { rawLogKey } from './manifest.js';
 import { readMetricCoverage } from '../metrics/coverage.js';
@@ -29,6 +31,7 @@ import { buildMinuteMetrics, type MetricEvent } from '../metrics/windows.js';
 import { summarizeLiquidityActions, annotateLatestSwapLiquidity } from '../metrics/liquidity.js';
 import { estimateGrossSwapFee } from '../metrics/fees.js';
 import { measureStage, type BatchTimings } from '../ops/batch-timings.js';
+import { valuationIndexFor, valuationKey } from '../metrics/valuation-index.js';
 
 export const METRIC_VERSION = 'rolling-v1';
 export class StaleMetricProjectionError extends Error {
@@ -47,6 +50,43 @@ export interface MetricInput {
 }
 export type MetricsReport = ReturnType<typeof buildMetricsReport>;
 
+/** What one report covers: the whole catalogue, or the pools a bounded live round selected. */
+export type MetricSelection = { kind: 'all' } | { kind: 'pools'; poolIds: readonly string[] };
+
+/** The bounded context a selected round reads through, resolved once so the build reads plainly. */
+type WorksetContext = {
+  /** The requested pools, sorted and deduplicated, exactly as the report names them. */
+  poolIds: readonly string[];
+  /** The same pools as a lookup, which is how every event is checked against the selection. */
+  index: ReadonlySet<string>;
+  registry: RegistryView;
+  eventIndex: LiveEventIndex;
+  /** What the round that accepted this batch did to the window, when the caller has it. */
+  changes: LiveProjectionChanges | undefined;
+};
+
+/**
+ * The workset a live round evaluates, or null for the full catalogue.
+ *
+ * A selection is meaningless without the state it was selected against: the registry says what the
+ * selected pools are, and the event index is the window those pools' valuations read. Both are
+ * required together, and neither is read for a full round — which is what keeps an offline reader
+ * and the audit path on exactly the path they had.
+ */
+function resolveWorkset(live: MetricBuildOptions['live']): WorksetContext | null {
+  const requested = live?.poolIds;
+  if (requested === undefined) return null;
+  if (!live?.registry || !live.eventIndex)
+    throw new Error('A pool selection needs the registry view and the event index that own it');
+  return {
+    poolIds: [...requested].sort(),
+    index: new Set(requested),
+    registry: live.registry,
+    eventIndex: live.eventIndex,
+    changes: live.changes,
+  };
+}
+
 /** A single SQLite read snapshot covers freshness, decoded input, registration and
  * minute evidence. Consumers never read naked projected_events or cached metrics. */
 export interface MetricBuildOptions {
@@ -54,7 +94,23 @@ export interface MetricBuildOptions {
   legacyWindows?: boolean;
   /** Read-model evidence for independent stock-side aggregation. */
   includeAssetValuations?: boolean;
-  live?: { historyMinutes: number };
+  live?: {
+    historyMinutes: number;
+    /**
+     * The pools this round evaluates. Absent evaluates every registered pool, which is what an
+     * offline reader does; a set evaluates exactly those pools plus the windowed swaps that price
+     * them, and reports for them exactly what the full read would.
+     */
+    poolIds?: ReadonlySet<string>;
+    registry?: RegistryView;
+    eventIndex?: LiveEventIndex;
+    /**
+     * What the round that accepted this batch did to the window. The sync inside this build is one
+     * the caller already ran, so its own delta is empty by proof and the caller's is the one that
+     * names what moved.
+     */
+    changes?: LiveProjectionChanges;
+  };
   projection?: StoredProjection;
   /** Present only for a timed live batch; offline readers pass nothing. */
   timings?: BatchTimings;
@@ -81,28 +137,49 @@ export function buildMetricsReport(
       options = { ...options, live: { historyMinutes: 180 } };
     const raw = new SqliteRangeStore(db);
     const tip = raw.acceptedTip(input.scopeId);
+    const workset = resolveWorkset(options.live);
+    const selection: MetricSelection = workset
+      ? { kind: 'pools', poolIds: workset.poolIds }
+      : { kind: 'all' };
     const historyMinutes = options.live?.historyMinutes ?? 180;
     if (!Number.isSafeInteger(historyMinutes) || historyMinutes < 65 || historyMinutes > 10080)
       throw new RangeError('Metric horizon must be 65..10080 minutes');
     const sinceSec =
       options.live && tip ? Math.floor(tip.timestampSec / 60) * 60 - historyMinutes * 60 : null;
     const liveStore = options.live ? new LiveProjectionStore(db) : null;
+    let synced: LiveProjectionChanges | null = null;
     if (liveStore && !db.readonly)
-      measureStage(options.timings, 'projection', () =>
+      synced = measureStage(options.timings, 'projection', () =>
         liveStore.sync(input.scopeId, input.registryScopeId, input.configVersion),
       );
+    const changes = workset?.changes ?? synced;
     const projection = measureStage(
       options.timings,
       'projection',
       () =>
         options.projection ??
         (liveStore
-          ? liveStore.read(
-              input.scopeId,
-              input.registryScopeId,
-              input.configVersion,
-              sinceSec! - 120,
-            )
+          ? workset
+            ? liveStore.readSelected(
+                input.scopeId,
+                input.registryScopeId,
+                input.configVersion,
+                sinceSec! - 120,
+                {
+                  pools: workset.index,
+                  tokens: workset.poolIds.flatMap((poolId) => {
+                    const registration = workset.registry.get(poolId);
+                    return registration ? [registration.token0, registration.token1] : [];
+                  }),
+                  index: workset.eventIndex,
+                },
+              )
+            : liveStore.read(
+                input.scopeId,
+                input.registryScopeId,
+                input.configVersion,
+                sinceSec! - 120,
+              )
           : new SqliteProjectionStore(db).read(
               input.scopeId,
               input.registryScopeId,
@@ -133,13 +210,57 @@ export function buildMetricsReport(
         ];
     const metadataCheck = reconcileMetricMetadata(input.metadata, metadataAnchors);
     const metricMetadata = metadataCheck.metadata;
-    const registry = measureStage(
-      options.timings,
-      'registry',
-      () => new PoolRegistry([...raw.pools(input.registryScopeId), ...raw.pools(input.scopeId)]),
-    );
-    const registrations = registry.snapshot();
+    // A selected round already holds the catalogue it selected from; reading `pools` again would be
+    // the catalogue read the workset exists to avoid. A full round reads it exactly as before.
+    const registrations: readonly PoolRegistration[] = workset
+      ? workset.poolIds.flatMap((poolId) => {
+          const registration = workset.registry.get(poolId);
+          return registration === undefined ? [] : [registration];
+        })
+      : measureStage(
+          options.timings,
+          'registry',
+          () =>
+            new PoolRegistry([...raw.pools(input.registryScopeId), ...raw.pools(input.scopeId)]),
+        ).snapshot();
+    const absentPoolIds = workset
+      ? workset.poolIds.filter((poolId) => workset.registry.get(poolId) === undefined)
+      : [];
     const byId = new Map(registrations.map((r) => [poolRegistrationId(r), r]));
+    /** The registration of an event: the workset's own view for a pool it did not select. */
+    const registrationFor = (event: Swap): PoolRegistration | undefined => {
+      const id = poolRegistrationId(event);
+      return byId.get(id) ?? workset?.registry.get(id);
+    };
+    /** Whether this round reports the event at all — every event, unless a workset bounds it. */
+    const inSelection = (event: PoolEvent): boolean => {
+      if (workset === null) return true;
+      // An ancillary event that names no pool belongs to no selected pool either.
+      if (event.pool === null) return false;
+      return workset.index.has(poolRegistrationId({ pool: event.pool }));
+    };
+    // A bounded round is the round that repeats: the same pools, valued again one batch later. The
+    // index holds what that round already computed, so the work a bounded round removes is not
+    // replaced by re-serializing and re-decoding the same valuation from the durable cache.
+    const valuationIndex = workset ? valuationIndexFor(db, input.scopeId) : null;
+    if (valuationIndex) {
+      // A quote that was deleted is named by the valuations that used it, so a key cannot see its
+      // disappearance, and a reader with no journal to read cannot see the arrival of one either.
+      // Both cases hand the index back empty; only a round that knows exactly which swaps moved
+      // keeps what it held.
+      if (!changes || changes.eventDelta === undefined || changes.eventDelta.deletedKeys.length > 0)
+        valuationIndex.clear();
+      else
+        for (const upsert of changes.eventDelta.upserts)
+          if (upsert.kind === 'swap')
+            valuationIndex.invalidateQuotesAfter([upsert.tokenIn, upsert.tokenOut], upsert.ref);
+      // The window only ever moves forward, so an event the reader did not read this round is an
+      // event no later round can ask about either. Expiring to the read's own lower bound — not to
+      // `sinceSec` — is what keeps the two minutes of margin the read buys: a swap just below
+      // `sinceSec` is not reported, but it is still read, and it still prices what is.
+      if (sinceSec !== null)
+        valuationIndex.expireOutside({ sinceSec: sinceSec - 120, sinceBlock: null });
+    }
     const rawCoverage = measureStage(options.timings, 'coverage', () =>
       readMetricCoverage(
         db,
@@ -182,9 +303,10 @@ export function buildMetricsReport(
     // window assembly below are measured separately, so no interval is counted twice.
     measureStage(options.timings, 'valuation', () => {
       for (const event of [...projection.events].sort((a, b) => comparePosition(a.ref, b.ref))) {
+        const selected = inSelection(event);
         let valuation: SwapValuation | null = null;
         if (event.kind === 'swap') {
-          const registration = byId.get(poolRegistrationId(event));
+          const registration = registrationFor(event);
           if (!registration) throw new Error('Projected swap lacks registration');
           const related = input.assets.assets.filter(
             (a) => a.address === registration.token0 || a.address === registration.token1,
@@ -212,19 +334,43 @@ export function buildMetricsReport(
               usdgDecimals: decimalsAt(metricMetadata, input.usdg, event.ref.blockNumber),
               maxQuoteAgeSec: 60,
             };
+            // A pool the round did not select is in the walk for one reason only: a selected pool
+            // reads its quote. It publishes that quote at this point in the order and nothing else
+            // about it enters the report — no valuation, no window, no count.
+            if (!selected) {
+              const quote = quoteFromRwaUsdgSwap(event, metadata);
+              if (quote) quotes.push(quote);
+              continue;
+            }
             const hasUsdg =
               registration.token0 === input.usdg || registration.token1 === input.usdg;
             const preceding = hasUsdg
               ? null
               : findPrecedingQuote(event, asset.address, input.usdg, quotes, 60);
-            const side = cache
-              ? cache.memo(
-                  'valuation:' + rawLogKey(event.ref) + ':' + asset.address,
-                  event.time.minuteStartSec ?? Math.floor(projection.end.timestampSec / 60) * 60,
-                  { event, metadata, preceding },
-                  () => valueSwap(event, metadata, preceding ? [preceding] : []),
+            // The durable cache survives a restart; the index sits in front of it so a round that
+            // values the same window again does not re-serialize the input and decode the payload.
+            const compute = () =>
+              cache
+                ? cache.memo(
+                    'valuation:' + rawLogKey(event.ref) + ':' + asset.address,
+                    event.time.minuteStartSec ?? Math.floor(projection.end.timestampSec / 60) * 60,
+                    { event, metadata, preceding },
+                    () => valueSwap(event, metadata, preceding ? [preceding] : []),
+                  )
+                : valueSwap(event, metadata, quotes);
+            const side = valuationIndex
+              ? valuationIndex.lookup(
+                  valuationKey({
+                    eventId: rawLogKey(event.ref),
+                    event,
+                    metadata,
+                    preceding,
+                  }),
+                  [asset.address],
+                  event,
+                  compute,
                 )
-              : valueSwap(event, metadata, quotes);
+              : compute();
             if (inWindow) {
               const group = valuedByRwa.get(asset.address) ?? [];
               group.push(side);
@@ -237,7 +383,11 @@ export function buildMetricsReport(
             const quote = quoteFromRwaUsdgSwap(event, metadata);
             if (quote) quotes.push(quote);
           }
-          if (inWindow && valuation) valuations.push(valuation);
+          if (selected && inWindow && valuation) valuations.push(valuation);
+        }
+        if (!selected) {
+          // A liquidity change of a pool outside the selection counts towards nothing above.
+          continue;
         }
         metricEvents.push({
           event,
@@ -331,6 +481,7 @@ export function buildMetricsReport(
     const recentLiquidityByPool = new Map<string, LiquidityChange[]>();
     for (const event of projection.events) {
       if (
+        !inSelection(event) ||
         event.kind !== 'liquidity' ||
         event.time.minuteStartSec === null ||
         event.time.minuteStartSec < current - 300 ||
@@ -388,6 +539,9 @@ export function buildMetricsReport(
           coverage,
           metadata: metricMetadata,
           metadataConflicts: metadataCheck.conflicts,
+          // Naming the selection keeps a bounded round's identity apart from the full report's: the
+          // two carry different windows, and a stored hash may not claim they are the same report.
+          ...(workset ? { selection: workset.poolIds } : {}),
         }),
       )
       .digest('hex');
@@ -401,6 +555,7 @@ export function buildMetricsReport(
       registryScopeId: input.registryScopeId,
       configVersion: input.configVersion,
       assetVersion: input.assets.version,
+      selection,
       sourceHash,
       projectionSourceHash: projection.sourceHash,
       metadata: metricMetadata,
@@ -416,6 +571,7 @@ export function buildMetricsReport(
       valuations,
       quotes,
       grossFees: projection.events
+        .filter(inSelection)
         .filter(
           (e) =>
             sinceSec === null ||
@@ -444,6 +600,16 @@ export function buildMetricsReport(
         'Shared stock pools count once in each stock aggregate with independent raw amounts and quotes; summing stock aggregates is not deduplicated market volume.',
         'Co-occurrence is only same-transaction evidence, not a complete route or user count.',
         'Fees are gross trade estimates; current pool L, dollar withdrawals and LP net return are unknown.',
+        ...(workset
+          ? [
+              'Selected-pool report: stock aggregates, pool counts and market totals cover only the pools named in selection, not the full catalogue.',
+              ...(absentPoolIds.length > 0
+                ? [
+                    `Selected-pool report: ${absentPoolIds.length} of ${workset.poolIds.length} requested pools are absent from the registry and contribute no window.`,
+                  ]
+                : []),
+            ]
+          : []),
       ],
     };
   })();

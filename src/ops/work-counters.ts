@@ -27,6 +27,10 @@ export type WorkCounts = {
   operationFilterRebuilds: number;
   /** Pool identity values sorted into a rebuilt operation request template. */
   operationFilterValuesScanned: number;
+  /** `live_events` rows decoded to derive a bounded live window in memory. */
+  liveEventRowsRead: number;
+  /** Pools a live round selected for evaluation. */
+  evaluatedWorksetPools: number;
 };
 
 export type WorkCounterKey = keyof WorkCounts;
@@ -42,6 +46,8 @@ export const WORK_COUNTER_KEYS: readonly WorkCounterKey[] = [
   'registryChangesRead',
   'operationFilterRebuilds',
   'operationFilterValuesScanned',
+  'liveEventRowsRead',
+  'evaluatedWorksetPools',
 ];
 
 export function emptyWorkCounts(): WorkCounts {
@@ -56,6 +62,8 @@ export function emptyWorkCounts(): WorkCounts {
     registryChangesRead: 0,
     operationFilterRebuilds: 0,
     operationFilterValuesScanned: 0,
+    liveEventRowsRead: 0,
+    evaluatedWorksetPools: 0,
   };
 }
 

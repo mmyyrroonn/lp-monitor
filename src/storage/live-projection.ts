@@ -1,12 +1,19 @@
 import type Database from 'better-sqlite3';
 import type { Hex, Address } from 'viem';
 import { encodeJson } from '../domain/json.js';
-import type { RawLog, LogTime, PoolEvent, PoolObservation } from '../domain/types.js';
+import type { BlockAnchor, RawLog, LogTime, PoolEvent, PoolObservation } from '../domain/types.js';
 import { countWork } from '../ops/work-counters.js';
 import type { PoolRegistration } from '../registry/pools.js';
 import { poolRegistrationId } from '../registry/pools.js';
 import type { PersistedPoolRegistration } from './manifest.js';
 import { rawLogKey } from './manifest.js';
+import {
+  eventIndexFor,
+  reviveEvent,
+  type EventDelta,
+  type LiveEventIndex,
+  type LiveEventIndexStore,
+} from './live-event-index.js';
 import { comparePosition } from '../state/observations.js';
 import { projectRangeSelected, PROJECTION_VERSION } from '../state/project-range.js';
 import {
@@ -86,6 +93,13 @@ export interface LiveProjectionChanges {
    * only way to know the registry is to read it in full, exactly as before.
    */
   registry?: RegistryEvidence;
+  /**
+   * What this sync did to the scope's windowed events, collected where the rows themselves were
+   * written. A caller never has to read `live_events` to find out what changed.
+   */
+  eventDelta?: EventDelta;
+  /** True when accepted coverage or a minute boundary moved under this watermark. */
+  coverageChanged?: boolean;
 }
 /** One identity the journal moved, paired with the records that describe the move. */
 type RegistryMove = {
@@ -94,6 +108,82 @@ type RegistryMove = {
   after: PoolRegistration | null;
 };
 const VERSION = PROJECTION_VERSION + '-incremental-v1';
+/** Pool ids per observation statement, well under SQLite's default variable limit. */
+const OBSERVATION_CHUNK = 900;
+/** The cursor, tip and window bounds a live read answers from as one unit. */
+type LiveWindow = {
+  sourceHash: string;
+  tip: BlockAnchor;
+  cutoff: number;
+  unknownUnbounded: boolean;
+  windowContextIncomplete: boolean;
+};
+
+/**
+ * The rows of one live table inside the window: the resolved minutes at or after `sinceSec`, plus
+ * the unresolved ones a verified boundary can place. Without such a boundary the unresolved rows
+ * are dropped rather than guessed at, exactly as `read` has always reported them.
+ */
+function windowedRows(
+  db: Database.Database,
+  table: string,
+  scopeId: string,
+  sinceSec: number,
+  window: LiveWindow,
+): JsonRow[] {
+  const known = db
+    .prepare('select payload_json from ' + table + ' where scope_id=? and minute_start_sec>=?')
+    .all(scopeId, sinceSec) as JsonRow[];
+  if (window.unknownUnbounded) return known;
+  const unknown = db
+    .prepare(
+      'select payload_json from ' +
+        table +
+        ' where scope_id=? and minute_start_sec is null and block_number>=?',
+    )
+    .all(scopeId, window.cutoff) as JsonRow[];
+  return [...known, ...unknown];
+}
+
+function reviveQualityError(row: JsonRow): StoredProjection['qualityErrors'][number] {
+  const error = JSON.parse(row.payload_json) as StoredProjection['qualityErrors'][number];
+  error.raw.blockNumber = BigInt(error.raw.blockNumber);
+  return error;
+}
+
+function compareQualityErrors(
+  a: StoredProjection['qualityErrors'][number],
+  b: StoredProjection['qualityErrors'][number],
+): number {
+  return (
+    comparePosition(a.raw, b.raw) ||
+    (a.code === 'unresolved-time'
+      ? -1
+      : b.code === 'unresolved-time'
+        ? 1
+        : a.code.localeCompare(b.code))
+  );
+}
+
+function reviveObservation(row: JsonRow): PoolObservation {
+  const observation = JSON.parse(row.payload_json) as PoolObservation;
+  if (observation.lastSwap) reviveEvent(observation.lastSwap);
+  if (observation.lastLiquidityAction) reviveEvent(observation.lastLiquidityAction);
+  return observation;
+}
+
+/** What one pool selection needs from the caller: the workset and the state it was derived from. */
+export type LiveSelectionRequest = {
+  /** The pools to report. */
+  pools: ReadonlySet<string>;
+  /**
+   * The tokens those pools trade. A pool that names no USDG is priced by a quote another pool
+   * published, so the pools holding those tokens are read too — as inputs, never as members.
+   */
+  tokens: Iterable<string>;
+  /** The window this round advances. It is expired to `sinceSec` before the dependencies are read. */
+  index: LiveEventIndex;
+};
 
 /** Durable incremental cache. First subscription/version changes replay once; ordinary sync
  * consumes deduplicated dirty IDs. SQL triggers share the source transaction, including rollback.
@@ -189,10 +279,20 @@ export class LiveProjectionStore {
   ): LiveProjectionChanges {
     const cache = registryCacheFor(this.db, registryScopeId, scopeId);
     const caller = { used: false };
+    const events = eventIndexFor(this.db, scopeId);
     try {
       return this.db
         .transaction(() =>
-          this.syncOnce(scopeId, registryScopeId, configVersion, prepared, cache, false, caller),
+          this.syncOnce(
+            scopeId,
+            registryScopeId,
+            configVersion,
+            prepared,
+            cache,
+            false,
+            caller,
+            events,
+          ),
         )
         .immediate();
     } catch (error) {
@@ -212,6 +312,7 @@ export class LiveProjectionStore {
     cache: ReturnType<typeof registryCacheFor>,
     forceRebuild = false,
     caller: { used: boolean } = { used: false },
+    events: LiveEventIndexStore = eventIndexFor(this.db, scopeId),
   ): LiveProjectionChanges {
     const tip = this.raw.acceptedTip(scopeId);
     if (!tip) throw new NoAcceptedScopeError(scopeId);
@@ -225,10 +326,14 @@ export class LiveProjectionStore {
       // by omission. It is still handed back, because a caller given no registry evidence has to
       // read the whole catalogue for it — which is the cost this path exists to avoid.
       const journaled = registryJournalAvailable(this.db);
+      events.mark(token);
+      events.apply({ upserts: [], deletedKeys: [] });
       return {
         repairFrom: null,
         affectedPoolIds: [],
         registryInitialization: false,
+        eventDelta: { upserts: [], deletedKeys: [] },
+        coverageChanged: false,
         ...(journaled
           ? {
               registry: {
@@ -253,7 +358,16 @@ export class LiveProjectionStore {
       reference &&
       (reference.registryScopeId !== registryScopeId || reference.operationScopeId !== scopeId)
     )
-      return this.syncOnce(scopeId, registryScopeId, configVersion, prepared, cache, true, caller);
+      return this.syncOnce(
+        scopeId,
+        registryScopeId,
+        configVersion,
+        prepared,
+        cache,
+        true,
+        caller,
+        events,
+      );
     const position = this.positions(registryScopeId, scopeId);
     const stored = rebuild ? null : reference;
     // A caller's prepared view is used only when it provably stands for the registry just read:
@@ -416,6 +530,12 @@ export class LiveProjectionStore {
     }
     const eventInsert = this.db.prepare('insert into live_events values(?,?,?,?,?,?,?,?,?)');
     const errorInsert = this.db.prepare('insert into live_quality_errors values(?,?,?,?,?,?)');
+    // The window's own record of what this round did, taken at the rows rather than re-discovered
+    // afterwards by reading them back.
+    const eventDelta: { upserts: PoolEvent[]; deletedKeys: string[] } = {
+      upserts: [],
+      deletedKeys: [],
+    };
     for (const id of dirty) {
       const before = this.db
         .prepare(
@@ -439,6 +559,12 @@ export class LiveProjectionStore {
       if (before) {
         repair(before.block_number);
         if (before.pool_id) affected.add(before.pool_id);
+        // This revision retires whatever contribution the key used to make — including the pool it
+        // used to belong to, which is also why it is already in `affected`.
+        if (!e)
+          eventDelta.deletedKeys.push(
+            rawLogKey((JSON.parse(before.payload_json) as PoolEvent).ref),
+          );
       }
       for (const error of beforeErrors) repair(error.block_number);
       const raw = rows.get(id);
@@ -450,6 +576,7 @@ export class LiveProjectionStore {
       if (e) {
         const pool = e.pool ? poolRegistrationId({ pool: e.pool }) : null;
         if (pool) affected.add(pool);
+        eventDelta.upserts.push(e);
         eventInsert.run(
           scopeId,
           id,
@@ -537,6 +664,14 @@ export class LiveProjectionStore {
         registryJson,
         Number(tip.number),
       );
+    // The cursor is the proof the window will be checked against: it is written by the same
+    // transaction as the events, so a transaction that rolls back leaves it at its previous token
+    // and the next round knows to derive the window again rather than trust it.
+    events.mark(token);
+    // A rebuild re-derives every active log, so its delta already names every event the scope has:
+    // the window is advanced by the same call as an ordinary round, and a key this round no longer
+    // produces leaves through the removal branch rather than being re-read to be noticed.
+    events.apply(eventDelta);
     this.db.prepare('delete from live_dirty_logs where scope_id=?').run(scopeId);
     this.db.prepare('delete from live_dirty_coverage where scope_id=?').run(scopeId);
     if (repairFrom !== null)
@@ -549,11 +684,88 @@ export class LiveProjectionStore {
       repairFrom,
       affectedPoolIds: [...affected].sort(),
       registryInitialization,
+      eventDelta,
+      coverageChanged: coverageRepair !== undefined,
       ...(journaled
         ? { registry: { revisionKey: position.revisionKey, changes: registryChanges } }
         : {}),
     };
   }
+  /**
+   * The cursor, tip and window bounds one read answers from, or null when the scope is stale.
+   *
+   * `unknownUnbounded` is the case the window cannot place: no verified boundary at or below
+   * `sinceSec`, so unresolved rows have nothing to be compared against and are left out of the
+   * window rather than assumed into it, and the context says so.
+   */
+  private windowOf(
+    scopeId: string,
+    registryScopeId: string,
+    configVersion: string,
+    sinceSec: number,
+  ): LiveWindow | null {
+    const cursor = this.db
+      .prepare('select * from live_projection_cursors where scope_id=?')
+      .get(scopeId) as Cursor | undefined;
+    const tip = this.raw.acceptedTip(scopeId);
+    if (
+      !cursor ||
+      !tip ||
+      cursor.source_hash !== this.token(scopeId, registryScopeId, configVersion)
+    )
+      return null;
+    // Require a boundary in the requested minute; an ancient boundary cannot bound unknown history.
+    const boundary = this.db
+      .prepare(
+        'select first_block from minute_boundaries where scope_id=? and timestamp_sec>=? and timestamp_sec<=? order by timestamp_sec desc limit 1',
+      )
+      .get(scopeId, Math.floor(sinceSec / 60) * 60, sinceSec) as
+      { first_block: number } | undefined;
+    const cutoff = boundary?.first_block ?? 0;
+    const unknownUnbounded = sinceSec > 0 && boundary === undefined;
+    const windowContextIncomplete =
+      unknownUnbounded &&
+      ['live_events', 'live_quality_errors'].some((table) =>
+        Boolean(
+          this.db
+            .prepare(
+              'select 1 from ' + table + ' where scope_id=? and minute_start_sec is null limit 1',
+            )
+            .get(scopeId),
+        ),
+      );
+    return {
+      sourceHash: cursor.source_hash,
+      tip,
+      cutoff,
+      unknownUnbounded,
+      windowContextIncomplete,
+    };
+  }
+
+  /**
+   * The observation rows of the named pools, in the order `read` returns the whole scope.
+   *
+   * An empty set reads nothing and a large one is chunked, so a bounded round never builds an
+   * `in ()` and never reads an observation of a pool it did not ask about.
+   */
+  private observationsOf(scopeId: string, poolIds: Iterable<string>): PoolObservation[] {
+    const ids = [...poolIds];
+    const observations: PoolObservation[] = [];
+    for (let start = 0; start < ids.length; start += OBSERVATION_CHUNK) {
+      const chunk = ids.slice(start, start + OBSERVATION_CHUNK);
+      const rows = this.db
+        .prepare(
+          `select payload_json from live_observations where scope_id=? and pool_id in (${chunk
+            .map(() => '?')
+            .join(',')})`,
+        )
+        .all(scopeId, ...chunk) as JsonRow[];
+      for (const row of rows) observations.push(reviveObservation(row));
+    }
+    return observations.sort((a, b) => poolRegistrationId(a).localeCompare(poolRegistrationId(b)));
+  }
+
   read(
     scopeId: string,
     registryScopeId = scopeId,
@@ -561,92 +773,83 @@ export class LiveProjectionStore {
     sinceSec = 0,
   ): StoredProjection | null {
     return this.db.transaction(() => {
-      const cursor = this.db
-        .prepare('select * from live_projection_cursors where scope_id=?')
-        .get(scopeId) as Cursor | undefined;
-      const tip = this.raw.acceptedTip(scopeId);
-      if (
-        !cursor ||
-        !tip ||
-        cursor.source_hash !== this.token(scopeId, registryScopeId, configVersion)
-      )
-        return null;
-      // Require a boundary in the requested minute; an ancient boundary cannot bound unknown history.
-      const boundary = this.db
-        .prepare(
-          'select first_block from minute_boundaries where scope_id=? and timestamp_sec>=? and timestamp_sec<=? order by timestamp_sec desc limit 1',
-        )
-        .get(scopeId, Math.floor(sinceSec / 60) * 60, sinceSec) as
-        { first_block: number } | undefined;
-      const cutoff = boundary?.first_block ?? 0;
-      const unknownUnbounded = sinceSec > 0 && boundary === undefined;
-      const windowContextIncomplete =
-        unknownUnbounded &&
-        ['live_events', 'live_quality_errors'].some((table) =>
-          Boolean(
-            this.db
-              .prepare(
-                'select 1 from ' + table + ' where scope_id=? and minute_start_sec is null limit 1',
-              )
-              .get(scopeId),
-          ),
-        );
-      const select = (table: string): JsonRow[] => {
-        const known = this.db
-          .prepare(
-            'select payload_json from ' + table + ' where scope_id=? and minute_start_sec>=?',
-          )
-          .all(scopeId, sinceSec) as JsonRow[];
-        if (unknownUnbounded) return known;
-        const unknown = this.db
-          .prepare(
-            'select payload_json from ' +
-              table +
-              ' where scope_id=? and minute_start_sec is null and block_number>=?',
-          )
-          .all(scopeId, cutoff) as JsonRow[];
-        return [...known, ...unknown];
-      };
-      const events = select('live_events')
+      const window = this.windowOf(scopeId, registryScopeId, configVersion, sinceSec);
+      if (!window) return null;
+      const events = windowedRows(this.db, 'live_events', scopeId, sinceSec, window)
         .map((row) => reviveEvent(JSON.parse(row.payload_json) as PoolEvent))
         .sort((a, b) => comparePosition(a.ref, b.ref));
-      const qualityErrors = select('live_quality_errors')
-        .map((row) => {
-          const e = JSON.parse(row.payload_json) as StoredProjection['qualityErrors'][number];
-          e.raw.blockNumber = BigInt(e.raw.blockNumber);
-          return e;
-        })
-        .sort(
-          (a, b) =>
-            comparePosition(a.raw, b.raw) ||
-            (a.code === 'unresolved-time'
-              ? -1
-              : b.code === 'unresolved-time'
-                ? 1
-                : a.code.localeCompare(b.code)),
-        );
+      const qualityErrors = windowedRows(this.db, 'live_quality_errors', scopeId, sinceSec, window)
+        .map(reviveQualityError)
+        .sort(compareQualityErrors);
       const observations = (
         this.db
           .prepare('select payload_json from live_observations where scope_id=? order by pool_id')
           .all(scopeId) as JsonRow[]
-      ).map((row) => {
-        const o = JSON.parse(row.payload_json) as PoolObservation;
-        if (o.lastSwap) reviveEvent(o.lastSwap);
-        if (o.lastLiquidityAction) reviveEvent(o.lastLiquidityAction);
-        return o;
-      });
+      ).map(reviveObservation);
       return {
         version: PROJECTION_VERSION as typeof PROJECTION_VERSION,
         scopeId,
-        batchId: 'live-' + cursor.source_hash,
-        end: tip,
-        sourceHash: cursor.source_hash,
+        batchId: 'live-' + window.sourceHash,
+        end: window.tip,
+        sourceHash: window.sourceHash,
         configVersion,
         registryScopeId,
         events,
         qualityErrors,
         observations,
-        ...(windowContextIncomplete ? { windowContextIncomplete: true } : {}),
+        ...(window.windowContextIncomplete ? { windowContextIncomplete: true } : {}),
+      };
+    })();
+  }
+
+  /**
+   * The same window `read` answers, restricted to a selected set of pools.
+   *
+   * The events are the selected pools plus the pools whose swaps can price them: a pool that names
+   * no USDG is valued from a quote another pool published, so a round that read only the selected
+   * pools would report different numbers than the full read does. The dependency set is derived
+   * from the event index, and the index is expired to this window *before* it is derived: a pool
+   * whose events left the window cannot price anything, and a superset would publish quotes the
+   * full read no longer has — a wrong report, not a slow one.
+   */
+  readSelected(
+    scopeId: string,
+    registryScopeId: string,
+    configVersion: string,
+    sinceSec: number,
+    request: LiveSelectionRequest,
+  ): StoredProjection | null {
+    return this.db.transaction(() => {
+      const window = this.windowOf(scopeId, registryScopeId, configVersion, sinceSec);
+      if (!window) return null;
+      // The bound the index expires with is the one `read` filters by: an unresolved row is
+      // comparable only while a boundary exists, and without one it is kept here and left out of
+      // the projection below.
+      request.index.expire({
+        sinceSec,
+        sinceBlock: !window.unknownUnbounded && window.cutoff > 0 ? BigInt(window.cutoff) : null,
+      });
+      const poolIds = new Set(request.pools);
+      for (const token of request.tokens)
+        for (const poolId of request.index.poolsForToken(token)) poolIds.add(poolId);
+      const events = request.index
+        .eventsFor(poolIds)
+        .filter((event) => !window.unknownUnbounded || event.time.minuteStartSec !== null);
+      const qualityErrors = windowedRows(this.db, 'live_quality_errors', scopeId, sinceSec, window)
+        .map(reviveQualityError)
+        .sort(compareQualityErrors);
+      return {
+        version: PROJECTION_VERSION as typeof PROJECTION_VERSION,
+        scopeId,
+        batchId: 'live-' + window.sourceHash,
+        end: window.tip,
+        sourceHash: window.sourceHash,
+        configVersion,
+        registryScopeId,
+        events,
+        qualityErrors,
+        observations: this.observationsOf(scopeId, request.pools),
+        ...(window.windowContextIncomplete ? { windowContextIncomplete: true } : {}),
       };
     })();
   }
@@ -670,22 +873,6 @@ function legacyRegistrations(json: string | undefined): PersistedPoolRegistratio
   if (json === undefined) return [];
   const value = JSON.parse(json) as unknown;
   return Array.isArray(value) ? (value as PersistedPoolRegistration[]) : [];
-}
-
-function reviveEvent(event: PoolEvent): PoolEvent {
-  event.ref.blockNumber = BigInt(event.ref.blockNumber);
-  if (event.kind === 'swap')
-    for (const key of [
-      'rawAmount0',
-      'rawAmount1',
-      'amountIn',
-      'amountOut',
-      'sqrtPriceX96After',
-      'liquidityAfter',
-    ] as const)
-      event[key] = BigInt(event[key]);
-  else if (event.kind === 'liquidity') event.delta = BigInt(event.delta);
-  return event;
 }
 
 /** Lightweight health reader: a present but stale live cache must never fall back
