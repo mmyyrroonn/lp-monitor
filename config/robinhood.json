@@ -1,5 +1,5 @@
 {
-  "version": "2026-09-08.p0-review2",
+  "version": "2026-09-15.catalogue-range2",
   "chainId": 4663,
   "v3Factory": "0x1f7d7550b1b028f7571e69a784071f0205fd2efa",
   "v4Manager": "0x8366a39cc670b4001a1121b8f6a443a643e40951",
@@ -34,6 +34,7 @@
   "pollIntervalMs": 2000,
   "maxRangeBlocks": 1000,
   "overlapBlocks": 20,
+  "discoveryMaxRangeBlocks": 250000,
   "logResponseGuard": 5000,
   "maxRpcCalls": 150,
   "rpcPerSecond": 5,
