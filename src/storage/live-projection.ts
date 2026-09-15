@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3';
 import type { Hex, Address } from 'viem';
 import { encodeJson } from '../domain/json.js';
 import type { RawLog, LogTime, PoolEvent, PoolObservation } from '../domain/types.js';
+import { countWork } from '../ops/work-counters.js';
 import { PoolRegistry, poolRegistrationId } from '../registry/pools.js';
 import type { PersistedPoolRegistration } from './manifest.js';
 import { rawLogKey } from './manifest.js';
@@ -126,7 +127,10 @@ export class LiveProjectionStore {
           for (const id of new Set([...prior.keys(), ...current.keys()])) {
             const a = prior.get(id),
               b = current.get(id);
-            if (encodeJson(a ?? null) === encodeJson(b ?? null)) continue;
+            const encodedPrior = encodeJson(a ?? null);
+            const encodedCurrent = encodeJson(b ?? null);
+            countWork('registryRowsSerialized', (a ? 1 : 0) + (b ? 1 : 0));
+            if (encodedPrior === encodedCurrent) continue;
             affected.add(id);
             for (const r of [a, b])
               if (r) {
@@ -318,6 +322,8 @@ export class LiveProjectionStore {
             .run(scopeId, poolId, encodeJson(observation));
         }
         if (old && Number(tip.number) < old.block_number) repair(Number(tip.number) + 1);
+        const registryJson = encodeJson(registrations);
+        countWork('registryRowsSerialized', registrations.length);
         this.db
           .prepare(
             'insert into live_projection_cursors values(?,?,?,?,?,?,?) on conflict(scope_id) do update set registry_scope_id=excluded.registry_scope_id,config_version=excluded.config_version,version=excluded.version,source_hash=excluded.source_hash,registry_json=excluded.registry_json,block_number=excluded.block_number',
@@ -328,7 +334,7 @@ export class LiveProjectionStore {
             configVersion,
             VERSION,
             token,
-            encodeJson(registrations),
+            registryJson,
             Number(tip.number),
           );
         this.db.prepare('delete from live_dirty_logs where scope_id=?').run(scopeId);

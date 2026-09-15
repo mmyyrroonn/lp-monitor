@@ -19,6 +19,8 @@ import type { RecordedRangeBatch } from '../storage/manifest.js';
 import { rawLogKey } from '../storage/manifest.js';
 import { AlertOutbox, type CaptureMode } from '../notify/outbox.js';
 import { formatObservedLiquidity } from '../notify/format.js';
+import type { BatchTimings } from '../ops/batch-timings.js';
+import { measureStage } from '../ops/batch-timings.js';
 import { encodeSignalState, decodeSignalState } from './codec.js';
 import { signalConfigVersion, type SignalConfig } from './config.js';
 import { evaluateSignal, initialSignalSnapshot } from './engine.js';
@@ -370,6 +372,7 @@ export function projectSignals(
   config: SignalConfig,
   context: SignalBatchContext,
   liveChanges?: LiveProjectionChanges,
+  timings?: BatchTimings,
 ): AlertRecord[] {
   return db
     .transaction(() => {
@@ -403,7 +406,11 @@ export function projectSignals(
           config.cooling.buckets * 5 + 10,
         ),
       );
-      const report = buildMetricsReport(db, input, liveChanges ? { live: { historyMinutes } } : {});
+      const report = buildMetricsReport(
+        db,
+        input,
+        liveChanges ? { live: { historyMinutes }, timings } : { timings },
+      );
       const configHash = digest({
         signal: signalConfigVersion(config),
         chain: input.configVersion,
@@ -490,114 +497,120 @@ export function projectSignals(
               ...(branchChanged ? { branch: report.at.hash } : {}),
             });
       const present = presentationIndex(report, input);
-      for (const w of report.windows) {
-        const row = statement(
-          db,
-          'select payload_json from signal_snapshots where scope_id=? and pool_id=?',
-        ).get(input.scopeId, w.poolId) as { payload_json: string } | undefined;
-        const previous =
-          row && !branchChanged
-            ? decodeSignalState<SignalSnapshot>(row.payload_json)
-            : initialSignalSnapshot();
-        const coverage = w.rolling
-          ? w.rolling['1m'].status === 'closed'
-            ? 'complete'
-            : w.rolling['1m'].status === 'gap'
-              ? 'gap'
-              : 'warming'
-          : w.partialCurrent?.status === 'partial'
-            ? 'complete'
-            : w.partialCurrent?.status === 'gap'
-              ? 'gap'
-              : 'warming';
-        // Reconsider a corrected entry bucket under the existing episode and
-        // logical cooldown. Only material escalation can bypass that cooldown;
-        // unchanged quantities cannot reappear as a fresh historical reminder.
-        const correctedEntry =
-          repair !== null &&
-          !branchChanged &&
-          (affected.has('*') || affected.has(w.poolId)) &&
-          previous.lastAlertScale === '5m' &&
-          previous.lastFiveEndSec !== null &&
-          previous.lastAlertSec === previous.lastFiveEndSec;
-        const evaluationPrevious = correctedEntry
-          ? { ...previous, lastFiveEndSec: previous.lastFiveEndSec! - 300 }
-          : previous;
-        const decision = evaluateSignal(
-          evaluationPrevious,
-          {
-            pool: w.pool,
-            batchId: context.batchId,
-            observedAtMs: context.observedAtMs,
-            endAnchor: report.at,
-            watermarkSec: report.at.timestampSec,
-            metrics: w,
-            coverage,
-            epoch,
-            presentation: present(w.poolId, report.at.timestampSec).presentation,
-          },
-          config,
-        );
-        const snapshotChanged = !isDeepStrictEqual(previous, decision.nextSnapshot);
-        if (snapshotChanged || !row)
-          statement(
+      // One measured stage around the real per-pool evaluation and outbox work; the
+      // report's own stages (registry/coverage/valuation/windows) are measured
+      // separately inside buildMetricsReport, so no interval is counted twice.
+      const evaluateWindows = () => {
+        for (const w of report.windows) {
+          const row = statement(
             db,
-            `insert into signal_snapshots(scope_id,pool_id,payload_json) values(?,?,?)
-           on conflict(scope_id,pool_id) do update set payload_json=excluded.payload_json`,
-          ).run(input.scopeId, w.poolId, encodeSignalState(decision.nextSnapshot));
-        const drafts = decision.alertDrafts ?? (decision.alertDraft ? [decision.alertDraft] : []);
-        // Audit material state transitions, matched decisions and historical
-        // evaluations. Quiet pools do not append a receipt for every poll.
-        const auditChanged = !isDeepStrictEqual(
-          {
-            ...previous,
-            lastFiveEndSec: decision.nextSnapshot.lastFiveEndSec,
-            lastHeatSec: decision.nextSnapshot.lastHeatSec,
-          },
-          decision.nextSnapshot,
-        );
-        if (auditChanged || drafts.length > 0)
-          statement(
-            db,
-            `insert into signal_evaluations(scope_id,batch_id,source_hash,pool_id,payload_json) values(?,?,?,?,?)
-           on conflict(scope_id,batch_id,source_hash,pool_id) do nothing`,
-          ).run(
-            input.scopeId,
-            context.batchId,
-            report.sourceHash,
-            w.poolId,
-            compactSignalJson(db, {
-              matches: decision.matches,
-              evaluations: decision.evaluations,
-              at: report.at,
-              observedAtMs: context.observedAtMs,
-              coverage,
-            }),
-          );
-        for (const draft of drafts) {
-          const evidenceAt = present(
-            w.poolId,
-            draft.logicalTimeSec ?? draft.watermarkSec,
-            draft.metrics.partialCurrent === null,
-          );
-          const record = commitSignalDecision(
-            db,
-            input.scopeId,
-            { ...decision, alertDraft: { ...draft, presentation: evidenceAt.presentation } },
-            draft.historical && context.captureMode === 'live' ? 'backfill' : context.captureMode,
+            'select payload_json from signal_snapshots where scope_id=? and pool_id=?',
+          ).get(input.scopeId, w.poolId) as { payload_json: string } | undefined;
+          const previous =
+            row && !branchChanged
+              ? decodeSignalState<SignalSnapshot>(row.payload_json)
+              : initialSignalSnapshot();
+          const coverage = w.rolling
+            ? w.rolling['1m'].status === 'closed'
+              ? 'complete'
+              : w.rolling['1m'].status === 'gap'
+                ? 'gap'
+                : 'warming'
+            : w.partialCurrent?.status === 'partial'
+              ? 'complete'
+              : w.partialCurrent?.status === 'gap'
+                ? 'gap'
+                : 'warming';
+          // Reconsider a corrected entry bucket under the existing episode and
+          // logical cooldown. Only material escalation can bypass that cooldown;
+          // unchanged quantities cannot reappear as a fresh historical reminder.
+          const correctedEntry =
+            repair !== null &&
+            !branchChanged &&
+            (affected.has('*') || affected.has(w.poolId)) &&
+            previous.lastAlertScale === '5m' &&
+            previous.lastFiveEndSec !== null &&
+            previous.lastAlertSec === previous.lastFiveEndSec;
+          const evaluationPrevious = correctedEntry
+            ? { ...previous, lastFiveEndSec: previous.lastFiveEndSec! - 300 }
+            : previous;
+          const decision = evaluateSignal(
+            evaluationPrevious,
             {
-              metricSourceHash: report.sourceHash,
-              projectionSourceHash: report.projectionSourceHash,
-              metricVersion: report.version,
-              chainConfigVersion: report.configVersion,
-              assetVersion: report.assetVersion,
-              metadataVersion: report.metadata.version,
-              evidenceEventIds: evidenceAt.evidenceEventIds,
+              pool: w.pool,
+              batchId: context.batchId,
+              observedAtMs: context.observedAtMs,
+              endAnchor: report.at,
+              watermarkSec: report.at.timestampSec,
+              metrics: w,
+              coverage,
+              epoch,
+              presentation: present(w.poolId, report.at.timestampSec).presentation,
             },
+            config,
           );
-          if (record) records.push(record);
+          const snapshotChanged = !isDeepStrictEqual(previous, decision.nextSnapshot);
+          if (snapshotChanged || !row)
+            statement(
+              db,
+              `insert into signal_snapshots(scope_id,pool_id,payload_json) values(?,?,?)
+           on conflict(scope_id,pool_id) do update set payload_json=excluded.payload_json`,
+            ).run(input.scopeId, w.poolId, encodeSignalState(decision.nextSnapshot));
+          const drafts = decision.alertDrafts ?? (decision.alertDraft ? [decision.alertDraft] : []);
+          // Audit material state transitions, matched decisions and historical
+          // evaluations. Quiet pools do not append a receipt for every poll.
+          const auditChanged = !isDeepStrictEqual(
+            {
+              ...previous,
+              lastFiveEndSec: decision.nextSnapshot.lastFiveEndSec,
+              lastHeatSec: decision.nextSnapshot.lastHeatSec,
+            },
+            decision.nextSnapshot,
+          );
+          if (auditChanged || drafts.length > 0)
+            statement(
+              db,
+              `insert into signal_evaluations(scope_id,batch_id,source_hash,pool_id,payload_json) values(?,?,?,?,?)
+           on conflict(scope_id,batch_id,source_hash,pool_id) do nothing`,
+            ).run(
+              input.scopeId,
+              context.batchId,
+              report.sourceHash,
+              w.poolId,
+              compactSignalJson(db, {
+                matches: decision.matches,
+                evaluations: decision.evaluations,
+                at: report.at,
+                observedAtMs: context.observedAtMs,
+                coverage,
+              }),
+            );
+          for (const draft of drafts) {
+            const evidenceAt = present(
+              w.poolId,
+              draft.logicalTimeSec ?? draft.watermarkSec,
+              draft.metrics.partialCurrent === null,
+            );
+            const record = commitSignalDecision(
+              db,
+              input.scopeId,
+              { ...decision, alertDraft: { ...draft, presentation: evidenceAt.presentation } },
+              draft.historical && context.captureMode === 'live' ? 'backfill' : context.captureMode,
+              {
+                metricSourceHash: report.sourceHash,
+                projectionSourceHash: report.projectionSourceHash,
+                metricVersion: report.version,
+                chainConfigVersion: report.configVersion,
+                assetVersion: report.assetVersion,
+                metadataVersion: report.metadata.version,
+                evidenceEventIds: evidenceAt.evidenceEventIds,
+              },
+            );
+            if (record) records.push(record);
+          }
         }
-      }
+      };
+      measureStage(timings, 'signals', evaluateWindows);
       statement(
         db,
         `insert into signal_cursors(scope_id,config_hash,source_hash,epoch,block_number,block_hash,evidence_json) values(?,?,?,?,?,?,?)
@@ -621,16 +634,19 @@ export function commitAcceptedSignalBatch(
   input: MetricInput,
   config: SignalConfig,
   batch: RecordedRangeBatch,
-  options: { startNewSegment?: boolean } = {},
+  options: { startNewSegment?: boolean; timings?: BatchTimings } = {},
 ) {
   if (batch.scopeId !== input.scopeId) throw new Error('Signal batch scope mismatch');
+  const { timings } = options;
   return db
     .transaction(() => {
-      const changes = new SqliteRangeStore(db).acceptRange(batch, options);
-      const liveChanges = new LiveProjectionStore(db).sync(
-        input.scopeId,
-        input.registryScopeId,
-        input.configVersion,
+      // The accepted-range write and the live-cursor sync are the projection stage;
+      // projectSignals measures its own leaves separately.
+      const changes = measureStage(timings, 'projection', () =>
+        new SqliteRangeStore(db).acceptRange(batch, { startNewSegment: options.startNewSegment }),
+      );
+      const liveChanges = measureStage(timings, 'projection', () =>
+        new LiveProjectionStore(db).sync(input.scopeId, input.registryScopeId, input.configVersion),
       );
       const alerts = projectSignals(
         db,
@@ -642,6 +658,7 @@ export function commitAcceptedSignalBatch(
           captureMode: batch.captureMode,
         },
         liveChanges,
+        timings,
       );
       return { changes, alerts };
     })

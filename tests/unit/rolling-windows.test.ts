@@ -1,5 +1,9 @@
 import { expect, test } from 'vitest';
-import { buildRollingMetrics } from '../../src/metrics/rolling.js';
+import {
+  buildRollingMetrics,
+  prepareRollingCoverage,
+  rollingCoverage,
+} from '../../src/metrics/rolling.js';
 import type { MetricEvent, MinuteCoverage } from '../../src/metrics/windows.js';
 import type { PoolRef } from '../../src/domain/types.js';
 const pool: PoolRef = { chainId: 4663, protocol: 'v3', address: `0x${'1'.repeat(40)}` };
@@ -144,4 +148,36 @@ test('multiple swaps in one transaction count once and minutes never exceed the 
   const e = event(7220, 1);
   const w = build([e, { ...e, event: { ...e.event, ref: { ...e.event.ref, logIndex: 99 } } }]);
   expect(w.rolling!['1m']).toMatchObject({ swapCount: 2, txCount: 1, activeMinutes: 1 });
+});
+test('the shared minute index answers exactly like the public per-call coverage query', () => {
+  // Public callers (dashboard snapshot, metric store) keep the old entry point; it must agree with
+  // the index a build prepares once.
+  for (const [start, end] of [
+    [7180, 7240],
+    [6940, 7240],
+    [3640, 7240],
+    [100, 200],
+  ] as const) {
+    const expected = rollingCoverage(coverage, start, end, end);
+    expect(prepareRollingCoverage(coverage).reasons(start, end, end, null)).toEqual(expected);
+  }
+  // The window ending on the watermark tolerates the trailing partial minute.
+  expect(rollingCoverage(coverage, 7180, 7240, 7240)).toEqual([]);
+  expect(prepareRollingCoverage(coverage).reasons(7180, 7240, 7240, null)).toEqual([]);
+  // A birth inside the covered minutes still shortens the window through both entry points.
+  expect(rollingCoverage(coverage, 6940, 7240, 7240, 118n)).toEqual(['pool-lifetime-incomplete']);
+  expect(prepareRollingCoverage(coverage).reasons(6940, 7240, 7240, 118n)).toEqual([
+    'pool-lifetime-incomplete',
+  ]);
+  // A birth at or before the first covered minute changes nothing.
+  expect(rollingCoverage(coverage, 6940, 7240, 7240, 0n)).toEqual([]);
+  // A hole in the coverage is still reported.
+  expect(
+    rollingCoverage(
+      coverage.filter((c) => c.minuteStartSec !== 6900),
+      6940,
+      7240,
+      7240,
+    ),
+  ).toEqual(['coverage-missing']);
 });

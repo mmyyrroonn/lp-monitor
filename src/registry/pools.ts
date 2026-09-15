@@ -1,5 +1,6 @@
 import type { Address, Hex } from 'viem';
 import type { BlockAnchor, LogRef, PoolRef } from '../domain/types.js';
+import { countWork } from '../ops/work-counters.js';
 import type {
   PersistedPoolRegistration as StoredPoolRegistration,
   RecordedRangeBatch,
@@ -64,6 +65,8 @@ function equivalent(left: PoolRegistration, right: PoolRegistration): boolean {
     JSON.stringify(value, (_key, item: unknown) =>
       typeof item === 'bigint' ? item.toString() : item,
     );
+  // Both sides are serialized; neither the merge nor the counters may assume equality.
+  countWork('registryRowsSerialized', 2);
   return encode(left) === encode(right);
 }
 

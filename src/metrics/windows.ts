@@ -1,4 +1,5 @@
 import type { BlockAnchor, PoolEvent, PoolRef } from '../domain/types.js';
+import { countWork } from '../ops/work-counters.js';
 import { poolRegistrationId } from '../registry/pools.js';
 import { RollingVolumeBaseline, volumeBaseline } from './baseline.js';
 
@@ -163,6 +164,8 @@ export function buildMinuteMetrics(
     null,
   );
   const dormantWindows = new Map<string, WindowCore>();
+  // One entry per pool whose windows are assembled below.
+  countWork('evaluatedPools', groups.size);
   return [...groups.entries()]
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([poolId, group]) => {

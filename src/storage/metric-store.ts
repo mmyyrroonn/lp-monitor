@@ -28,6 +28,7 @@ import { aggregateRwa } from '../metrics/rwa-aggregate.js';
 import { buildMinuteMetrics, type MetricEvent } from '../metrics/windows.js';
 import { summarizeLiquidityActions, annotateLatestSwapLiquidity } from '../metrics/liquidity.js';
 import { estimateGrossSwapFee } from '../metrics/fees.js';
+import { measureStage, type BatchTimings } from '../ops/batch-timings.js';
 
 export const METRIC_VERSION = 'rolling-v1';
 export class StaleMetricProjectionError extends Error {
@@ -55,6 +56,8 @@ export interface MetricBuildOptions {
   includeAssetValuations?: boolean;
   live?: { historyMinutes: number };
   projection?: StoredProjection;
+  /** Present only for a timed live batch; offline readers pass nothing. */
+  timings?: BatchTimings;
 }
 export function buildMetricsReport(
   db: Database.Database,
@@ -85,16 +88,27 @@ export function buildMetricsReport(
       options.live && tip ? Math.floor(tip.timestampSec / 60) * 60 - historyMinutes * 60 : null;
     const liveStore = options.live ? new LiveProjectionStore(db) : null;
     if (liveStore && !db.readonly)
-      liveStore.sync(input.scopeId, input.registryScopeId, input.configVersion);
-    const projection =
-      options.projection ??
-      (liveStore
-        ? liveStore.read(input.scopeId, input.registryScopeId, input.configVersion, sinceSec! - 120)
-        : new SqliteProjectionStore(db).read(
-            input.scopeId,
-            input.registryScopeId,
-            input.configVersion,
-          ));
+      measureStage(options.timings, 'projection', () =>
+        liveStore.sync(input.scopeId, input.registryScopeId, input.configVersion),
+      );
+    const projection = measureStage(
+      options.timings,
+      'projection',
+      () =>
+        options.projection ??
+        (liveStore
+          ? liveStore.read(
+              input.scopeId,
+              input.registryScopeId,
+              input.configVersion,
+              sinceSec! - 120,
+            )
+          : new SqliteProjectionStore(db).read(
+              input.scopeId,
+              input.registryScopeId,
+              input.configVersion,
+            )),
+    );
     if (!projection) throw new StaleMetricProjectionError();
     const cache = options.live && !db.readonly ? new LiveMetricCache(db, input.scopeId) : null;
     const metadataAnchors = options.live
@@ -119,19 +133,22 @@ export function buildMetricsReport(
         ];
     const metadataCheck = reconcileMetricMetadata(input.metadata, metadataAnchors);
     const metricMetadata = metadataCheck.metadata;
-    const registry = new PoolRegistry([
-      ...raw.pools(input.registryScopeId),
-      ...raw.pools(input.scopeId),
-    ]);
+    const registry = measureStage(
+      options.timings,
+      'registry',
+      () => new PoolRegistry([...raw.pools(input.registryScopeId), ...raw.pools(input.scopeId)]),
+    );
     const registrations = registry.snapshot();
     const byId = new Map(registrations.map((r) => [poolRegistrationId(r), r]));
-    const rawCoverage = readMetricCoverage(
-      db,
-      input.scopeId,
-      projection.qualityErrors,
-      projection.end,
-      historyMinutes,
-      !!options.live,
+    const rawCoverage = measureStage(options.timings, 'coverage', () =>
+      readMetricCoverage(
+        db,
+        input.scopeId,
+        projection.qualityErrors,
+        projection.end,
+        historyMinutes,
+        !!options.live,
+      ),
     );
     const coverage = projection.windowContextIncomplete
       ? rawCoverage.map((c) => ({
@@ -161,92 +178,102 @@ export function buildMetricsReport(
     const valuations: SwapValuation[] = [];
     const metricEvents: MetricEvent[] = [];
     const valuedByRwa = new Map<string, SwapValuation[]>();
-    for (const event of [...projection.events].sort((a, b) => comparePosition(a.ref, b.ref))) {
-      let valuation: SwapValuation | null = null;
-      if (event.kind === 'swap') {
-        const registration = byId.get(poolRegistrationId(event));
-        if (!registration) throw new Error('Projected swap lacks registration');
-        const related = input.assets.assets.filter(
-          (a) => a.address === registration.token0 || a.address === registration.token1,
-        );
-        const inWindow =
-          sinceSec === null ||
-          event.time.minuteStartSec === null ||
-          event.time.minuteStartSec >= sinceSec;
-        for (const asset of related) {
-          const token = (address: Address) => ({
-            address,
-            decimals: decimalsAt(metricMetadata, address, event.ref.blockNumber),
-            role:
-              address === input.usdg
-                ? ('usdg' as const)
-                : input.assets.has(address)
-                  ? ('rwa' as const)
-                  : ('other' as const),
-          });
-          const metadata: SwapValuationMetadata = {
-            token0: token(registration.token0),
-            token1: token(registration.token1),
-            rwa: asset.address,
-            usdg: input.usdg,
-            usdgDecimals: decimalsAt(metricMetadata, input.usdg, event.ref.blockNumber),
-            maxQuoteAgeSec: 60,
-          };
-          const hasUsdg = registration.token0 === input.usdg || registration.token1 === input.usdg;
-          const preceding = hasUsdg
-            ? null
-            : findPrecedingQuote(event, asset.address, input.usdg, quotes, 60);
-          const side = cache
-            ? cache.memo(
-                'valuation:' + rawLogKey(event.ref) + ':' + asset.address,
-                event.time.minuteStartSec ?? Math.floor(projection.end.timestampSec / 60) * 60,
-                { event, metadata, preceding },
-                () => valueSwap(event, metadata, preceding ? [preceding] : []),
-              )
-            : valueSwap(event, metadata, quotes);
-          if (inWindow) {
-            const group = valuedByRwa.get(asset.address) ?? [];
-            group.push(side);
-            valuedByRwa.set(asset.address, group);
+    // One measured leaf around swap valuation; the projections read above and the
+    // window assembly below are measured separately, so no interval is counted twice.
+    measureStage(options.timings, 'valuation', () => {
+      for (const event of [...projection.events].sort((a, b) => comparePosition(a.ref, b.ref))) {
+        let valuation: SwapValuation | null = null;
+        if (event.kind === 'swap') {
+          const registration = byId.get(poolRegistrationId(event));
+          if (!registration) throw new Error('Projected swap lacks registration');
+          const related = input.assets.assets.filter(
+            (a) => a.address === registration.token0 || a.address === registration.token1,
+          );
+          const inWindow =
+            sinceSec === null ||
+            event.time.minuteStartSec === null ||
+            event.time.minuteStartSec >= sinceSec;
+          for (const asset of related) {
+            const token = (address: Address) => ({
+              address,
+              decimals: decimalsAt(metricMetadata, address, event.ref.blockNumber),
+              role:
+                address === input.usdg
+                  ? ('usdg' as const)
+                  : input.assets.has(address)
+                    ? ('rwa' as const)
+                    : ('other' as const),
+            });
+            const metadata: SwapValuationMetadata = {
+              token0: token(registration.token0),
+              token1: token(registration.token1),
+              rwa: asset.address,
+              usdg: input.usdg,
+              usdgDecimals: decimalsAt(metricMetadata, input.usdg, event.ref.blockNumber),
+              maxQuoteAgeSec: 60,
+            };
+            const hasUsdg =
+              registration.token0 === input.usdg || registration.token1 === input.usdg;
+            const preceding = hasUsdg
+              ? null
+              : findPrecedingQuote(event, asset.address, input.usdg, quotes, 60);
+            const side = cache
+              ? cache.memo(
+                  'valuation:' + rawLogKey(event.ref) + ':' + asset.address,
+                  event.time.minuteStartSec ?? Math.floor(projection.end.timestampSec / 60) * 60,
+                  { event, metadata, preceding },
+                  () => valueSwap(event, metadata, preceding ? [preceding] : []),
+                )
+              : valueSwap(event, metadata, quotes);
+            if (inWindow) {
+              const group = valuedByRwa.get(asset.address) ?? [];
+              group.push(side);
+              valuedByRwa.set(asset.address, group);
+            }
+            // One pool contribution, preferring the first priced stock in stable address order.
+            // Stock aggregates retain each side's own raw amount and as-of valuation.
+            if (!valuation || (valuation.usdMicros === null && side.usdMicros !== null))
+              valuation = side;
+            const quote = quoteFromRwaUsdgSwap(event, metadata);
+            if (quote) quotes.push(quote);
           }
-          // One pool contribution, preferring the first priced stock in stable address order.
-          // Stock aggregates retain each side's own raw amount and as-of valuation.
-          if (!valuation || (valuation.usdMicros === null && side.usdMicros !== null))
-            valuation = side;
-          const quote = quoteFromRwaUsdgSwap(event, metadata);
-          if (quote) quotes.push(quote);
+          if (inWindow && valuation) valuations.push(valuation);
         }
-        if (inWindow && valuation) valuations.push(valuation);
+        metricEvents.push({
+          event,
+          scopeId: input.scopeId,
+          usdMicros: valuation?.usdMicros ?? null,
+          usdgNotionalRaw: valuation?.usdgNotionalRaw ?? null,
+          rawNotional: valuation
+            ? { token: valuation.nativeToken, raw: valuation.nativeAmountRaw }
+            : null,
+        });
       }
-      metricEvents.push({
-        event,
-        scopeId: input.scopeId,
-        usdMicros: valuation?.usdMicros ?? null,
-        usdgNotionalRaw: valuation?.usdgNotionalRaw ?? null,
-        rawNotional: valuation
-          ? { token: valuation.nativeToken, raw: valuation.nativeAmountRaw }
-          : null,
-      });
-    }
-    const windows = (options.legacyWindows ? buildMinuteMetrics : buildRollingMetrics)(
-      sinceSec === null
-        ? metricEvents
-        : metricEvents.filter(
-            (m) => m.event.time.minuteStartSec === null || m.event.time.minuteStartSec >= sinceSec,
-          ),
-      coverage,
-      projection.end,
-      {
-        memo: cache ? (key, at, value, compute) => cache.memo(key, at, value, compute) : undefined,
-        pools: registrations.map((r) => ({
-          pool: r.pool,
-          discoveredAtBlock: r.source === 'seed-config' ? null : r.discoveredAt.blockNumber,
-          rawToken:
-            r.token0 === input.usdg || r.token1 === input.usdg
-              ? input.usdg
-              : (input.assets.addresses.find((a) => a === r.token0 || a === r.token1) ?? null),
-        })),
-      },
+    });
+    const windows = measureStage(options.timings, 'windows', () =>
+      (options.legacyWindows ? buildMinuteMetrics : buildRollingMetrics)(
+        sinceSec === null
+          ? metricEvents
+          : metricEvents.filter(
+              (m) =>
+                m.event.time.minuteStartSec === null || m.event.time.minuteStartSec >= sinceSec,
+            ),
+        coverage,
+        projection.end,
+        {
+          memo: cache
+            ? (key, at, value, compute) => cache.memo(key, at, value, compute)
+            : undefined,
+          pools: registrations.map((r) => ({
+            pool: r.pool,
+            discoveredAtBlock: r.source === 'seed-config' ? null : r.discoveredAt.blockNumber,
+            rawToken:
+              r.token0 === input.usdg || r.token1 === input.usdg
+                ? input.usdg
+                : (input.assets.addresses.find((a) => a === r.token0 || a === r.token1) ?? null),
+          })),
+        },
+      ),
     );
     const current = Math.floor(projection.end.timestampSec / 60) * 60;
     const rwa = input.assets.assets.map((asset) => {

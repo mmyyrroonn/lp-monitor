@@ -1,0 +1,122 @@
+{
+  "generatedAt": "2026-09-15T10:10:50.595Z",
+  "node": "v24.5.0",
+  "platform": "win32 x64",
+  "head": "6ed70d7d6f7bd5fecbe22f2324b3e4ffad71acfa",
+  "options": {
+    "pools": 80000,
+    "active": 400,
+    "iterations": 3,
+    "assetCount": 194,
+    "historyMinutes": 180,
+    "out": "E:\\lp-monitor\\.worktrees\\live-runtime-performance\\artifacts\\performance\\baseline-80k-recheck"
+  },
+  "fixtureMs": 170.782,
+  "initMs": 9742.702,
+  "rounds": [
+    {
+      "iteration": 0,
+      "totalMs": 2449.896,
+      "stages": {
+        "registryRead": 275.212,
+        "registryMerge": 346.318,
+        "batchDecode": 1071.685,
+        "windows": 306.022,
+        "rolling": 448.861,
+        "valuation": 1.596
+      },
+      "counts": {
+        "registryRowsRead": 80000,
+        "registryRowsSerialized": 0,
+        "rawBatchDecodes": 1,
+        "valuationComputes": 800,
+        "evaluatedPools": 80400,
+        "metadataCandidates": 0
+      },
+      "rssBytes": 3247640576
+    },
+    {
+      "iteration": 1,
+      "totalMs": 2242.691,
+      "stages": {
+        "registryRead": 268.677,
+        "registryMerge": 179.883,
+        "batchDecode": 1072.27,
+        "windows": 293.622,
+        "rolling": 427.434,
+        "valuation": 0.678
+      },
+      "counts": {
+        "registryRowsRead": 80000,
+        "registryRowsSerialized": 0,
+        "rawBatchDecodes": 1,
+        "valuationComputes": 800,
+        "evaluatedPools": 80400,
+        "metadataCandidates": 0
+      },
+      "rssBytes": 3266637824
+    },
+    {
+      "iteration": 2,
+      "totalMs": 2272.551,
+      "stages": {
+        "registryRead": 266.942,
+        "registryMerge": 175.191,
+        "batchDecode": 1096.045,
+        "windows": 303.505,
+        "rolling": 430.063,
+        "valuation": 0.731
+      },
+      "counts": {
+        "registryRowsRead": 80000,
+        "registryRowsSerialized": 0,
+        "rawBatchDecodes": 1,
+        "valuationComputes": 800,
+        "evaluatedPools": 80400,
+        "metadataCandidates": 0
+      },
+      "rssBytes": 3267743744
+    }
+  ],
+  "total": {
+    "p50Ms": 2272.551,
+    "p95Ms": 2449.896,
+    "maxMs": 2449.896
+  },
+  "stages": {
+    "registryRead": {
+      "p50Ms": 268.677,
+      "p95Ms": 275.212
+    },
+    "registryMerge": {
+      "p50Ms": 179.883,
+      "p95Ms": 346.318
+    },
+    "batchDecode": {
+      "p50Ms": 1072.27,
+      "p95Ms": 1096.045
+    },
+    "windows": {
+      "p50Ms": 303.505,
+      "p95Ms": 306.022
+    },
+    "rolling": {
+      "p50Ms": 430.063,
+      "p95Ms": 448.861
+    },
+    "valuation": {
+      "p50Ms": 0.731,
+      "p95Ms": 1.596
+    }
+  },
+  "countsPerRound": {
+    "registryRowsRead": 80000,
+    "registryRowsSerialized": 0,
+    "rawBatchDecodes": 1,
+    "valuationComputes": 800,
+    "evaluatedPools": 80400,
+    "metadataCandidates": 0
+  },
+  "rssBytes": 3267796992,
+  "databaseBytes": 233091072
+}

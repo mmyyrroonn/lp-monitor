@@ -71,6 +71,28 @@ test('a retryable failure with no retry left does not stall the limiter', async 
   expect(Date.now() - start).toBeLessThan(250);
   expect(reader.meter.summary()).toMatchObject({ calls: 2, retries: 0 });
 });
+test('a 429 with no retry left still holds back the next call on this provider', async () => {
+  let calls = 0;
+  const reader = createChainReader(
+    { httpRpcUrl: 'https://secret.invalid/key', providerAlias: 'test', dataDir: 'data' },
+    {
+      maxRetries: 0,
+      perSecond: 10000,
+      fetchFn: async () => {
+        calls++;
+        return calls === 1
+          ? new Response('too many requests', { status: 429 })
+          : new Response(JSON.stringify({ jsonrpc: '2.0', id: 1, result: '0x1237' }));
+      },
+    },
+  );
+  const start = Date.now();
+  await expect(reader.request('eth_chainId', [])).rejects.toMatchObject({ kind: 'rate-limit' });
+  expect(await reader.request('eth_chainId', [])).toBe('0x1237');
+  // There is no retry to space out, but the provider is still telling the whole process to back
+  // off, so the next call on this limiter must wait out the cooldown.
+  expect(Date.now() - start).toBeGreaterThanOrEqual(900);
+});
 test('429 retry is counted and provider error secrets never reach evidence', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'lp-client-'));
   const evidenceFile = join(directory, 'requests.jsonl');

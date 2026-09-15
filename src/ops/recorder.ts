@@ -22,6 +22,8 @@ import { createChainReader } from '../rpc/client.js';
 import { verifyIdentity } from '../registry/identity.js';
 import { loadAssetVersion } from '../registry/assets.js';
 import { PoolRegistry } from '../registry/pools.js';
+import { countWork, openWorkCounts } from './work-counters.js';
+import { BatchTimings } from './batch-timings.js';
 import { buildDiscoveryFilterPlan, computeWatchScopeId } from '../ingest/filter-plan.js';
 import {
   classifyDiscoveryFailures,
@@ -266,6 +268,10 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     discoveryBatches: 0,
     operationBatches: 0,
   };
+  // The open per-batch counter scope is tracked here so a batch that fails midway
+  // cannot leave the process counting into a scope nobody will read.
+  let batchWorkCounts: ReturnType<typeof openWorkCounts> | null = null;
+  const closeBatchWorkCounts = () => batchWorkCounts?.close();
   const metered = (
     kind: keyof Pick<typeof counts, 'endpointAnchors' | 'minuteAnchors' | 'warmupAnchors'>,
   ): ChainReader => ({
@@ -913,10 +919,18 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           telemetry.setPhase(phase);
           telemetry.sample(null);
           const acquisitionAt = acquisitionStartedAtMs;
-          const pools = new PoolRegistry([...store.pools(discoveryScope), ...store.pools(scopeId)]);
-          const batch = await reader.meter.withPurpose(
-            phase === 'backfill' ? 'backfill' : 'logs',
-            () =>
+          // Stage timings and structural counts cover exactly this one batch, so a
+          // per-batch log line can explain the batch instead of re-reading the run.
+          const timings = new BatchTimings();
+          const workCounts = (batchWorkCounts = openWorkCounts());
+          const pools = timings.measure(
+            'registry',
+            () => new PoolRegistry([...store.pools(discoveryScope), ...store.pools(scopeId)]),
+          );
+          // The acquisition stage wraps the fetch alone; rpcAcquisitionMs below keeps
+          // its legacy wider window so existing reports stay comparable.
+          const batch = await timings.measureAsync('rpcAcquisition', () =>
+            reader.meter.withPurpose(phase === 'backfill' ? 'backfill' : 'logs', () =>
               fetchRange(endpointReader, {
                 mode: 'operations',
                 fromBlock: from,
@@ -938,12 +952,17 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
                     ? 'backfill'
                     : 'live',
               }),
+            ),
           );
           const rawWriteAt = Date.now();
-          rawSaveStage('operations', () => store.saveRaw(batch, { compact: true }));
+          rawSaveStage('operations', () =>
+            timings.measure('rawPersist', () => store.saveRaw(batch, { compact: true })),
+          );
           const rawWriteMs = Date.now() - rawWriteAt;
           if (shutdown.requested) {
-            saveJson(resolve(out, 'range-' + batch.id + '.json'), batch, out);
+            timings.measure('artifactPersist', () =>
+              saveJson(resolve(out, 'range-' + batch.id + '.json'), batch, out),
+            );
             batchRecords.push({
               id: batch.id,
               scopeId: batch.scopeId,
@@ -965,7 +984,9 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
               (options.signalConfig?.cooling.buckets ?? 0) * 5 + 10,
             ) + 2,
           );
-          const timeContext = store.liveTimeContext(scopeId, from, end, liveTimeHistoryMinutes);
+          const timeContext = timings.measure('coverage', () =>
+            store.liveTimeContext(scopeId, from, end, liveTimeHistoryMinutes),
+          );
           const allLogs = [
             ...new Map(
               [...timeContext.unresolved, ...batch.logs].map((log) => [rawLogKey(log), log]),
@@ -978,13 +999,15 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           let timed: RecordedRangeBatch = batch;
           let timingFailures: readonly unknown[] = [];
           if (batch.completeness === 'complete') {
-            const resolution = await resolveLogTimes(
-              metered('minuteAnchors'),
-              allLogs,
-              timeFrom,
-              end,
-              timeContext.anchors,
-              timeContext.boundaries,
+            const resolution = await timings.measureAsync('coverage', () =>
+              resolveLogTimes(
+                metered('minuteAnchors'),
+                allLogs,
+                timeFrom,
+                end,
+                timeContext.anchors,
+                timeContext.boundaries,
+              ),
             );
             timingFailures = resolution.failures;
             result.timingFailures.push(
@@ -1006,7 +1029,13 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           const completeEvidenceAtMs =
             batch.completeness === 'complete' && result.timingUnresolved === 0 ? Date.now() : null;
           const rpcAcquisitionMs = Date.now() - acquisitionAt;
-          saveJson(resolve(out, 'range-' + batch.id + '.json'), { ...timed, timingFailures }, out);
+          timings.measure('artifactPersist', () =>
+            saveJson(
+              resolve(out, 'range-' + batch.id + '.json'),
+              { ...timed, timingFailures },
+              out,
+            ),
+          );
           batchRecords.push({
             id: batch.id,
             scopeId: batch.scopeId,
@@ -1017,12 +1046,17 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
             logs: batch.logs.length,
             accepted: false,
           });
-          if (batch.completeness !== 'complete') return null;
+          if (batch.completeness !== 'complete') {
+            workCounts.close();
+            return null;
+          }
           if (batch.completeness === 'complete') {
-            const registered = new PoolRegistry([
-              ...pools.snapshot(),
-              ...(batch.poolRegistrations ?? []),
-            ]).snapshot();
+            const registered = timings.measure('registry', () =>
+              new PoolRegistry([
+                ...pools.snapshot(),
+                ...(batch.poolRegistrations ?? []),
+              ]).snapshot(),
+            );
             const targets: TokenMetadataTarget[] = [
               { address: config.tokens.USDG, blockNumber: from },
             ];
@@ -1034,10 +1068,11 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
                 for (const address of [pool.token0, pool.token1])
                   targets.push({ address, blockNumber: height });
             }
+            countWork('metadataCandidates', targets.length);
             await refreshMetadata(targets);
           }
 
-          await reader.flush?.();
+          await timings.measureAsync('commitOther', async () => reader.flush?.());
           shutdown.throwIfRequested();
           const commitAt = Date.now();
           const changes =
@@ -1045,6 +1080,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
               ? signalStage('accepted-batch', () =>
                   commitAcceptedSignalBatch(db, metricInput, options.signalConfig!, timed, {
                     startNewSegment: latestStart && from === start,
+                    timings,
                   }),
                 ).changes
               : store.acceptRange(timed, { startNewSegment: latestStart && from === start });
@@ -1056,7 +1092,16 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
               ? outboxDurableAtMs - completeEvidenceAtMs
               : null;
           if (processingLatencyMs !== null) reader.meter.recordProcessing(processingLatencyMs);
-          const delivery = await drain(batch.captureMode !== 'live');
+          const delivery = await timings.measureAsync('notify', () =>
+            drain(batch.captureMode !== 'live'),
+          );
+          const localProcessingMs = processingLatencyMs;
+          const headObservedAgeMs =
+            telemetry.headObservedAtMs === null ? null : Date.now() - telemetry.headObservedAtMs;
+          // Wall-clock age of the data this batch accepted, next to the stage
+          // breakdown, so a fast batch on stale data cannot look healthy.
+          const acceptedDataAgeMs =
+            end.timestampSec > 0 ? Math.max(0, Date.now() - end.timestampSec * 1000) : null;
           telemetry.batchTimings.push({
             phase,
             batchId: batch.id,
@@ -1071,13 +1116,37 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
             notifyAttemptCompletedAtMs: metricInput ? Date.now() : null,
             deliveredAtMs: delivery.deliveredAtMs,
             writeLatencyMs,
-            processingLatencyMs:
-              completeEvidenceAtMs !== null && outboxDurableAtMs !== null
-                ? outboxDurableAtMs - completeEvidenceAtMs
-                : null,
+            processingLatencyMs,
             headAcquisitionLagMs:
               head.timestampSec > 0 ? Math.max(0, acquisitionAt - head.timestampSec * 1000) : null,
+            stageMs: timings.snapshot(),
+            localProcessingMs,
+            headObservedAgeMs,
+            acceptedDataAgeMs,
+            counts: { ...workCounts.counts },
           });
+          workCounts.close();
+          // Per-batch line: stages, real structural counts and data ages only. No
+          // endpoint URL, credential or full catalogue ever reaches this log.
+          console.log(
+            encodeJson({
+              event: 'batch-timing',
+              runId: id,
+              batchId: batch.id,
+              phase,
+              captureMode: batch.captureMode,
+              fromBlock: from,
+              toBlock: end.number,
+              logs: batch.logs.length,
+              rpcAcquisitionMs,
+              writeLatencyMs,
+              localProcessingMs,
+              headObservedAgeMs,
+              acceptedDataAgeMs,
+              stageMs: timings.snapshot(),
+              counts: workCounts.counts,
+            }),
+          );
           batchRecords.at(-1)!.accepted = true;
           counts.operationBatches++;
           telemetry.sample(null);
@@ -1141,6 +1210,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
             : 3
           : 1;
   } finally {
+    closeBatchWorkCounts();
     try {
       await reader.close?.();
     } catch (error) {

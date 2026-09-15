@@ -12,6 +12,7 @@ import type {
   WatchScopeId,
 } from '../domain/types.js';
 import { verifySuccessfulShardCoverage } from '../ingest/completeness.js';
+import { countWork } from '../ops/work-counters.js';
 import { readBatch, writeCompactBatch } from './payload-store.js';
 import {
   rawLogKey,
@@ -497,6 +498,7 @@ export class SqliteRangeStore {
         'select payload_json from pools where scope_id = ? order by discovered_block_number, pool_key',
       )
       .all(scopeId) as { payload_json: string }[];
+    countWork('registryRowsRead', rows.length);
     return rows.map((row) => decodePoolRegistration(row.payload_json));
   }
 

@@ -6,6 +6,7 @@ import type { BlockAnchor } from '../domain/types.js';
 import type { RequestMeter } from '../rpc/request-meter.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
 import { saveJson } from './files.js';
+import type { BatchTimingRecord } from './batch-timings.js';
 import {
   aggregateOpsReport,
   healthSnapshot,
@@ -32,7 +33,7 @@ const fileBytes = (path: string) => {
   }
 };
 
-export interface RuntimeBatchTiming extends BatchTimingSample {
+export interface RuntimeBatchTiming extends BatchTimingSample, BatchTimingRecord {
   batchId: string;
   fromBlock: bigint;
   toBlock: bigint;

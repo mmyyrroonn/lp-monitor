@@ -287,7 +287,9 @@ test('actual HTTP 429 penalizes client requests and sustained success restores b
       expect(await request).toBe('0x1');
     }
     expect(times[1]! - times[0]!).toBe(1000);
-    expect(times[2]! - times[1]!).toBe(1000);
+    // The cooldown is spent on the first follow-up call; the one after it is paced by the doubled
+    // effective interval (200ms against the 100ms configured baseline), not by a second cooldown.
+    expect(times[2]! - times[1]!).toBe(200);
     expect(times.at(-1)! - times.at(-2)!).toBe(100);
     expect(reader.meter.summary()).toMatchObject({ calls: 15, retries: 1 });
     await reader.close();

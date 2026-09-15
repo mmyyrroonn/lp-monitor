@@ -4,6 +4,7 @@ import type Database from 'better-sqlite3';
 import { CHAIN_ID } from '../domain/chain.js';
 import { encodeJson } from '../domain/json.js';
 import type { RawLog } from '../domain/types.js';
+import { countWork } from '../ops/work-counters.js';
 import type { RecordedRangeBatch } from './manifest.js';
 
 export const MAX_PAYLOAD_BYTES = 64 * 1024 * 1024;
@@ -205,6 +206,7 @@ export function readBatch(db: Database.Database, batchId: string): RecordedRange
   const row = db.prepare('select payload_json from ingest_batches where id=?').get(batchId) as
     { payload_json: string } | undefined;
   if (row === undefined) throw new PayloadFormatError('Ingest batch is missing');
+  countWork('rawBatchDecodes');
   const trimmed = row.payload_json.trimStart();
   // Legacy payloads are parsed once; compact envelopes are deliberately parsed
   // once for the reference and once for their compressed logical payload.

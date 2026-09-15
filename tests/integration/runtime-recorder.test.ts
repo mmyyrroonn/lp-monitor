@@ -124,6 +124,53 @@ test('real recorder persists measured evidence-to-outbox timing, phase budgets a
     expect(timing.deliveredAtMs).toBeNull();
     expect(manifest.telemetry.healthSamples.at(-1).scanned.blockNumber).toBe('200');
     expect(manifest.telemetry.healthSamples.at(-1).projected.blockNumber).toBe('200');
+    // A2: every stage that ran is measured at its own real boundary, so the
+    // breakdown can explain the batch instead of re-summing one long window.
+    const stageMs = timing.stageMs as Record<string, number>;
+    for (const stage of [
+      'rpcAcquisition',
+      'rawPersist',
+      'artifactPersist',
+      'coverage',
+      'registry',
+      'projection',
+      'valuation',
+      'windows',
+      'signals',
+      'commitOther',
+      'notify',
+    ])
+      expect(stageMs[stage], `${stage} must be measured`).toBeGreaterThanOrEqual(0);
+    // The acceptance metric keeps the legacy evidence-to-outbox definition.
+    expect(timing.localProcessingMs).toBe(timing.processingLatencyMs);
+    expect(timing.headObservedAgeMs).toBeGreaterThanOrEqual(0);
+    expect(timing.acceptedDataAgeMs).toBeGreaterThanOrEqual(0);
+    expect(timing.counts.rawBatchDecodes).toBeGreaterThanOrEqual(1);
+    expect(timing.counts.evaluatedPools).toBeGreaterThan(0);
+    expect(timing.counts.metadataCandidates).toBeGreaterThan(0);
+    const batchLogs = log.mock.calls
+      .map((call) => String(call[0]))
+      .flatMap((line) => {
+        try {
+          const parsed = JSON.parse(line) as {
+            event?: string;
+            stageMs?: Record<string, number>;
+            counts?: Record<string, number>;
+            headObservedAgeMs?: number;
+            acceptedDataAgeMs?: number;
+          };
+          return parsed.event === 'batch-timing' ? [parsed] : [];
+        } catch {
+          return [];
+        }
+      });
+    expect(batchLogs.length).toBeGreaterThan(0);
+    const logged = batchLogs.at(-1)!;
+    expect(Object.keys(logged.stageMs as object).length).toBeGreaterThan(0);
+    expect(logged.counts).toBeDefined();
+    expect(typeof logged.headObservedAgeMs).toBe('number');
+    expect(typeof logged.acceptedDataAgeMs).toBe('number');
+    expect(JSON.stringify(batchLogs)).not.toContain('fixture.invalid');
     expect(JSON.stringify({ report, manifest })).not.toContain('fixture.invalid');
     expect(JSON.parse(readFileSync(opts.databasePath + '.health.json', 'utf8')).scopeId).toBe(
       manifest.scopeId,

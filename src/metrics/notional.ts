@@ -1,5 +1,6 @@
 import type { Address } from 'viem';
 import type { LogRef, LogTime, PoolRef, Quality, QuoteObservation, Swap } from '../domain/types.js';
+import { countWork } from '../ops/work-counters.js';
 import { rawLogKey } from '../storage/manifest.js';
 import { findPrecedingQuote, quoteRawToMicros, quoteRawToRaw } from './price.js';
 
@@ -88,6 +89,7 @@ export function valueSwap(
   metadata: SwapValuationMetadata,
   quotes: readonly QuoteObservation[],
 ): SwapValuation {
+  countWork('valuationComputes');
   validatePair(swap, metadata);
   const hasUsdg =
     sameAddress(metadata.token0.address, metadata.usdg) ||

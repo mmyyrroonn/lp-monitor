@@ -1,5 +1,6 @@
 import type { BlockAnchor, LogTime } from '../domain/types.js';
 import { poolRegistrationId } from '../registry/pools.js';
+import { countWork } from '../ops/work-counters.js';
 import { volumeBaseline } from './baseline.js';
 import {
   buildMinuteMetrics,
@@ -33,16 +34,19 @@ export function inRollingWindow(
   if (m > start && (m + 59 <= end || atWatermark)) return true;
   return null;
 }
-export function rollingCoverage(
-  coverage: readonly MinuteCoverage[],
+/** A minute index over one coverage set, built once and reused by every query in a build. */
+export interface RollingCoverageIndex {
+  reasons(start: number, end: number, watermark: number, birth: bigint | null): string[];
+}
+function coverageReasons(
+  byMinute: Map<number, MinuteCoverage>,
   start: number,
   end: number,
   watermark: number,
-  birth: bigint | null = null,
+  birth: bigint | null,
 ): string[] {
   const reasons = new Set<string>();
   if (start < 0) reasons.add('warming');
-  const byMinute = new Map(coverage.map((c) => [c.minuteStartSec, c]));
   for (let m = Math.max(0, Math.floor(start / 60) * 60); m <= Math.floor(end / 60) * 60; m += 60) {
     const c = byMinute.get(m);
     if (!c || c.fromBlock === null || c.toBlock === null) reasons.add('coverage-missing');
@@ -57,18 +61,35 @@ export function rollingCoverage(
   }
   return [...reasons];
 }
+export function prepareRollingCoverage(coverage: readonly MinuteCoverage[]): RollingCoverageIndex {
+  countWork('coverageIndexBuilds');
+  const byMinute = new Map(coverage.map((c) => [c.minuteStartSec, c]));
+  return {
+    reasons: (start, end, watermark, birth) =>
+      coverageReasons(byMinute, start, end, watermark, birth),
+  };
+}
+export function rollingCoverage(
+  coverage: readonly MinuteCoverage[],
+  start: number,
+  end: number,
+  watermark: number,
+  birth: bigint | null = null,
+): string[] {
+  return prepareRollingCoverage(coverage).reasons(start, end, watermark, birth);
+}
 const sum = (xs: readonly (bigint | null)[]) =>
   xs.some((v) => v === null) ? null : xs.reduce<bigint>((a, b) => a + b!, 0n);
 function window(
   events: readonly MetricEvent[],
-  coverage: readonly MinuteCoverage[],
+  index: RollingCoverageIndex,
   start: number,
   end: number,
   watermark: BlockAnchor,
   rawToken: string | null,
   birth: bigint | null,
 ): RollingMetric {
-  const reasons = rollingCoverage(coverage, start, end, watermark.timestampSec, birth);
+  const reasons = index.reasons(start, end, watermark.timestampSec, birth);
   const selected: MetricEvent[] = [];
   for (const e of events) {
     if (e.event.ref.blockNumber > watermark.number) continue;
@@ -173,9 +194,21 @@ export function buildRollingMetrics(
   const groups = new Map<string, MetricEvent[]>();
   const registrations = new Map(options.pools?.map((p) => [poolRegistrationId(p), p]));
   const dormant = new Map<
-    string,
-    Pick<PoolMetricWindows, 'rolling' | 'rollingHistory1m' | 'rollingHistory5m'>
+    RollingCoverageIndex,
+    Map<string, Pick<PoolMetricWindows, 'rolling' | 'rollingHistory1m' | 'rollingHistory5m'>>
   >();
+  // One minute index per coverage set for the whole build. Windows ask this map instead of
+  // rebuilding the index for every query, and it dies with the build: nothing is reused across
+  // batches, where a watermark move would invalidate every entry.
+  const indexes = new Map<readonly MinuteCoverage[], RollingCoverageIndex>();
+  const scoped = new Map<string, MinuteCoverage[]>();
+  const indexFor = (cs: readonly MinuteCoverage[]) => {
+    const existing = indexes.get(cs);
+    if (existing) return existing;
+    const prepared = prepareRollingCoverage(cs);
+    indexes.set(cs, prepared);
+    return prepared;
+  };
   for (const e of events)
     if (e.event.pool) {
       const id = poolRegistrationId({ pool: e.event.pool });
@@ -191,16 +224,32 @@ export function buildRollingMetrics(
     const scopes = new Set(es.map((e) => e.scopeId).filter((s) => s !== undefined));
     const cs =
       scopes.size === 1
-        ? coverage.filter((c) => scopes.has(c.scopeId))
+        ? (() => {
+            const only = [...scopes][0]!;
+            const memo = scoped.get(only);
+            if (memo) return memo;
+            const filtered = coverage.filter((c) => c.scopeId === only);
+            scoped.set(only, filtered);
+            return filtered;
+          })()
         : new Set(coverage.map((c) => c.scopeId)).size <= 1
           ? coverage
           : [];
+    const index = indexFor(cs);
     const registration = registrations.get(w.poolId);
-    const dormantKey = JSON.stringify([
-      registration?.rawToken,
-      registration?.discoveredAtBlock?.toString(),
-    ]);
-    const cached = es.length === 0 ? dormant.get(dormantKey) : undefined;
+    // A pool born at or before the earliest verifiable boundary of the coverage it is measured
+    // against cannot have any window shortened by its birth, so its result never depends on the
+    // exact birth block. Dropping it from the key lets those pools share one computation instead
+    // of repeating it once per discovery height. Without a verifiable boundary the birth stays.
+    const starts = cs.flatMap((c) => (c.fromBlock === null ? [] : [c.fromBlock]));
+    const earliest = starts.reduce<bigint | null>((a, b) => (a === null || b < a ? b : a), null);
+    const birth = registration?.discoveredAtBlock ?? null;
+    const birthKey =
+      birth !== null && earliest !== null && birth <= earliest ? null : (birth?.toString() ?? null);
+    const byKey = dormant.get(index) ?? new Map();
+    dormant.set(index, byKey);
+    const dormantKey = JSON.stringify([registration?.rawToken ?? null, birthKey]);
+    const cached = es.length === 0 ? byKey.get(dormantKey) : undefined;
     if (cached)
       return {
         ...w,
@@ -241,7 +290,7 @@ export function buildRollingMetrics(
           ),
           ...unknown,
         ],
-        cs,
+        index,
         end - duration,
         end,
         watermark,
@@ -274,7 +323,7 @@ export function buildRollingMetrics(
       '15m': compute(900),
       '1h': compute(3600),
     };
-    if (es.length === 0) dormant.set(dormantKey, { rolling, rollingHistory1m, rollingHistory5m });
+    if (es.length === 0) byKey.set(dormantKey, { rolling, rollingHistory1m, rollingHistory5m });
     return {
       ...w,
       partialCurrent: null,
