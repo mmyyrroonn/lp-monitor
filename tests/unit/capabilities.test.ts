@@ -11,7 +11,8 @@ test.each([
   [{ status: 429 }, 'unknown', true],
   [{ name: 'TimeoutError' }, 'unknown', true],
   [{ message: 'missing trie node' }, 'unsupported', false],
-  [{ message: 'something failed' }, 'unknown', false],
+  // The residual fallback is retryable: one unfamiliar provider message must not end a scan.
+  [{ message: 'something failed' }, 'unknown', true],
 ])('capability error classification %j', (error, status, retryable) => {
   expect(classifyRpcError(error)).toMatchObject({ status, retryable });
 });

@@ -157,7 +157,13 @@ test('malformed JSON response is rejected without accepting transport evidence',
   const h = harness();
   h.fixture.faultNext('eth_getLogs', 'malformed-json');
   try {
-    await expect(h.run(1, { oneShot: true })).rejects.toThrow();
+    // A truncated body matches no known provider shape, so it classifies as a retryable
+    // `request-failed` rather than an integrity violation. The range stays uncovered and the
+    // run says so; what must never happen is evidence being accepted from a bad response.
+    const result = await h.run(1, { oneShot: true });
+    expect(result.complete).toBe(false);
+    expect(result.failures).toEqual(['request-failed']);
+    expect(result.acceptedRanges).toBe(0);
     expect(h.store.acceptedTip(scopeId)).toBeNull();
     expect(h.store.activeLogs(scopeId)).toEqual([]);
     expect(h.database.prepare('select count(*) as n from accepted_ranges').get()).toEqual({ n: 0 });

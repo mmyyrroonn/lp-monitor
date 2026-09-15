@@ -125,8 +125,12 @@ export function createChainReader(
           if (result === undefined) throw new RpcFailure('malformed-response');
         } catch (error) {
           const failure = classifyRpcError(error);
+          // The backoff below exists to space out the retry that follows it. When the budget is
+          // spent the error is thrown instead, and delaying every other call sharing this limiter
+          // buys nothing: the caller is already in charge of when to come back.
+          const retryFollows = failure.retryable && attempt < (options.maxRetries ?? 2);
           if (failure.kind === 'rate-limit') limiter.penalize();
-          else if (failure.retryable) limiter.defer(500 * 2 ** attempt);
+          else if (retryFollows) limiter.defer(500 * 2 ** attempt);
           try {
             await writer.write({
               sourceAlias: env.providerAlias,
@@ -144,7 +148,7 @@ export function createChainReader(
                 ? evidenceError
                 : new RpcFailure('evidence-write');
           }
-          if (!failure.retryable || attempt >= (options.maxRetries ?? 2)) throw failure;
+          if (!retryFollows) throw failure;
           continue;
         }
         limiter.succeed();

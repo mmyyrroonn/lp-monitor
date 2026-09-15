@@ -22,7 +22,8 @@ test.each([
   [{ code: -32005, message: 'block range too large' }, 'range-limit', false],
   [{ code: -32005, message: 'rate limit exceeded' }, 'rate-limit', true],
   [{ code: -32005, message: 'limit exceeded' }, 'unknown-limit', false],
-  [{ message: 'HTTP https://rpc/429' }, 'request-failed', false],
+  [{ message: 'HTTP https://rpc/429' }, 'request-failed', true],
+  [{ code: -32000, message: 'metadata is not found, 9073' }, 'historical-state-missing', false],
 ])('classifies structured provider errors safely %j', (error, kind, retryable) => {
   expect(classifyRpcError(error)).toMatchObject({ kind, retryable });
   expect(classifyRpcError(error).message).not.toContain('https');

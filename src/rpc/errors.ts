@@ -55,7 +55,14 @@ export function classifyRpcError(error: unknown): RpcFailure {
     return new RpcFailure('method-not-found', 'unsupported');
   if (/timeout|timed out|aborterror|econnreset|fetch failed/i.test(message))
     return new RpcFailure('timeout-or-network', 'unknown', true);
-  if (/missing trie|historical state|state.*not available|pruned/i.test(message))
+  // Two wordings for the same provider limitation: geth's pruned-trie message, and providers
+  // that only index block metadata for a recent window ("metadata is not found, <block>").
+  if (
+    /missing trie|historical state|state.*not available|pruned|metadata is not found/i.test(message)
+  )
     return new RpcFailure('historical-state-missing', 'unsupported');
-  return new RpcFailure('request-failed');
+  // Residual fallback for a provider message that matches no known shape. Still retryable:
+  // a bounded retry (the caller's maxRetries) costs seconds, while treating it as terminal
+  // let the first unfamiliar message end an hours-long scan.
+  return new RpcFailure('request-failed', 'unknown', true);
 }

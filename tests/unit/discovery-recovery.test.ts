@@ -4,6 +4,7 @@ import {
   classifyDiscoveryFailures,
   discoveryRetryDelayMs,
   DiscoveryRecoveryStop,
+  isCooperativeDiscoveryStop,
 } from '../../src/ingest/discovery-recovery.js';
 
 test('only classified transient failures retry', () => {
@@ -18,6 +19,17 @@ test('only classified transient failures retry', () => {
   expect([1, 2, 3, 4, 5, 6].map(discoveryRetryDelayMs)).toEqual([
     2000, 4000, 8000, 16000, 30000, 30000,
   ]);
+});
+
+test('an unfamiliar provider error retries a bounded number of times instead of ending the scan', () => {
+  expect(classifyDiscoveryFailures(['request-failed'])).toBe('retry');
+  expect(classifyDiscoveryFailures(['request-failed', 'timeout-or-network'])).toBe('retry');
+  // Provider answers that mean "this node cannot serve that block", seen intermittently in
+  // production while the same blocks scanned cleanly on the next attempt.
+  expect(classifyDiscoveryFailures(['historical-state-missing'])).toBe('retry');
+  // A cooperative cutoff alongside a retryable leaf is still a stop, not a crash.
+  expect(classifyDiscoveryFailures(['request-failed', 'deadline'])).toBe('fatal');
+  expect(isCooperativeDiscoveryStop(['request-failed', 'deadline'])).toBe(true);
 });
 
 test('unknown, empty, and mixed stop failures fail closed', () => {
