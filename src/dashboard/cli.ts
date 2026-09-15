@@ -6,10 +6,16 @@ import { loadAssetVersion } from '../registry/assets.js';
 import { loadMetricMetadata } from '../metrics/metadata.js';
 import { computeWatchScopeId } from '../ingest/filter-plan.js';
 import { createDashboardReader } from './snapshot.js';
+import {
+  createSnapshotCoordinator,
+  type SnapshotCoordinator,
+  type SnapshotWorkerFactory,
+} from './snapshot-coordinator.js';
 import { createDashboardServer } from './server.js';
 export async function runDashboardCli(
   args: string[],
   environment: NodeJS.ProcessEnv = process.env,
+  options: { workerFactory?: SnapshotWorkerFactory } = {},
 ): Promise<number> {
   let parsed: ReturnType<typeof parseArgs>;
   try {
@@ -54,31 +60,48 @@ export async function runDashboardCli(
     usdg: config.tokens.USDG,
     metadata,
   };
-  const reader = createDashboardReader(path, input, {
-    legacySnapshot: values['legacy-snapshot'] === true,
-  });
-  const server = createDashboardServer({
-    readSnapshot: (at) => reader.read(at),
-  });
+  // `--legacy-snapshot` is the one explicit way back to the in-process reader; everything else is
+  // answered by the worker-backed coordinator.
+  const legacy = values['legacy-snapshot'] === true,
+    reader = legacy ? createDashboardReader(path, input, { legacySnapshot: true }) : null,
+    coordinator: SnapshotCoordinator | null = legacy
+      ? null
+      : createSnapshotCoordinator({
+          dbPath: path,
+          scopeId: input.scopeId,
+          registryScopeId: input.registryScopeId,
+          configVersion: input.configVersion,
+          assetVersion: input.assets.version,
+          // The worker rebuilds its own registry from these, so what crosses is JSON, not the class.
+          assets: input.assets.assets,
+          usdg: input.usdg,
+          metadata: input.metadata,
+          ...options,
+        });
+  const server =
+    coordinator === null
+      ? createDashboardServer({ readSnapshot: (at) => reader!.read(at) })
+      : createDashboardServer({ coordinator });
   return new Promise<number>((resolveResult) => {
     let done = false;
-    const finish = (code: number) => {
+    const finish = async (code: number) => {
       if (done) return;
       done = true;
       process.off('SIGINT', stop);
       process.off('SIGTERM', stop);
-      reader.close();
+      reader?.close();
+      await coordinator?.close();
       resolveResult(code);
     };
     const stop = () => {
-      server.close(() => finish(0));
+      server.close(() => void finish(0));
       server.closeIdleConnections();
     };
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
     server.once('error', () => {
       console.error('Unable to start local dashboard; check the port and local configuration.');
-      finish(2);
+      void finish(2);
     });
     server.listen(port, '127.0.0.1', () =>
       console.log(`Dashboard: http://127.0.0.1:${port} (read-only; Ctrl+C stops)`),

@@ -1519,3 +1519,1082 @@
   9. 真实 provider 的端到端验证、运行时迁移与生产切换均**未执行**（属验收阶段，见后续记录）。
 
 - Commit：`a9e28a82d64431bdb3762c5d741c0c1d54648a5e`（子计划 03 单一提交，C1–C5 全部在内，29 文件 / +7802 −263，且**未**包含 00–05 计划、spec 与 review 这些输入文件）。本行哈希的补写位于其后的一个小提交（与子计划 01/02 同一做法）。
+
+### D1
+
+- 状态：完成（四处需要裁决或记录的边界见「未通过项」1–4，一条 D2 必须遵守的输入口径见「未通过项」6；另有一条 D1 自身的缓存失效缺陷在 D2 设计阶段被发现并修正，见本节末尾的「D1 补记」）
+
+- 修改文件：
+  - 新增 `src/dashboard/read-model.ts`（1177 行）：`DashboardReadModel`。四层结构，逐层都对着计划 04 的一条要求：
+    1. `PoolIndex`（338–423）——整个目录的**一份**索引：`#byId` 身份表、`#byAsset` 每 token 的成员集合、`#views` 每 token 的惰性视图（升序 `ids` + `BirthGroups`）。`add`/`remove` 只把**被碰到的 token** 记进 `#stale`，所以一轮 80k 目录里只有被 delta 点名的 token 会重建视图——`readModelRegistryScans` 数的就是这里，计划要求的「不再对每轮重建 80k 的 Set、不再 `registrations.filter + includes`」落在这一层。
+    2. `BirthGroups`（279–322）+ `CoverageQuery`（205–245）——把「每个池各问一次 `rollingCoverage(…, birth)`」化成「一次区间最小值比较」。`CoverageQuery` 在每代覆盖上建一张稀疏最小值表（`sparseMinimums`，171–183），`rangeMin(start,end)` O(1) 给出窗口里最小的已知 `fromBlock`；`BirthGroups` 把该 token 的出生高度升序排好，`#retire(threshold)` **只前进不回退**（已消费前缀永久定居，注释 313–316 写明为什么这是安全的），`maxActive`/`above` 只在未被消费的高度里找候选。于是静默池不再各自占一个窗口对象——计划那句「静默池不占每池窗口」在这一层。
+    3. `GenerationRegistry`（434–521）——一代的目录 = 共享基座 + **undo overlay**。`records` 记「某个池在这一代是什么样」（`applyRegistryDelta` 在基座移动**之前**为每一代记下它发布时看到的那一版，659–676），`corrections` 记成员资格与基座不一致的池（677–719），`touched` 让被改过的 token 从自己的成员回答 `maxBirth`/`aboveBirth`（490–515）。只有真正移动的身份被记录，旧代不需要拷贝目录。
+    4. `Generation` + 分页（797–1029）——`pools()` 先拿 `total`，再把顺序拆成 hot（有交易，按 app 的比较器排）／冷（已知零，poolId 升序）／null（未知，排最后），三组拼出这一页要的 poolId 之后才 `poolDetail(...)`：只构造这一页要的池（`readModelPoolsBuilt` = 该页条数）。`#windowOrder` 算顺序时不构造任何池详情，并在最坏情况（窗口对全体未知 → `allNull`）短路。
+    另有 `#pages`/`#orders` 两个上限 64 的 LRU（596–611、846、1027）与 `#evict()`：保留 2 代 live + 4 个历史 cutoff（956–972，与计划一致）。
+  - 修改 `src/dashboard/snapshot.ts`（净 +1/−32）：**唯一**的行为改动是 `aggregate()` 改为委托 `aggregateWindow(...)`——窗口公式（含 reasons 的推入顺序）从此只有一份实现，「两条路径不可能漂移」。`buildDashboardSnapshot`、`readDashboardSnapshot`、`createDashboardReader`、`attachDashboardHealth`、旧库只读兼容路径逐字未动（`git diff` 可核：删掉的 32 行正好是原 `aggregate` 的函数体）。
+  - 修改 `src/dashboard/types.ts`（+25）：按计划加四个契约 `DashboardTokenSummary` / `DashboardSummary` / `PoolPage` / `TokenHistory`。`DashboardSummary` 用 `Omit<DashboardSnapshot,'tokens'>` 书写，保证旧字段（`scopeId`/`health`/`message`/`notes`/`coverage`/`assetVersion`…）一个不少，只去掉 `tokens`。
+  - 修改 `src/ops/work-counters.ts`（+16）：`readModelIndexBuilds`、`readModelRegistryScans`、`readModelPoolsBuilt`、`readModelPageCacheHits` 四个计数器，`WorkCounts` / `WORK_COUNTER_KEYS` / `emptyWorkCounts()` 三处都加（前一版任务的做法一致）。
+  - 新增 `tests/dashboard/read-model.test.ts`（433 行 / 12 用例）、`tests/dashboard/pool-page.test.ts`（368 行 / 9 用例）、`tests/helpers/dashboard-fixture.ts`（466 行）。fixture 不是手写期望值：它用真实的 `SqliteRangeStore.acceptRange` + `LiveProjectionStore.sync` 建库、用 `buildMetricsReport` 取 report，再用**未重构的旧入口** `buildDashboardSnapshot` 当 oracle；分页顺序的 oracle 是 `web/app.ts` 的比较器（pool-page.test.ts:30–42 逐字符复刻，注释写明来源）。
+
+- RED（每条都是单点变异，逐字输出。变异由仓库外脚本 `mutate-d1.cjs` 施加，改完立即按字节还原并校验哈希：整轮 6 次变异前后 `src/dashboard/read-model.ts` 的 sha256 均为 `01d993387dcc548c0f74b1846557086cb8749b01262fffdca13b48a673a979ef`）：
+
+  1. **分页把 null 组排进了已知零前面**（`pools()` 的冷池游走 `if (order.hotIds.has(poolId) || order.nullSet.has(poolId)) continue;` 改成 `if (order.hotIds.has(poolId)) continue;`）：
+     ```
+      ❯ tests/dashboard/pool-page.test.ts (9 tests | 1 failed) 106ms
+        × pages reproduce the order and the details the legacy snapshot hands the app 102ms
+      Test Files  1 failed | 1 passed (2)
+           Tests  1 failed | 12 passed (21)
+     ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯
+      FAIL  tests/dashboard/pool-page.test.ts > pages reproduce the order and the details the legacy snapshot hands the app
+     AssertionError: expected [ …(2) ] to deeply equal [ Array(1) ]
+     - Expected
+     + Received
+       [
+         "4663:v3:0x000000000000000000000000000000000000010c",
+     +   "4663:v3:0x000000000000000000000000000000000000010c",
+       ]
+      ❯ tests/dashboard/pool-page.test.ts:83:48
+         81|           limit: 3,
+         82|         });
+         83|       expect(items.map((pool) => pool.poolId)).toEqual(expected.map((p…
+           |                                                ^
+         84|       // Details too: every window, every reason, and the last exact s…
+         85|       expect(items).toEqual(expected);
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+     ```
+     为什么是原问题：计划 04 明写「poolPage 的稳定顺序必须与原 app 一致（null/0 的先后不得自创）」。这一改让「窗口未知」的池在冷池游走里也被当成已知零输出、随后又在 null 组里再输出一次，同一个池在页里出现两次（receive 里那行重复的 `…010c`）。这就是「自创顺序」的最小形态：`total` 对、条数对、顺序错。
+  2. **`pool-lifetime` 判定方向放宽一格**（`src/dashboard/read-model.ts:1081` 的 `floor < highest` 改成 `floor <= highest`）：
+     ```
+      ❯ tests/dashboard/read-model.test.ts (12 tests | 1 failed) 101ms
+        × every stock window, pool count and active count equals the legacy snapshot 100ms
+      Test Files  1 failed (2)
+           Tests  1 failed | 7 passed (21)
+     ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      FAIL  tests/dashboard/read-model.test.ts > every stock window, pool count and active count equals the legacy snapshot
+     AssertionError: expected { …(4) } to deeply equal { …(4) }
+     - Expected
+     + Received
+     @@ -49,17 +49,19 @@
+             "usdMicros": null,
+           },
+         },
+         "1m": {
+           "current": {
+     -       "available": true,
+     +       "available": false,
+             "endSec": 4860,
+     -       "reasons": [],
+     +       "reasons": [
+     +         "pool-lifetime-incomplete",
+     +       ],
+             "startSec": 4800,
+     -       "swapCount": 0,
+     -       "txCount": 0,
+     -       "usdMicros": "0",
+     +       "swapCount": null,
+     +       "txCount": null,
+     +       "usdMicros": null,
+           },
+           "previous": {
+             "available": false,
+             "endSec": 4800,
+             "reasons": [
+      ❯ tests/dashboard/read-model.test.ts:66:27
+         64|     expect(token.address).toBe(previous.address);
+         65|     expect(token.symbol).toBe(previous.symbol);
+         66|     expect(token.windows).toEqual(previous.windows);
+            |                           ^
+         67|     expect(token.poolCount).toBe(previous.poolIds.length);
+         68|     for (const name of WINDOWS)
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+     ```
+     为什么是原问题：逐池规则是「出生高度高于窗口最小已知高度才否认这个窗口」，把 `>` 放宽成 `>=` 会让出生高度**恰好等于**下界的池也去否认窗口。D1 的全部性能都押在「逐池循环可以化成一个区间比较」上（read-model.ts:171–205 的注释），方向错一格就等于把窗口公式改写了一遍——这一格正是「不用重写窗口/信号公式」这条约束的落点。
+  3. **目录索引新增池后不标记 token 视图失效**（`PoolIndex.add()` 里去掉 `this.#stale.add(token);`）：
+     ```
+      ❯ tests/dashboard/pool-page.test.ts (9 tests | 1 failed) 780ms
+        × a generation published before a delta keeps its own pages and history 66ms
+      Test Files  1 failed | 1 passed (2)
+           Tests  1 failed | 19 passed (21)
+     ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      FAIL  tests/dashboard/pool-page.test.ts > a generation published before a delta keeps its own pages and history
+     AssertionError: expected 4 to be greater than 4
+      ❯ pageWalk tests/dashboard/pool-page.test.ts:60:29
+         58|     // A page that answers with nothing and still promises more would …
+         59|     // rather than hang, because the walk only ends when the offset pa…
+         60|     expect(page.nextOffset).toBeGreaterThan(offset);
+            |                                 ^
+         61|     expect(page.nextOffset).toBe(offset + page.items.length);
+         62|     offset = page.nextOffset;
+      ❯ walk tests/dashboard/pool-page.test.ts:269:5
+      ❯ tests/dashboard/pool-page.test.ts:307:12
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+     ```
+     为什么是原问题：惰性视图是这份索引省下 80k 重建的代价所在——`ids`/`births` 只有被标记失效的 token 才会重算。少了这一次标记，delta 加进来的池永远不进 `memberIds`，而 `total`（走 `#byAsset.size`，不经过视图）照旧变大，于是分页游走走到 offset 4 就再也拿不到新成员、`nextOffset` 却还声称有下一页：**页面走不动又不报错**。计划要求「目录变化靠 B2 的 delta 增量推进」，这条变异取的就是「增量推进的失效信号丢了」。
+  4. **`history` 起始分钟丢掉覆盖下界**（`src/dashboard/read-model.ts:860–864` 的 `Math.max(0, last - 180*60, 首个有 fromBlock 的分钟)` 改成 `Math.max(0, last - 180*60)`）：
+     ```
+      ❯ tests/dashboard/read-model.test.ts (12 tests | 1 failed) 169ms
+        × history minutes equal the legacy minutes and follow the selected stock only 71ms
+      Test Files  1 failed (2)
+           Tests  1 failed | 8 passed (21)
+     ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      FAIL  tests/dashboard/read-model.test.ts > history minutes equal the legacy minutes and follow the selected stock only
+     AssertionError: expected [ { minuteStartSec: +0, …(5) }, …(81) ] to deeply equal [ Array(80) ]
+     - Expected
+     + Received
+     @@ -1,7 +1,28 @@
+       [
+         {
+     +     "minuteStartSec": 0,
+     +     "reasons": [
+     +       "warming",
+     +       "coverage-missing",
+     +     ],
+     +     "status": "gap",
+     +     "swapCount": null,
+     +     "txCount": null,
+     +     "usdMicros": null,
+     +   },
+     +   {
+     +     "minuteStartSec": 60,
+     +     "reasons": [
+     +       "coverage-missing",
+     +     ],
+     +     "status": "gap",
+     …
+     +
+     +     "minuteStartSec": 120,
+     +     "reasons": [],
+     +     "status": "closed",
+     +     "swapCount": 5,
+     +     "txCount": 5,
+      ❯ tests/dashboard/read-model.test.ts:117:29
+        115|     expect(history.generation).toBe(summary.generation);
+        116|     expect(history.tokenAddress).toBe(token.address);
+        117|     expect(history.minutes).toEqual(token.minutes);
+           |                               ^
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+     ```
+     （上面是逐字输出，中段省略号是我为可读性缩短的 diff；`expected …(81)` 与 `Array(80)` 是原文。）为什么是原问题：`from` 的三个项是旧实现逐字搬来的（snapshot.ts:99–103），第三项保证分钟序列不早于覆盖能作证的第一分钟。去掉它，图表就会画两分钟「什么都没记」的 `gap`——那是**假装有覆盖**，正是计划在 D1 要求「缺覆盖样本要与旧输出逐字段相等」要挡的。
+  5. **分页缓存键漏掉窗口**（`src/dashboard/read-model.ts:806` 的 key 去掉 `|${request.window}`）：
+     ```
+      ❯ tests/dashboard/pool-page.test.ts (9 tests | 1 failed) 99ms
+        × pages reproduce the order and the details the legacy snapshot hands the app 97ms
+      Test Files  1 failed | 1 passed (2)
+           Tests  1 failed | 12 passed (21)
+     ⎯⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯
+      FAIL  tests/dashboard/pool-page.test.ts > pages reproduce the order and the details the legacy snapshot hands the app
+     AssertionError: expected '1m' to be '5m' // Object.is equality
+     Expected: "5m"
+     Received: "1m"
+      ❯ pageWalk tests/dashboard/pool-page.test.ts:54:25
+         52|     expect(page.offset).toBe(offset);
+         53|     expect(page.limit).toBe(query.limit);
+         54|     expect(page.window).toBe(query.window);
+            |                         ^
+         55|     expect(page.tokenAddress).toBe(query.tokenAddress.toLowerCase());
+         56|     items.push(...page.items);
+      ❯ tests/dashboard/pool-page.test.ts:77:17
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+     ```
+     为什么是原问题：顺序、`activePoolCount`、每张卡的窗口数值都随窗口变（计划前端条目「切换股票/窗口/at 用 AbortController」正说明窗口是请求的一部分）。缓存键少一段就会把 1m 的页当成 5m 的页发回去——**用户切了窗口，页面没变**，而服务端不会报任何错。
+  6. **旧代 poolCount 不再补回被删掉的成员**（`GenerationRegistry.count()` 去掉 `+ (own?.removed ?? 0)`；逐字输出较长，下面给出首尾，中段是同一个 minute 条目的重复）：
+     ```
+      ❯ tests/dashboard/pool-page.test.ts (9 tests | 1 failed) 791ms
+        × a generation published before a delta keeps its own pages and history 74ms
+      Test Files  1 failed | 1 passed (2)
+           Tests  1 failed | 19 passed (21)
+     ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯
+      FAIL  tests/dashboard/pool-page.test.ts > a generation published before a delta keeps its own pages and history
+     AssertionError: expected [ Array(80) ] to deeply equal [ Array(80) ]
+     - Expected
+     + Received
+       [
+         {
+           "minuteStartSec": 120,
+           "reasons": [
+     -       "pool-lifetime-incomplete",
+     +       "no-registered-pools",
+           ],
+     -     "status": "warming",
+     +     "status": "gap",
+           "swapCount": null,
+           "txCount": null,
+           "usdMicros": null,
+         },
+         {
+           "minuteStartSec": 180,
+           …
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+      ❯ tests/dashboard/pool-page.test.ts:292:92
+         290|   expect(walk(first.generation!, stocks.a)).toEqual(beforeA);
+         291|   expect(walk(first.generation!, stocks.b)).toEqual(beforeB);
+         292|   expect(model.history({ generation: first.generation!, tokenAddress: …
+            |                                                                                            ^
+         293|     beforeHistory.minutes,
+         294|   );
+     ```
+     为什么是原问题：这是 undo overlay 的**计数**半边。delta 删掉某只股票唯一的池之后，基座里它没有了，而**已经发布出去的那一代**必须继续报告它当时有的那个池。少了这半项，旧代从「池还在、窗口因出生高度未知」直接变成「一个池都没登记」（`pool-lifetime-incomplete`/`warming` → `no-registered-pools`/`gap`），也就是**改写了一个已经发给浏览器的版本**——计划 D1 那条「旧代池删除/改 token 后，旧代详情仍一致」要挡的形态。
+
+- GREEN：
+  - 我亲自跑的四个 dashboard 测试文件：`pnpm exec vitest run tests/dashboard/read-model.test.ts tests/dashboard/pool-page.test.ts tests/dashboard/snapshot.test.ts tests/dashboard/view-model.test.ts` → `Test Files 4 passed (4)  Tests 41 passed (41)`（1.66s）。
+  - 我亲自跑的全量：`pnpm exec vitest run` → `Test Files 132 passed (132)  Tests 1121 passed (1121)`（35.01s）。1121 = C5 记录里的 1100 + 本次新增 21（read-model 12 + pool-page 9），文件数 132 = 130 + 2。
+  - `pnpm typecheck` → `$ tsc --noEmit && tsc -p tsconfig.scripts.json`，无输出、退出码 0。
+  - `prettier --check` 本次涉及并改动的七个文件全过（read-model.ts / snapshot.ts / types.ts / work-counters.ts / 两个新测试 / fixture）。`pnpm lint` 整体仍红，只有 C5 已记录的那 8 个文件（见「未通过项」8）。
+  - **我自己的 80k 尺度测量**（临时探针文件，测完即删，不在交付里）：194 股票 / 80000 登记池 → summary JSON `241925` 字节（< 1 MiB = 1048576）；`loadRegistry` 105ms；`publish`（194 股票 × 4 窗口 × 当前/上一个 + 4 个活跃数）72ms；首个 20 项页 <1ms（`Date.now()` 分辨率为 1ms，测得 0）；stock[0] 的 `total` = 413（80000/194 向上取整，与 20 × 20 的翻页一致）。这与我未采信的 sub agent 数字（241925）一致，但上面这组是我自己跑出来的。
+  - **我自己补的一次对拍（计划没要求、D3 会依赖）**：同一个临时探针里用 `at = 4679` 发布一代，与 legacy `buildDashboardSnapshot(db, input, { at })` 逐字段比较——`selectedEndSec`、`coverage`、每只股票的 `windows`、`history().minutes`、以及第一页的 `items` 全部相等。这是 D1 唯一一处没有现成测试覆盖的语义（历史 cutoff），我按字节对拍过才写进下面「未通过项」1。
+  - 三个 sub agent 自己的变异（去掉 `pool-lifetime-incomplete`、去掉 hot 分组、忽略 overlay）我**没有转发**，下面是上面那六条我自己设计的变异。
+
+- 行为差异：
+  1. **新增 JSON 契约**：summary 只带 `apiVersion: 2` / `generation` / `refreshing` / 每 token 的 `poolCount` 与 `activePoolCount`，不再带 `poolIds`/`pools`/`minutes`；池详情走 `PoolPage`，分钟走 `TokenHistory`。前端要跟着改（D3），旧的 `legacy-snapshot` 模式仍返回旧格式。
+  2. **`aggregate()` 的实现搬了家**（snapshot.ts → read-model.ts 的 `aggregateWindow`）：行为不变，代价是 `snapshot.ts` 现在 import `read-model.ts`（都在 `src/dashboard/` 内，不跨模块）。这样「旧快照」与「读模型」不可能各自演化出不同的窗口含义。
+  3. **每 token 的池数与活跃数**从「构造全部池再 filter」变成「索引 + hot 组」，口径不变（对拍见 GREEN 第一条）。
+  4. **`history()` 只算被请求的那只股票**（旧路径每轮为全部 194 只股票各算一遍 minutes）；旧路径的 minutes 本身也是按 token 算的，所以口径不变。代价是同一份分钟序列可能在多次请求间重复计算——它现在按请求付费，不再按轮次付费。
+  5. **公式未动**：窗口起止、`(start, end]`、`coverageStart = start % 60 === 59 ? start + 1 : start`、`no-registered-pools`、`boundary-time-unknown`、`pool-lifetime-incomplete`、`seed-config` 不参与出生高度、minutes 的 `warming/gap/partial/closed` 判定，逐字保留（read-model.ts:117–147 与 1066–1100、868–892 对应 snapshot.ts 的原实现，`git diff` 里删掉的那 32 行就是对照）。
+
+- 未通过项 / 已记录的边界：
+  1. **历史分钟的锚点是 watermark 而不是所选 cutoff**（裁决点 1）：`history()` 的分钟循环终点取 `generation.watermark`（855–894），只有窗口终点取 `selectedEndSec`。这正是旧实现的行为（snapshot.ts:117–125 的 minutes 用 `report.at.timestampSec`，147–158 的 windows 用 `end = options.at ?? report.at.timestampSec`），我用 `at=4679` 的探针独立对拍过（GREEN 最后一条）。保留的理由：D3 前端 `trendMinutes(t, 30)`（web/app.ts:161–165）以 `selectedEnd()` 为锚截最后 30 分钟，锚点在客户端，服务端跟随 watermark 不丢信息；反过来改就会与旧快照不一致。**这是一条刻意的兼容，不是疏漏**——如果审查者认为新接口应当改成「分钟也截止于 `at`」，那是改前端契约，我没有自行实施。
+  2. **`loadRegistry` 是并集语义**（裁决点 2）：重复调用只把更多记录并进索引，不会替换（641–652 注释写明原因：已发布的代从这份索引回答，抽掉记录会改写一个已经发出去的版本）。**D2 必须为此新建 read model 或一次性把目录装好**，不能指望「重新 load 一遍」清掉过时记录。
+  3. **接口相对计划有三处增补**（裁决点 3）：`pools()` 的 `limit` 可省略（默认 20——计划给的 `PoolPage` 有 `limit`，方法签名里没写）；`refreshing` 由 `GenerationInput.refreshing` 传入并有 `setRefreshing()` 入口（计划要求 summary 上有 `refreshing` 且「旧 generatedAt/source 保留」，两者各需要一个入口）；`RegistryDeltaRow.poolKey` 保留但读模型不使用（只用 `before`/`after` 的 `poolRegistrationId`），保留是因为它是 B2 那侧的原始键。
+  4. **`status`/`message`/`notes` 是输入，不是读模型算的**：`publish()` 原样复制 `GenerationInput` 的这三个字段（731–758）。旧路径里这三样由 `buildDashboardSnapshot` 自己产生：三条固定文案（snapshot.ts:203–208）与 `nowMs - report.at.timestampSec*1000 > 60000` 的 stale 规则（183、202）。**D2 必须把这三条文案与那条 60 秒规则一并喂进来**，否则 summary 的 message/notes 会是空的；现有测试没有断言这三个字段（见下一条）。
+  5. **测试没有覆盖 summary 的 `notes`/`message` 传递**：read-model.test.ts 只对拍了 `status` 与 `sourceChainTimeSec`（55–58），没有对拍 notes/message/三条文案。这是 D2 checklist 第 10 条（各类文案）要覆盖的空档，它属于 D2 的输入组装，我没有为它补 D1 用例。
+  6. **D2 必须遵守的输入口径（我从源码核出来的，不是猜的）**：在 `{kind:'pools'}` 选择下 `report.rwa[].poolIds` **只包含被选中的池**——metric-store.ts:215–225 的 `registrations` 在有 workset 时取自 `workset.poolIds`，429–436 的 `poolIds` 又由它 filter 而来；而读模型的 `poolCount` 来自 `loadRegistry` 的目录。因此 D2 的 worker 必须**一次性装入完整目录**（`new PoolRegistry([...raw.pools(registryScope), ...raw.pools(scope)]).snapshot()`）之后靠 `registryChangesAfter` 的 delta 增量推进，**不能**用 `report.rwa[].poolIds` 当成员来源（那会在有界选择下把 poolCount 缩小到热池），也**不能**每轮重读目录（那正是 C1/C2 要消掉的 80k 读）。D1 的测试用全量 report（无 `live.poolIds`，`resolveWorkset` 返回 null → `{kind:'all'}`，metric-store.ts:76–78），那条路径上两者等价（对拍见 GREEN 第一条），选择路径上不等价。
+  7. **`#orders` 与 `#pages` 共用 `#pageCapacity = 64`**：计划只规定 poolPage 的 LRU 为 64，我给顺序缓存也用了同一个数（它同样只由分页请求产生，且每项比一页小）。若审查者认为顺序缓存该有独立上限，这是一个可调常数，不影响语义。
+  8. **`pnpm lint` 仍是红的，只有 HEAD 起就红的那 8 个文件**（清单见 C5「未通过项」8）；D1 涉及的七个文件都不在其中。
+  9. 真实浏览器检查与真实 80k/160k 运行库上的采样**未执行**（计划 05 的验收阶段）：本轮 80k 数据是内存构造的，不是真实目录。
+
+- Commit：待办——D1 与 D2/D3 同属子计划 04，按 01/02/03 的做法落在同一个 `perf:` 提交里，哈希在其后的小提交里补写。
+
+#### D1 补记：同代重发时的缓存失效（D2 前置修正）
+
+- 状态：完成（在 D1 提交前并入子计划 04 的同一个 `perf:` 提交；由主 session 直接实施并验证，不是 sub agent 交付）
+
+- 修改文件：
+  - `src/dashboard/read-model.ts`：`publish()` 在 `this.#generations.delete(key)` 之后、`set(key, generation)` 之前新增 `this.#dropViews(key)`；把原 `#drop()` 里的两段前缀清理抽成新的私有 `#dropViews(key)`，`#drop()` 改为 `delete` + 调用它，两处共用。其余未动。
+
+- 为什么必须补（我从源码核出来的，不是猜的）：`GenerationKeyParts`（read-model.ts:71–80）**不包含热事件本身**。`report.sourceHash` 由 `metricVersion` / `projectionSourceHash` / `usdg` / `assets` / `coverage` / `metadata` / `selection` 组成（metric-store.ts:532–545），而 `live_projection_cursors.source_hash` 是 `token(scopeId, registryScopeId, configVersion)`（live-projection.ts:323、714），**与 tip 无关**。于是「同一分钟内新来一笔 swap、热池集合未变、coverage 未变」时，新一代与上一代拿到**完全相同的 generation 字符串**而数据不同。D2 的 worker 正是按 5 秒变化检测（源 revision + tip）反复 `publish()`，必然落进这个情形。原实现 `delete(key)` + `set(key, generation)` 替换了世代，却把该 key 的 `#pages`/`#orders` 留在缓存里——**把上一轮的数据当成这一轮的详情发出去**。这是 D1 自己的缺陷，不是 D2 的使用问题。
+
+- RED（单点变异，仓库外脚本 `mutate-amend.cjs`：改完立即按字节还原并校验 sha256；三条都 `restore: OK`。每条都是把「清理」这一步单独去掉，看新用例是否会抓到）：
+  1. **`publish` 里完全不清理**（去掉 `this.#dropViews(key);` 这一行调用）：
+     ```
+      ❯ tests/dashboard/read-model.test.ts (13 tests | 1 failed) 464ms
+        × a round republished under the same version rebuilds the pages it replaces 53ms
+      Test Files  1 failed (1)
+           Tests  1 failed | 8 passed (13)
+     ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯
+      FAIL  tests/dashboard/read-model.test.ts > a round republished under the same version rebuilds the pages it replaces
+     AssertionError: expected [ { …(6) }, { …(6) }, { …(6) } ] to deeply equal [ { …(6) }, { …(6) }, { …(6) } ]
+     - Expected
+     + Received
+     @@ -1,120 +1,120 @@
+       [
+         {
+     -     "lastSwapTimeSec": 4822,
+     -     "poolId": "4663:v3:0x0000000000000000000000000000000000000108",
+     +     "lastSwapTimeSec": 4821,
+     +     "poolId": "4663:v3:0x0000000000000000000000000000000000000101",
+           "protocol": "v3",
+           "token0": "0x0000000000000000000000000000000000000021",
+     -     "token1": "0x0000000000000000000000000000000000000022",
+     +     "token1": "0x0000000000000000000000000000000000000003",
+     ```
+     为什么是原问题：`+ Received` 是**被复用的那个 model 返回的页**，它整页（`@@ -1,120 +1,120 @@` 全部 120 行）都是上一轮的内容，连首项都是上一轮的热池 `…0101`；`- Expected` 是同一个输入喂给一个**全新 model** 得到的页，首项是这一轮唯一的热池 `…0108`。也就是说复用的 model 把「已经不存在的那一轮」原样发了出去。
+  2. **只保留页清理、去掉顺序清理**（`#dropViews` 里删掉 `#orders` 那两行）：
+     ```
+      ❯ tests/dashboard/read-model.test.ts (13 tests | 1 failed) 462ms
+        × a round republished under the same version rebuilds the pages it replaces 53ms
+      Test Files  1 failed (1)
+           Tests  1 failed | 8 passed (13)
+     ⎯⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+      FAIL  tests/dashboard/read-model.test.ts > a round republished under the same version rebuilds the pages it replaces
+     AssertionError: expected [ { …(6) }, { …(6) }, { …(6) } ] to deeply equal [ { …(6) }, { …(6) }, { …(6) } ]
+     - Expected
+     + Received
+     @@ -1,54 +1,54 @@
+       [
+         {
+     -     "lastSwapTimeSec": 4822,
+     -     "poolId": "4663:v3:0x0000000000000000000000000000000000000108",
+     +     "lastSwapTimeSec": null,
+     +     "poolId": "4663:v3:0x0000000000000000000000000000000000000101",
+     ```
+     为什么是原问题：页缓存没了、顺序缓存还在，于是这一页是**按上一轮的排名**重新构造的（首项仍是 `…0101`），只是详情换成了新数据（它已经没有任何 swap，`lastSwapTimeSec` 变 `null`）。这正是「自创顺序」在缓存层的形态：数据对、顺序错。
+  3. **只保留顺序清理、去掉页清理**（`#dropViews` 里删掉 `#pages` 那两行）：
+     ```
+      ❯ tests/dashboard/read-model.test.ts (13 tests | 1 failed) 457ms
+        × a round republished under the same version rebuilds the pages it replaces 54ms
+      Test Files  1 failed (1)
+           Tests  1 failed | 8 passed (13)
+     ⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯
+      FAIL  tests/dashboard/read-model.test.ts > a round republished under the same version rebuilds the pages it replaces
+     AssertionError: expected [ { …(6) }, { …(6) }, { …(6) } ] to deeply equal [ { …(6) }, { …(6) }, { …(6) } ]
+     - Expected
+     + Received
+     @@ -1,120 +1,120 @@
+       [
+         {
+     -     "lastSwapTimeSec": 4822,
+     -     "poolId": "4663:v3:0x0000000000000000000000000000000000000108",
+     +     "lastSwapTimeSec": 4821,
+     +     "poolId": "4663:v3:0x0000000000000000000000000000000000000101",
+     ```
+     为什么是原问题：整页（120 行）来自上一轮的缓存副本，连 `lastSwapTimeSec` 都是上一轮的 4821。
+
+- GREEN：
+  - 我亲自跑：`pnpm exec vitest run tests/dashboard/read-model.test.ts` → `Test Files 1 passed (1)  Tests 13 passed (13)`（新增第 13 条用例）。
+  - 我亲自跑：`pnpm exec vitest run tests/dashboard/` → `Test Files 5 passed (5)  Tests 45 passed (45)`。
+  - 我亲自跑：`pnpm typecheck` → `$ tsc --noEmit && tsc -p tsconfig.scripts.json`，无输出、退出码 0。
+
+- 测试的 oracle（不写理想值）：第二轮 `publish` 的期望页来自**另一个新建的 model**——它只装同一份目录、只 publish 第二轮输入，所以它答的就是「这一轮应当有的页」。用例还先断言两条预置条件：目标池（stock a 的 poolId 最大者 `…0108`）在第一页里**不**出现，且第一页至少有一个池在 1m 有交易。把该股票全部 swap 移到目标池之后，正确的顺序必然以目标池开头，而上一轮的顺序里目标池排在最后——陈旧页与正确页因此不可能巧合相同。末两行还断言 `after.items[0].poolId === targetId` 与其 1m `txCount > 0`、`activePoolCount['1m'] === 1`。三条变异各自都能被这条用例抓住，说明它同时覆盖了「页」与「顺序」两条缓存路径。
+
+- 行为差异：无。此前该场景（同一 generation 字符串被重发）下，页与顺序属于上一轮；现在它们随数据一起重建。对旧路径（`buildDashboardSnapshot`）无影响。
+
+- 未通过项 / 已记录的边界：D2 每次 publish 之后，**浏览器已经下载到的那一页**仍然是它取数时的版本（服务端会按新数据重建，客户端不会主动重取）。D3 的「收到新 summary 切新 generation 重取第一页」以 generation 字符串为判据，同代重发不会触发它——这是刻意的（否则每 5 秒都会打断用户翻页），D3 记录里会写清这条。
+
+### D2
+
+- 状态：完成。计划 D2 的 13 条 checklist 全部落地，两条需要裁决的边界与一条「必须验证项」的不同结论见「未通过项」1–4；主控复核后追加的两条用例、三条漏网变异的复核结论、以及一条复核发现的真实缺陷见文末「D2 补记」；该缺陷经主控裁决 (a) 判定为**必须修**，已落地并转正用例，见文末「D2 补记二」。
+
+- 修改文件：
+  - 新增 `src/dashboard/snapshot-worker.ts`（626 行）：`SnapshotWorker`，线程里的一整个读模型。四层，每层对着 D2 的一条要求：
+    1. `#init`（228–279）——**整个进程唯一一次目录读**：`new PoolRegistry([...raw.pools(registryScopeId), ...raw.pools(scopeId)]).snapshot()` 喂 `loadRegistry`；之后目录只靠 `registryRevision`/`registryChangesAfter` 的 delta 推进（`#registryRows`，469–515）。`init` 的入参全是 JSON：`assets` 用 `buildAssetRegistry(version, assets)` 在 worker 内重建，class 实例、Map、DB 句柄一个都不过线程。
+    2. `#refresh`（281–369）——一轮的**全部读取在同一个 read transaction 里**（token、tip、registry delta、bounded 事件、observations 依次读到），事务外先做一次廉价的 token 比对。`report.at.timestampSec`/`coverage`/`sourceHash` 与 delta 因此描述同一批行，不会跨两次 DB 快照拼一代。事务外才 `applyRegistryDelta` + `publish`，并且 `#tokens`/`#eventRevisions`/`#registryPosition` 只在**成功发布之后**才前进——失败的轮次不会留下「已消费」的假状态。
+    3. `#windowPools`（423–437）——Option E：`LiveProjectionStore.readSelected(scopeId, registryScopeId, configVersion, sinceSec - 120, {pools: 空集, tokens: 空集, index})` 既让 index 变 current（`ensureCurrent()` 比 cursor），又按 `windowOf` 的规则把它 expire 到窗口，之后 `index.pools()` 就是这一轮的工作集。`windowOf` 返回 null 时抛 `StaleMetricProjectionError`（维持既有 freshness 拒绝，不回退更老的 offline cursor）。窗口规则因此只有一份实现，worker 不复制它。
+    4. `#eventDelta`（439–467）——自造 `EventDelta`：保留上一轮的 `Map<rawLogKey, revision>`（swap 用 `eventRevision`，其余用 `encodeJson`），与本轮 `index.eventsFor(index.pools())` 对比出 `upserts`/`deletedKeys`。`deletedKeys` 非空时 metric-store 仍会保守清空估值索引，这条没有绕过。
+    另有 `#publish`（371–421，把 report 折成 `GenerationInput`）、`#sourceToken`（532–562）、`#page`/`#history`（564–607）、`close`（215–226），以及 `init` 失败时的分类（`SNAPSHOT_NO_DATABASE` / `SNAPSHOT_UNAVAILABLE`，196–213）。
+  - 新增 `src/dashboard/snapshot-coordinator.ts`（586 行）：`SnapshotCoordinatorImpl`。
+    - `latest`（174–186）**同步、纯内存**：只从 `#summaries` 取对象、按墙钟重算 freshness、浅拷一份覆盖 `refreshing`/故障文案；没有任何 worker 调用、DB 访问或指标计算。
+    - `#pump`（382–416）最多一个 job，积压只有「最新 live」+「一个显式历史」，两者都有时交替跑，历史不会被 live 饿死；`refresh` 只是置位并返回。
+    - `#detail`（471–515）按 `generation|address|window|offset|limit` 去重、并发上限 8、单项 2 秒超时后以 `SnapshotBusyError` 释放（不是挂死）。
+    - 看门狗：`#onJobTimeout`（357–365）常规 10 秒、首次 60 秒（`#pump` 按「有没有 live summary」选），超时保留已发布结果、终止 worker、清掉所有 pending；`#scheduleRestart`（367–380）把重启压到冷却期内至多一次。
+    - 故障分级：首次还没 summary 时 `SNAPSHOT_NO_DATABASE` → `status:'empty'`（文案与 legacy 一致），其余 → `status:'error'`；已有 summary 后任何故障只覆盖 `status:'stale'` + 一句短原因（`reasonFor`，578–584），不含 SQL、路径或配置值。
+  - 修改 `src/dashboard/snapshot.ts`（与 D1 的改动合起来 `git diff --stat` 报 144 行变动，其中 `aggregate`→`aggregateWindow` 是 D1 既有的；本任务只加了下面四样，`git diff` 里可以逐条对上）：把三样东西从 `buildDashboardSnapshot` 里**提取**成共享导出，旧路径行为逐字不变——`SNAPSHOT_NOTES`（37–41，三条固定文案）、`snapshotFreshness(watermarkSec, nowMs)`（42–52，那条 60 秒规则，205 行改用它）、`runtimeHealth(path, scopeId)` + `mapDatabaseHealth`（256–292，原 `attachDashboardHealth` 的函数体）；两个调用点（240、376 行）改成 `snapshot.health = runtimeHealth(...)`，读不到时仍返回 `unavailableHealth()`，与原 catch 分支等价。做法与 D1 把 `aggregate` 搬成 `aggregateWindow` 一致：文案与规则只有一份实现，worker 与 legacy 不可能漂移。
+  - 修改 `src/dashboard/server.ts`（+31/−8）：`DashboardSnapshotSource` union（13–22），`coordinator` 与 `readSnapshot` 在类型上互斥（各带 `?: never`），同时传入是编译错误而不是运行时二选一；`/api/snapshot` 的 `at` 校验逐字未动，走 coordinator 时是「先 `refresh(at)`（立即返回）再 `json(200, latest(at))`」（112–117）。legacy 分支的缓存/串行路径原样保留。
+  - 修改 `src/dashboard/cli.ts`（+43/−16）：默认构造 `createSnapshotCoordinator` 并把 `input.assets.assets` + `assetVersion` 等 JSON 输入传进去，`--legacy-snapshot` 仍走 `createDashboardReader` + `{readSnapshot}`（两条 union 分支都真实可走，见 GREEN 第 5 条）；`finish` 现在 `await coordinator?.close()`；退出码规则（0 正常 / 2 启动错误）未动。新增可选第三参数 `{workerFactory}` 供测试注入。
+  - 修改 `src/registry/assets.ts`（+8/−1）：只给既有私有函数 `buildAssetRegistry` 加 `export`（41 行），别的一字未动。
+  - 新增 `tests/helpers/dashboard-worker.ts`（273 行）与 `tests/helpers/tsx-worker-loader.mjs`（4 行）：前者是**真实 `worker_threads` 线程**的夹具（`DashboardWorkerHarness`、`dashboardWorkerFactory`、`snapshotWorkerInit`、`appendBatch` 写连接夹具）；后者是 worker 线程里的 tsx 注册垫片（见「未通过项」8）。`tests/helpers/dashboard-fixture.ts` **未改动**。
+  - 新增 `tests/dashboard/snapshot-worker.test.ts`（9 用例 → 复核后 11 → **裁决后 14 用例**）、`tests/dashboard/snapshot-coordinator.test.ts`（15 用例）。复核追加的两条：`a round that moves only the watermark republishes and re-reads no history`、`a reader values with the metadata revision it was built with`（内容见「D2 补记」）；裁决后追加的三条：`a metadata revision under a still watermark is published, not deduplicated`、`a database without the source revisions cannot publish, and fails as the legacy read does`、`a database without the durable metadata journal still publishes and still deduplicates`（内容见「D2 补记二」）。
+  - 修改 `tests/helpers/dashboard-worker.ts`（复核追加，1 处）：`appendBatch` 的批次 id/manifestHash 由固定的 `'extend'` 改成按本次 `toBlock` 命名。**这是复核必需的**——`ingest_batches` 的行是不可变的（`raw-store.ts:675` 的 `Ingest batch transport payload is immutable`），固定 id 使同一个夹具只允许追加一次，而「只推 watermark 的一轮」需要在同一个夹具上追加两次。
+  - 修改 `tests/integration/projection-readonly.test.ts`（+172）：两条新用例（只读证明、并发写后 generation 与旧页）。
+
+- RED：**先说口径**。D2 的两个新模块是按主 session 逐字给定的接口先写实现、后写测试的，所以没有「模块缺失」形态的 RED 可贴。下面的 RED 是在**实现完成后**、在真实代码上施加的单点变异：每条先跑一次、贴逐字输出、再按字节还原并校验哈希（五条变异整轮前后 `src/dashboard/snapshot-worker.ts` 的 sha256 恒为 `8fb3ad6910438e0f3105de064d8dcc3f7c858802210c34c086d51bc65917fa13`，`src/dashboard/snapshot-coordinator.ts` 恒为 `95893a8d2e04acbd88b0e89e888372f32022c32a31a0ae51044ee9bd0d8d4315`）。第 5 条（M2）**没有被任何测试抓住**，我没有删掉它，而是把结论写进「未通过项」3。主控复核后又追加了一轮 4 条变异（M8 = 上面的 M2、M10b、M11、MC1），逐条结论、测量数据与新增用例见文末「D2 补记」；主控裁决落地 metadata 修复后再追加一轮 3 条变异（MD1–MD3，并重跑上面那一轮的 M8/M10b/M11/MC1），见文末「D2 补记二」。
+
+  1. **M1 工作集取自目录而不是窗口**（`src/dashboard/snapshot-worker.ts:437` 的 `return this.#index!.pools();` 改成 `return new Set(this.#catalogue.keys());`）：
+     ```
+     ⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯
+
+      FAIL  tests/dashboard/snapshot-worker.test.ts > a window that has moved on selects the pools it still holds, not the catalogue
+     AssertionError: expected 12 to be 8 // Object.is equality
+
+     - Expected
+     + Received
+
+     - 8
+     + 12
+
+      ❯ tests/dashboard/snapshot-worker.test.ts:323:39
+         321|   expect(selected.length).toBeGreaterThan(0);
+         322|   expect(selected.length).toBeLessThan(catalogue);
+         323|   expect(run.counts().evaluatedPools).toBe(selected.length);
+            |                                       ^
+     ```
+     为什么是原问题：计划 D2 的第一句就是「移动到 worker 之后仍须缩小计算输入」。这一改让一轮评估 12 个池（全目录）而不是 8 个（窗口里还有事件的池），`evaluatedPools` 从 8 跳到 12——**worker 照跑、结果照对、只是把 80k 目录的代价原样搬进了线程**，正是「仅把原 30 秒全量计算搬到线程里不算完成」要挡的形态。`selected` 由测试侧 SQL 从 `live_events` 独立推出，不是手写常数。
+
+  2. **M3 这一轮不给 build 任何 event delta**（`src/dashboard/snapshot-worker.ts:322` 的 `changes: {repairFrom: null, …eventDelta: {…}}` 整块改成 `changes: undefined`）：
+     ```
+      FAIL  tests/dashboard/snapshot-worker.test.ts > a round after a write values the new swap and re-decodes no history
+     AssertionError: expected 24 to be 1 // Object.is equality
+
+     - Expected
+     + Received
+
+     - 1
+     + 24
+
+      ❯ tests/dashboard/snapshot-worker.test.ts:236:36
+         234|   expect(after.generation).not.toBe(before.generation);
+         235|   // The window grew by exactly one swap, and that swap is the only th…
+         236|   expect(counts.valuationComputes).toBe(1);
+            |                                    ^
+     ```
+     为什么是原问题：指标库只在「拿到了 eventDelta 且没有删除」时才保留估值索引（metric-store.ts:251–252），拿不到就整表清空。少了这个 delta，一笔新 swap 带来的代价是**把窗口里全部 24 笔重新估值**（`1`→`24`）——结果一样、成本差一个量级，也就是「未改事件不重新估值」这条 D2 要求被悄悄取消。
+
+  3. **M4 历史时点被 live 汇总顶替**（`src/dashboard/snapshot-coordinator.ts:179` 前插入一行：`if (fault === undefined && this.#summaries.has(LIVE_KEY)) return this.#summaries.get(LIVE_KEY)!;`）：
+     ```
+      FAIL  tests/dashboard/snapshot-coordinator.test.ts > a historical cutoff is never answered with the live summary
+     AssertionError: expected { status: 'ok', …(15) } to match object { generation: null, refreshing: true }
+
+     - Expected
+     + Received
+
+       {
+     -   "generation": null,
+     -   "refreshing": true,
+     +   "generation": "g1",
+     +   "refreshing": false,
+       }
+
+      ❯ tests/dashboard/snapshot-coordinator.test.ts:332:36
+         330|   coordinator.refresh(4679);
+         331|   // Until its own generation exists the cutoff is pending, and the li…
+         332|   expect(coordinator.latest(4679)).toMatchObject({ generation: null, r…
+            |                                    ^
+     ```
+     为什么是原问题：D2 checklist 第 10 条明写「历史请求与 live 缓存分开，不能把 live 结果返回给选定 at」。这一改让 `?at=4679` 拿到 live 的 `g1`（`selectedEndSec: 4860`），页面会把**当前时刻数据画成历史时点**，而且不会报任何错——用户以为自己在看 4679，实际看的是 4860。
+
+  4. **M5 重启不看冷却**（`src/dashboard/snapshot-coordinator.ts:369–372` 的 `wait` 表达式改成 `const wait = 0;`）：
+     ```
+      FAIL  tests/dashboard/snapshot-coordinator.test.ts > a stuck round is abandoned: the old summary stays and the reader is dropped
+     AssertionError: expected 'ok' to be 'stale' // Object.is equality
+
+     Expected: "stale"
+     Received: "ok"
+
+      ❯ tests/dashboard/snapshot-coordinator.test.ts:255:23
+         253|   const held = coordinator.latest();
+         254|   expect(held.generation).toBe('g1');
+         255|   expect(held.status).toBe('stale');
+            |                       ^
+     ⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+      FAIL  tests/dashboard/snapshot-coordinator.test.ts > a restart storm is impossible: one reader per cooldown, no more
+     AssertionError: expected 4 to be 1 // Object.is equality
+
+     - Expected
+     + Received
+
+     - 1
+     + 4
+
+      ❯ tests/dashboard/snapshot-coordinator.test.ts:269:26
+         267|   });
+         268|   await delay(100);
+            |                  ^
+     ```
+     为什么是原问题：这是「防重启风暴」这一条的全部内容。没有冷却，100 毫秒里起了 **4 个** worker（`1`→`4`），每个都重新 `init` 一遍、重读目录；而且新 worker 的 `ready` 会清掉 `#fault`，于是刚被判定为超时的汇总又变回 `status:'ok'`——**页面既不显示它正在降级，服务端还在被自己的重启循环打满**。第二条断言正是把「一个冷却期至多一个」量化出来。
+
+  5. **M2 token 去掉 `live_events` 增长项**（`src/dashboard/snapshot-worker.ts:552` 的 `high?.id ?? null,` 改成 `null,`）：`Test Files 1 passed (1) / Tests 9 passed (9)`——**没有任何测试失败**。结论与处置见「未通过项」3，不作为 RED 计入。
+
+- GREEN（都是我自己跑出来的真实输出）：
+  - 三个 D2 指定的文件：`pnpm exec vitest run tests/dashboard/snapshot-coordinator.test.ts tests/dashboard/snapshot-worker.test.ts tests/integration/projection-readonly.test.ts` → `Test Files 3 passed (3)  Tests 26 passed (26)`。
+  - `pnpm exec vitest run tests/dashboard/ tests/integration/projection-readonly.test.ts` → `Test Files 8 passed (8)  Tests 77 passed (77)`。
+  - `pnpm exec vitest run`（全量）→ `Test Files 1 failed | 135 passed (136)  Tests 4 failed | 1166 passed (1170)`。**这 4 个失败全部在 `tests/integration/v4-capture-equivalence.test.ts`**，是同一 worktree 里另一个并发 agent 正在写的 E 系列文件（未跟踪、当时还在改），与 D2 无关；D2 涉及的 8 个文件全绿。D1 后的基线是 132 文件 / 1121 用例，本次新增 `snapshot-worker.test.ts`（9）、`snapshot-coordinator.test.ts`（15）、`projection-readonly.test.ts`（+2）共 26 条，其余增量属于并发的 E 系列。
+  - `pnpm typecheck` → 我改动的文件**零错误**；整条命令当时仍红，红的全部是另一个 agent 的 `tests/integration/v4-capture-equivalence.test.ts`（`'r.rolling' is possibly 'undefined'` 等）。把该文件排除后 `tsc --noEmit` 对我的文件无输出。**这是并发写同一个 worktree 造成的外部红项，不是我改出来的**；我没有去修它（超出授权范围）。
+  - `pnpm exec prettier --check` 本次涉及的 10 个文件全过：`snapshot-worker.ts`、`snapshot-coordinator.ts`、`snapshot.ts`、`server.ts`、`cli.ts`、`assets.ts`、两个新测试、`dashboard-worker.ts`、`projection-readonly.test.ts`。`pnpm lint` 整体仍红，红名单 10 个文件，我改的文件一个都不在其中（见「未通过项」9）。
+  - **构建产物的真实 worker**：`pnpm build` 成功（`dist/dashboard/snapshot-worker.js` 生成），随后用一个临时脚本（跑完即删，不在交付里）用 `new Worker(文件路径)`（**普通 Node，没有任何 loader**）在真实临时库上跑：
+    ```
+    init: {"type":"ready","scopeId":"s"} 255ms
+    refresh: summary generation ab1d2890d140ca12297a6abb905cf0d6 tokens 5 bytes 12477 273ms
+    poolPage: total 5 items 5
+    tokenHistory: minutes 80
+    second refresh: unchanged
+    worker exit code: 0 279ms
+    active Worker handles after close: 0
+    parent has no pending timers left; exiting naturally
+    ```
+    即：构建产物能启动真实 worker；一轮汇总 12477 字节；同一 token 的第二轮直接回 `unchanged`（不重算）；收到 `close` 后 worker **自己退出**（`parentPort.close()`，exit code 0），父进程无残留 Worker 句柄并自然退出。`scripts/copy-build-assets.mjs` 未改动（worker 由 tsc 直接产出，不需要追加复制项）。
+  - **两条 CLI union 分支在构建产物上真实可走**（同一个临时脚本，跑完即删）：对一个 scope 不含数据的真实库分别起 `node dist/cli.js dashboard`：
+    ```
+    default(coordinator)   http 200 | apiVersion 2 | generation null | status empty | message "当前范围没有已接受的链上数据。"
+    default(coordinator)   keys status,generatedAtMs,sourceChainTimeSec,selectedEndSec,availableFromSec,sourceHash,scopeId,assetVersion,tokens,coverage,health,message,notes,apiVersion,generation,refreshing
+    legacy-snapshot        http 200 | apiVersion (none) | generation (absent) | status stale | message "旧库只读快照 · 不自动跟随写入；重启重新核验。源数据库已更改，或旧投影未通过核验。"
+    legacy-snapshot        keys status,generatedAtMs,sourceChainTimeSec,selectedEndSec,availableFromSec,sourceHash,scopeId,assetVersion,tokens,coverage,health,message,notes
+    ```
+    默认分支出现 `apiVersion`/`generation`/`refreshing` 三个新键、legacy 分支没有且带 `LEGACY_NOTE`，说明两条分支各自真的被走到了。
+  - **计划 04 完成门槛里属于 D2 的两条**：
+    1. 「真实构建 worker 可运行、退出无残留」→ 上面第 5 条。
+    2. 「GET 期间核心计数为 0」→ `tests/dashboard/snapshot-coordinator.test.ts` 的最后一条用例：用**真实 worker 线程 + 真实 HTTP server + 真实投影库**，在测试进程装 `openWorkCounts()` 后 `fetch('/api/snapshot')`，断言 `counts.counts` 等于 `emptyWorkCounts()`（`rawBatchDecodes`/`valuationComputes`/`evaluatedPools` 因而全为 0），同时 `body.apiVersion === 2` 且 `body.generation` 与内存里的那一代一致。
+  - 只读与旧库兼容：`tests/integration/projection-readonly.test.ts` 用独立临时库，靠**同一个只读句柄**在 worker 跑前跑后读 `schema_version` / `total_changes` / `data_version` 与 13 张业务表的行数，前后完全相等（`data_version` 是连接自己的视图，别人提交过就会变，所以这一条同时证明 worker 连一次写都没触发）；`snapshot-worker.test.ts` 另有一条把 `registry_changes` 整表删掉的旧库用例：init 成功、汇总与 legacy 逐字段相等、注册进一个新池后下一轮 `poolCount` 跟着 +1（目录 diff 路径），全程零 `failed`。
+  - 复核追加（主控复核后由我跑）：`pnpm exec vitest run tests/dashboard/ tests/integration/projection-readonly.test.ts` → `Test Files 9 passed (9)  Tests 97 passed (97)`；`pnpm exec prettier --check tests/dashboard/snapshot-worker.test.ts tests/helpers/dashboard-worker.ts` → `All matched files use Prettier code style!`；`pnpm typecheck` → 整条命令干净（`tsc --noEmit` 与 `tsconfig.scripts.json` 都过，两个并发 agent 的红项此时都已消失）。
+  - 裁决后（metadata 修复落地，由我跑）：`pnpm exec vitest run tests/dashboard/ tests/integration/projection-readonly.test.ts` → `Test Files 9 passed (9)  Tests 100 passed (100)`；`pnpm exec prettier --check src/dashboard/snapshot-worker.ts tests/dashboard/snapshot-worker.test.ts` → `All matched files use Prettier code style!`；`pnpm typecheck` 我改的两个文件零错误，整条命令仍红（外部红项，逐条说明见「D2 补记二」的边界 2）。
+
+- 行为差异：
+  1. **`summary.sourceHash` 与 legacy 快照不同**。有界轮次的 report 把 `selection` 并进 sourceHash（metric-store.ts:534–545，既有语义），worker 又总是走有界轮次，所以即使数值完全一致，`summary.sourceHash !== legacy.sourceHash`。generation 字符串因此也与「全量轮次」的假设无关。D1 的 `generationInput` 夹具传的是全量 report 的 hash，D1 的用例不受影响。
+  2. **描述「有界选择」的 notes 被 worker 过滤掉了**（`SELECTED_REPORT_NOTE`，snapshot-worker.ts:46–51）。metrics report 会带一条 `Selected-pool report: stock aggregates, pool counts and market totals cover only the pools named in selection…`，那句对**这一轮的报告**成立，但 worker 发布的是读模型产出的**全目录口径**汇总（`poolCount` 来自 `loadRegistry` 的完整目录）。留着它会让页面声称一个不成立的统计口径，所以按前缀滤掉；其余 notes 与 legacy 逐字相同（`expectSameAsLegacy` 里 `summary.notes === legacy.notes` 就是这条的证据）。
+  3. **`/api/snapshot?at=` 的失败语义变了**。legacy 路径同步计算，`at` 超出保留范围时抛 `RangeError` → 400「Cutoff is outside retained chain-time evidence」。coordinator 路径是「`refresh(at)` 立即返回 + `latest(at)` 先给结构」，所以同样的 `at` 现在得到 200 + `status:'error'` + 一句「所选时点的快照暂时无法生成。」。`%60===59`、非负安全整数、重复/未知 query 的**语法**校验逐字保留在 server.ts。（D3 若要恢复 400，需要 coordinator 暴露「这个 at 是否在保留范围内」——我没有自行加，留给 D3 裁决。）
+  4. **freshness 由 main 侧按墙钟重算**。summary 里烘焙的 `status`/`message` 是发布那一刻的判定；`latest()` 每次都会用同一个 `snapshotFreshness` 重新判一次。理由：worker 在源不变时**不重算**，如果只信烘焙值，一个「链上 3 分钟没动」的页面会永远显示 `ok`。
+  5. **旧库（无 `registry_changes`）每轮重读目录**。没有 journal 就无从命名「谁动了」，worker 改为每轮读一次目录、与上一轮做差得到 delta（`#registryRows` 的 475–500）。这是兼容代价，不是新语义；新库不受影响。
+  6. **`runtimeHealth` 会开一个瞬时的只读连接**（`inspectDatabaseStatus` 自己 open/close）。worker 常驻的那个连接仍然只有一个；这一处是复用既有 health 映射的代价（另一条路是复制那段映射，主 session 第 8 条明确禁止）。
+  7. **CLI 的 `--legacy-snapshot` 现在固定传 `legacySnapshot: true`**。原来传的是 `values['legacy-snapshot'] === true`，非 legacy 时 `reader.read()` 会走 `readDashboardSnapshot`；现在非 legacy 根本不建 reader，所以这半边死代码被去掉了。legacy 模式下 `read()` 的行为一字未变（D1 的 `snapshot.test.ts` 全绿）。
+  8. worker 收到 `close` 会 `parentPort.close()`，线程自己退出；coordinator 仍会再 `terminate()` 一次（幂等）。这是为了让「关闭后没有残留」成为 worker 自己的性质，而不只依赖调用方记得 terminate。
+
+- 未通过项 / 已记录的边界：
+  1. **`health` 的新鲜度不参与 token**。`runtimeHealth` 从 sidecar 读的字段（`sidecarFreshness`/`updatedAtMs`…）不在 source token 里，所以 sidecar 自己变了不会触发重算，要等下一次源变化。`health` 是次要指示器，我选择不为此每 5 秒重算一次；这是刻意的，不是漏掉。
+  2. **一次测试夹具自身的坑，写下来给后续任务**：我第一版把 `openWorkCounts()` 的作用域开在断言之前、关在断言之后，于是**测试自己的 oracle 调用**（`buildDashboardSnapshot` + 一次全量 `buildMetricsReport`）被记进了 worker 的计数，`evaluatedPools` 读出 32 而不是 8，看起来像「池 × 窗口」。真实关系是 1:1：`buildRollingMetrics` 只调一次 `buildMinuteMetrics`，`countWork('evaluatedPools', groups.size)` 一轮只打一次点，`groups` 由工作集的注册预置。修法是让计数在 `worker.handle()` 返回后**立刻**停止。M1 变异（8→12）用的就是修好后的口径。
+  3. **`live_events` 增长项无法单独验证（M2 无测试抓住）**。主 session 要求 token「必须另外覆盖 `live_events` 的增长」并「用测试证实：写连接提交一批新的 live 事件后，token 变化、generation 更新」。后半句我做到了（`a round after a write values the new swap` 与 `projection-readonly` 的第二条用例都断言 generation 变了）。但**前半句我证不出独立性**：我把 `max(raw_log_id)` 这一项删掉（M2），9 条 worker 用例**全绿**。原因是所有能到达的写路径里，live 事件的增长必然同时移动 `live_source_revisions.revision`（migration 005 的触发器）或 `live_projection_cursors.source_hash`（sync 写的），而这两项本来就在 token 里；也就是说在这个 reader 真正能服务的库上，这一项是冗余的。我**保留**它（一次 PK 索引 seek），并在这里说明它不是被测试守着的——**没有把它写成「已验证」**。主控复核后我做了测量，结论不变、理由更硬：它动的时候 `live_source_revisions.revision` 一定同时动，而 revision 缺席的老库根本发布不出一轮（详见「D2 补记」）。裁决后新增的 `a database without the source revisions cannot publish, and fails as the legacy read does` 又把这条**论证**变成了**证据**（详见「D2 补记二」）：删掉该表的老库上 worker 回 `SNAPSHOT_ERROR`、legacy 读抛 `no such table: live_source_revisions`，两轮都如此。最终状态：**仍未验证**（未构造真实链路产生不出来的库状态去凑绿）。
+  4. **`at` 越界的 400 在 coordinator 路径上不可能再抛**（见「行为差异」3）。需要 D3 决定是恢复 400 还是接受 `status:'error'`。
+  5. **SIGINT/SIGTERM→退出码 0 未在真实信号下实测**。Windows 上 `child.kill('SIGINT')` 是硬终止，子进程拿不到优雅路径（构建产物的两次 CLI 跑都是 `exit code null`，即被信号杀掉）。我改为在进程内验证**同一个 `finish()`**：`tests/dashboard/snapshot-coordinator.test.ts` 最后一条用「端口被占用」触发 `server.once('error')` 分支，断言返回 `2`、`console.error` 被调用、且**进程里不再有任何 Worker 句柄**——`finish` 是两条路径共用的，`await coordinator?.close()` 与 `reader?.close()` 都在其中。真实 Ctrl+C 的验收留给计划 05/D3。
+  6. **Option E 的工作集可能含一个「只有未知分钟事件」的池**。`readSelected` 在 `unknownUnbounded` 时会把未知分钟的事件排除出投给指标库的 projection，但 `index.pools()` 仍会把它算进工作集。这是一个**超集**（那类池这一轮不贡献任何事件），代价是每轮多读几个注册，不产生错误结果。本仓库的夹具里每一笔日志都有分钟，所以现有测试覆盖不到这条；我按边界记录，没有为它构造一个真实链路产生不出来的样本。
+  7. **`#page`/`#history` 的合法性校验仍在读模型里**。worker 只把 `RangeError` 归类成 `SNAPSHOT_BAD_REQUEST`，coordinator 再翻成 `RangeError` 交给 server 现有的 400 分支；地址/generation 长度的**显式**校验（计划 D3 第 2 条）没有在 D2 加，因为那属于路由层。
+  8. **worker 线程里的 tsx 需要一个小垫片**。`new Worker('./x.ts', {execArgv: ['--import','tsx']})` 在 Node 24 上**不会**注册 tsx（实测：worker 里 `.ts` 被 Node 自带的 strip-only 模式接管，`.js`→`.ts` 改写不生效，参数属性直接 SyntaxError）；`--loader tsx` 被 tsx 自己拒绝，`NODE_OPTIONS` 也不行。可行做法是让 worker `--import` 一个自己调用 `register()`（`tsx/esm/api`）的小模块，即 `tests/helpers/tsx-worker-loader.mjs`。**这只影响测试怎么加载源码**；构建产物是纯 JS，用普通 `new Worker(path)` 启动（GREEN 第 5 条）。
+  9. **`pnpm lint` 仍红，红名单 10 个文件**：`src/metrics/coverage.ts`、`src/replay/export.ts`、`src/replay/reader.ts`、`src/replay/runner.ts`、`src/storage/batch-coverage.ts`、`tests/dashboard/read-model.test.ts`、`tests/integration/batch-coverage-cache.test.ts`、`tests/integration/referenced-batch-replay.test.ts`、`tests/unit/operation-filter-index.test.ts`（这 9 个是 HEAD 起就红的，见 C5「未通过项」8），外加 `tests/integration/v4-capture-equivalence.test.ts`（**另一个并发 agent 正在写的文件**）。D2 改动的 10 个文件都不在其中。
+  10. **并发写同一个 worktree 的外部红项**：`pnpm typecheck` 与全量 `vitest run` 在本次收尾时各有一条红项，全部来自另一个 agent 正在写的 `src/ingest/v4-capture-experiment.ts` / `tests/integration/v4-capture-equivalence.test.ts`（未跟踪、内容在会话期间还在变）。我**没有**改动这两个文件，也没有为了让整条命令变绿去碰它们；上面的 GREEN 里给出了「排除该文件后我的文件零错误」的证据。
+  11. **真实 80k/160k 目录、真实运行库、真实浏览器**都没有在 D2 跑（计划 05 与 D3 的范围）。D2 的规模证据是结构计数（目录读一次、事件行只读窗口、估值只算新增）与真实构建产物的短跑，不是线上采样。
+  12. **`#pages`/`#orders` 的 64 上限、generation 只留 2 代 + 4 个历史时点**都是读模型 D1 的性质，D2 原样沿用；worker 与 coordinator 没有再加一层缓存（coordinator 只多存了「已完成 summary」按 key 的一张表）。
+
+  13. **token 对 durable metadata revision 是盲的（复核发现的真实缺陷，已按主控裁决 (a) 落地修复）**。`buildMetricsReport` 每轮都会把 `token_metadata` 表的观察合并进估值用的 metadata（`src/storage/metric-store.ts:124`），而这张表的写只动 `metadata_revision`（migration 014），不动 token 里任何一项；token 里的 metadata 项是 init 那份**种子**的 `version`，在一个 reader 的生命里不可能变。可复现的后果：同一 watermark 下 metadata 观察被补齐（USDG `decimals` 6→8）后，legacy 快照的 USD 从 `8000000000` 变 `80000000`，worker 仍回 `unchanged`，页面继续显示旧估值直到链上随便来一批。候选修复（token 改看 `metadataJournalPresent(db) ? metadataRevision(db) : 种子 version`）已用临时补丁验证过 RED→GREEN，但**按主控「发现缺陷先停下、不要自行改行为」的要求当时没有落地**，证据与待裁决项见「D2 补记」。主控裁决 (a) 判定这是真实缺陷、不接受只写成边界：该修复已落地，那条临时用例已转正，逐行改动、变异证据与保留的边界见「D2 补记二」。
+
+- Commit：待办——D2 与 D1/D3 同属子计划 04，按 01/02/03 的做法落在同一个 `perf:` 提交里，哈希在其后的小提交里补写。
+
+#### D2 补记：变更检测复核（M8 / M10b / M11 / MC1）
+
+主控对 D2 做了 11 条单点变异，其中三条「token 忽略某一项」的漏网需要复核：M8（去掉 `max(raw_log_id)`）、M10b（`tip` 三个字段全部置 null）、M11（`input.metadata.version` 置 null）；M9b（事务内那次 token 复查改成 `if (false)`）主控判定为防御性冗余，不要求补测。本补记记录新增用例、复核口径下的逐条变异结论，以及第 3 条最终是「已验证」还是「仍未验证」。
+
+- 新增用例（`tests/dashboard/snapshot-worker.test.ts`，9 → 11 条；`pnpm exec vitest run tests/dashboard/snapshot-worker.test.ts` → `Tests 11 passed (11)`）：
+  1. `a round that moves only the watermark republishes and re-reads no history`——**只推 watermark 的一轮**（E3.1「3 轮仅 watermark 推进」的最小形态）。先用一个链时间把夹具最早的日志顶出 180 分钟窗口的 range（与 `a window that has moved on…` 同一个形状，所以窗口是目录的严格子集），再追加一个 `events: []` 的批次（只把 `toBlock`/boundary 往前推）。断言：这一轮**不是** `unchanged`；generation 变了；`sourceChainTimeSec` 严格大于上一轮；`expectSameAsLegacy` 逐字段等于 legacy 快照；`valuationComputes === 0`（没有任何事件被重新估值）；`liveEventRowsRead` 等于**窗口内**的行数（由测试侧 SQL 独立推出，且严格小于该 scope 的全部 `live_events` 行数）。实测：first round `sourceChainTimeSec 11100` → 只推 watermark 后 `11160`，`liveEventRowsRead 13`（scope 共 24 行），`unchanged` 消息 0 条。
+  2. `a reader values with the metadata revision it was built with`——同一个库上起两个 reader，第二个拿到「运维重新加载过的缓存」（`version: 'test-2'` 且 USDG `decimals` 改成 8）。断言：两者 `sourceHash` 不同；每个 reader 的 USD 数值等于**用它自己被给的那份 metadata 跑出来的 legacy 快照**（期望值来自 `buildDashboardSnapshot`，不是手写常数）；对已初始化的 reader 再发一次 `init` 会被拒（`SNAPSHOT_BAD_REQUEST`）——这就是「一个 reader 的 metadata revision 在它活着的时候不会变」的机器可验证形式。
+- 变异复核（第 2 轮；`pnpm exec vitest run tests/dashboard/ tests/integration/projection-readonly.test.ts`，**不加 `--bail`**，好让报告点名是哪条用例抓住的；`src/dashboard/snapshot-worker.ts` 与 `snapshot-coordinator.ts` 的 sha256 全程恒为 `8fb3ad…fa13` / `95893a…4315`，每条变异按字节还原）：
+
+  | 变异 | 结果 |
+  |---|---|
+  | M8 token 去掉 `max(raw_log_id)` | MISSED — `Test Files 9 passed (9) / Tests 97 passed (97)` |
+  | M10b token 三个 `tip` 字段全部置 null | MISSED — `Test Files 9 passed (9) / Tests 97 passed (97)` |
+  | M11 token 里 `input.metadata.version` 置 null | MISSED — `Test Files 9 passed (9) / Tests 97 passed (97)` |
+  | MC1 `tip` + `cursor` + 两个 `#sourceRevision` 一起置 null（只留事件行/journal/metadata） | **CAUGHT** — `Test Files 1 failed / 8 passed (9)`、`Tests 1 failed / 96 passed (97)`，唯一失败的是新用例 1 |
+
+  MC1 是这一轮补的锚点：把「watermark/cursor/revision」整组信号拿掉，只留事件行、journal 与 metadata。只有新用例 1 抓得住它——只有那一轮里这三项是**唯一**的移动者（既有用例每轮都伴随新事件或目录变化，`max(raw_log_id)`/journal 会替它们报警）。新用例因此不是重复覆盖。
+- **为什么 M8/M10b 抓不住（用测量给出，不用推断）**：在任何「能成功发布一轮」的库上，这两项都被别的 token 项涵盖。
+  - `scope_cursors` 的写（`acceptedTip` 前进的唯一途径）带 `live_scope_cursors_INSERT/UPDATE` 触发器，必然 `live_source_revisions.revision + 1`（migration 005，无 `WHEN` 子句）；同一批还会写 `live_projection_cursors.source_hash`，而 sync 的 token 里就含 revision。用测试侧 SQL 把 token 的每一项在同一夹具上量出来：
+    - 只推 watermark 的一批（`events: []`）：tip 4800→4900（timestamp 4860→4960）、revision 298→307、cursor 的 `source_hash` 变了；**`max(raw_log_id)` 恒为 20**、journal `seq` 恒为 12。
+    - 带一笔 swap 的一批：revision 298→309、`max(raw_log_id)` 20→21、cursor 同样变了。
+    即：`max(raw_log_id)` 动的时候 revision 一定也动；tip 动的时候 revision 一定也动。
+  - `live_source_revisions` 缺席的库（`#sourceRevision` 返回 null、`max(raw_log_id)` 成为唯一信号）**根本发布不出一轮**：`LiveProjectionStore.windowOf` 判断 cursor 是否 current 时会 `prepare` 这张表，直接抛 `no such table: live_source_revisions`。实测：worker 回 `SNAPSHOT_ERROR`；**legacy 读取路径抛的是一模一样的错**（`buildDashboardSnapshot` 同样 `no such table`），所以这不是 D2 引入的差异，而是既有读路径的性质。结论：`#sourceRevisions === false` 这条分支在任何「能产出 summary」的状态里都不可达。
+  - 因此主控问的第 3 条最终是 **仍未验证**，不是「已验证」。我没有为它构造一个真实链路产生不出来的库状态（例如手工删掉 `scope_cursors` 的触发器，或直接 `insert into live_events`）来把它变绿——那只会把一项冗余伪装成受测试保护。它继续留在 token 里：一次 PK 索引 seek，代价可忽略；一旦将来出现一条不经过 `scope_cursors` 的写入路径，它就会重新变成唯一的信号。
+- **一条真实缺陷：token 对 durable metadata revision 是盲的**（超出「补测」范围，按主控要求未自行修复，等裁决）。
+  - 依据：`buildMetricsReport` 每轮 `input = { ...input, metadata: readCachedMetricMetadata(db, input.metadata) }`（`src/storage/metric-store.ts:124`），把 `token_metadata` 的观察合并进估值 metadata；这张表的每次写只动 `metadata_revision`（migration 014 的 `token_metadata_change_insert/update` 触发器），**不动** `live_source_revisions`、tip、cursor 或 `live_events`。token 里的 metadata 项是 init 那份种子的 `version`，在 reader 生命里恒定（新用例 2 的第二段断言就是这条）。
+  - 复现（全走真实写入路径，零手写 SQL）：`enqueueTokenMetadata`（真实需求入队；这里用「种子不知道这个地址」这一真实触发条件）→ `metadataQueueFor(db).lease` → `applyMetadataLookup`（流水线自己的持久化函数，写一行 `token_metadata`：USDG `decimals` 6→8，`metadata_revision` 0→1）。此时 legacy 快照的 USD 从 `8000000000` 变 `80000000`（stock A，100 倍），worker 回 **`unchanged`**。
+  - RED/GREEN（临时用例 + 临时候选补丁，跑完两者都按字节还原、sha256 校验通过）：RED = `Tests 1 failed | 11 passed (12)`，失败点 `expect(run.port.count('unchanged')).toBe(0)`（收到 1）；候选修复 = token 用 `metadataJournalPresent(db) ? metadataRevision(db) : input.metadata.version`（`src/storage/metadata-queue.ts:305/320`，单行索引读，与 `#sourceRevisions` 同一处置于 `#init`）→ GREEN = `Tests 12 passed (12)`。
+  - 这正是主控要的第 2 条补测的**真实形态**：不是「同一个 reader 换一份 metadata」（按现有接线不可能发生，reader 的 metadata 在 init 时固定、第二次 `init` 被拒），而是「同一 watermark 下 metadata 观察被补齐/修订」。上面那个临时用例就是修复后应当落库的用例，**我没有把它留在树里**（留一条红用例会挡住同时在跑的其他 agent）。
+  - 触发面：follow 安全点的 maintenance transaction（计划 C5「没有新块时……应用 ready metadata 并修复受影响池」）以及任何不在 accepted transaction 内的 metadata 补齐。accepted transaction 内的补齐会因为同一事务里 `scope_cursors` 被写而顺带被 token 看到，所以日常持续跟随时症状会被链上写入掩盖。
+
+#### D2 补记二：metadata revision 落地（主控裁决 (a)）
+
+补记一里那条「token 对 durable metadata revision 是盲的」被主控裁决为**真实缺陷、必须修**（不接受只写成边界）。本段记录落地内容、变异证据与仍然保留的边界。只动 `src/dashboard/snapshot-worker.ts` 与 `tests/dashboard/snapshot-worker.test.ts`；D1/E1 一字未动。
+
+- 改动（`src/dashboard/snapshot-worker.ts`，4 处）：
+  1. 第 20 行：`import { metadataJournalPresent, metadataRevision } from '../storage/metadata-queue.js';`——**取 `db`、返回 `number`** 的那个 `metadataRevision`（`metadata-queue.ts:305`），不是 `src/metrics/valuation-index.ts:72` 的同名函数（那个取 `SwapValuationMetadata`、返回 `string`）。
+  2. 第 181–184 行：新增能力位 `#metadataJournal = false;`，注释写明只在这里settle「这个库有没有 journal」，revision 值每轮现读。
+  3. 第 278 行 `#init`：`this.#metadataJournal = metadataJournalPresent(db);`（与 `#sourceRevisions` 同一处置）。
+  4. 第 559 行 token 的最后一项由 `input.metadata.version` 换成 `this.#metadataRevision()`；新增 `#metadataRevision()`（578–580）：journal 存在时**每轮现读** `metadataRevision(this.#db!)`，不存在时回落 init 那份种子的 `input.metadata.version`（形状与 `token-metadata.ts:76` 一致）。`#sourceToken` 的文档注释同步改成「the durable metadata revision」。
+  - 文档注释写明了为什么必须每轮读：`buildMetricsReport` 每轮都把 `token_metadata` 合并进估值 metadata，一次落地的观察就是一轮「链没动、答案变了」；在 `#init` 里记住的值会成为变更检测**唯一看不见**的输入，页面会一直显示旧估值，直到某个无关的写入顺带把它带进来。
+- 未改（按裁决）：`?at=` 历史路径与 legacy reader 的语义；`#publish` 里 `GenerationInput.metadataRevision` 仍是种子 version（主控观察项，无正确性后果，本轮不动——durable metadata 变化会让 recompute 后的 `sourceHash` 变化，generation 因此跟着变）。
+- 新增用例（`tests/dashboard/snapshot-worker.test.ts`，11 → **14**）：
+  1. `a metadata revision under a still watermark is published, not deduplicated`——**补记一里那条临时 RED 用例转正**，全走真实写入路径（`enqueueTokenMetadata` → `metadataQueueFor(db).lease` → `applyMetadataLookup`，USDG `decimals` 6→8；零手写 SQL）。断言：`unchanged` 计数为 0；generation 变了；`valuationComputes > 0`；`sourceHash` 等于**把窗口选择折进去的 legacy 哈希**（`hashForSelection`，与 `a window that has moved on…` 同一个 oracle，因为 worker 的身份含 selection，全量 legacy 的 `sourceHash` 本来就不等于它）；`expectSameAsLegacy` 逐字段等于同一批行上的 `buildDashboardSnapshot`。为了让断言非空洞，先断言这次写入**真的**改了页面上的数（`legacyBefore` 与 `legacyAfter` 的 `1m.current.usdMicros` 不相等）。所有期望值都来自 oracle，没有手写常数。
+  2. `a database without the source revisions cannot publish, and fails as the legacy read does`——`vacuum into` 出来的副本上删掉 `live_source_revisions` 整表：worker 对 `refresh` 回 `{type:'failed', code:'SNAPSHOT_ERROR'}`、`summary` 消息数为 0、消息里不含 fixture 目录路径；**连发两次都如此**（一轮在事务里抛错后 reader 仍可用）；同一副本上 `buildDashboardSnapshot` 抛 `/no such table: live_source_revisions/`。这把补记一里对 M8 的「论证」变成了**证据**：`#sourceRevisions === false` 的分支确实到不了「能发布」的状态，因为每一轮都要做的窗口读就 prepare 在这张表上。
+  3. `a database without the durable metadata journal still publishes and still deduplicates`——删掉 `metadata_revision` / `metadata_address_changes` 两张表（`token_metadata` 出自 008、revision 出自 014，所以这是「008 与 014 之间」的那一档 schema）：仍然发布，`expectSameAsLegacy` 等于同一副本上的 legacy 读取；再刷新一次回 `unchanged`（回落分支不会让去重失效）。**这条是给这次新引入的回落分支补的**——新分支不能没有测试。构造方式是「当前 schema 减去 014 的两张表」：对只读读者而言与真实 pre-014 文件等价（残留的 014 触发器只在**写**的时候才报错，而 worker 从不写）。
+- 变异验证（第 4 轮，`node %TEMP%/d2-mutate4.cjs`；跑 `tests/dashboard/snapshot-worker.test.ts`，不加 `--bail`；每条按字节还原）：
+
+  | 变异 | 结果 |
+  |---|---|
+  | MD1 token 的 metadata 项换成常量 `null`（原始 M11 的形状） | **CAUGHT** — `Tests 1 failed / 12 passed (13)`，唯一失败的是新用例 1 |
+  | MD2 token 的 metadata 项退回修复前的种子 `input.metadata.version`（即修复前的行为） | **CAUGHT** — 同上 |
+  | MD3 `metadataJournalPresent` 判断反掉（`!metadataJournalPresent(db)`） | **CAUGHT** — 同上 |
+
+  整轮前后 `src/dashboard/snapshot-worker.ts` 的 sha256 恒为 `77a6e70cc6b42babe42eebbf77048b6d122eb1bb4c90b4c1b049c5ae4b09aed5`，三条 `restore: OK`。MD2 逐字失败点（证明 RED 方向确实是那条 `unchanged` 断言，而不是别的巧合）：
+
+  ```
+   FAIL  tests/dashboard/snapshot-worker.test.ts > a metadata revision under a still watermark is published, not deduplicated
+  AssertionError: expected 1 to be +0 // Object.is equality
+
+  ❯ tests/dashboard/snapshot-worker.test.ts:377:39
+      375|   run.send({ type: 'refresh', key: 'live' });
+      376|   const after = run.summary();
+      377|   expect(run.port.count('unchanged')).toBe(0);
+         |                                       ^
+  ```
+
+  同一轮把补记一那张表用**新锚点**重跑（`d2-mutate3.cjs`，M11 的锚点从 `input.metadata.version` 改成 `this.#metadataRevision()`）：
+
+  | 变异 | 补记一时 | 现在 |
+  |---|---|---|
+  | M8 token 去掉 `max(raw_log_id)` | MISSED | MISSED — `Tests 99 passed (99)` |
+  | M10b token 三个 `tip` 字段全部置 null | MISSED | MISSED — `Tests 99 passed (99)` |
+  | M11 token 的 metadata 项置 null | MISSED | **CAUGHT** — `Tests 1 failed / 98 passed (99)` |
+  | MC1 `tip` + `cursor` + 两个 `#sourceRevision` 一起置 null | CAUGHT | **CAUGHT** — 仍由「只推 watermark 的一轮」抓住 |
+
+- GREEN（我自己跑的真实输出）：`pnpm exec vitest run tests/dashboard/ tests/integration/projection-readonly.test.ts` → `Test Files 9 passed (9)  Tests 100 passed (100)`；`pnpm exec prettier --check src/dashboard/snapshot-worker.ts tests/dashboard/snapshot-worker.test.ts` → `All matched files use Prettier code style!`。
+- 仍未验证 / 保留的边界：
+  1. **M8 的最终状态仍是「仍未验证」**，不因为这次修复而改变（「未通过项」3 与补记一的结论不变）。新用例 2 只证明「缺这张表的老库发布不出来」，不证明 `max(raw_log_id)` 这一项被测试守着。
+  2. **`pnpm typecheck` 整条命令仍红，但我改的两个文件零错误**：红项 57 条在 `scripts/benchmark-live-performance.mjs`（另一路 E3 正在写的文件），1 条在 `src/dashboard/snapshot.ts:148`（`never[]` 推断，落在该文件他人 diff 的**未改动行**上）。`snapshot.ts` 不 import worker（方向是反的：worker 从它 import），所以我的改动不可能影响它的类型检查。我没有为了让整条命令变绿去碰这两个文件。
+  3. **`metadataJournalPresent` 的能力位是按句柄 memo 的**（`metadata-queue.ts:290–302`，`WeakMap<db, boolean>`），而 worker 的句柄在 `#init` 打开后一直活着：如果文件在 worker 打开**之后**才被写连接迁移出 014（只读读者自己不迁移），这个句柄会一直答 false，回落分支会继续用种子 version。这是 `metadata-queue.ts` 既有的 memo 语义（`readCachedMetricMetadata` 有同样的暴露面），**不是本次改动引入的**；我把回落写成每轮调用，但 `metadataJournalPresent` 自身的 memo 让「每轮」与「只读一次」在行为上等价。按边界记录，没有扩大改动范围去动 storage 层。
+  4. `tests/helpers/dashboard-worker.ts` 把 `appendBatch` 的批次 id 从固定 `'extend'` 改成 `` `extend-${toBlock}` ``：**主控已接受为授权内偏离**，理由成立（`ingest_batches` 行不可变，固定 id 使同一夹具只能追加一次），且同高度二次追加现在会响亮失败而不是静默。
+#### 主控补记：scripts 程序暴露的 `never[]` 推断（一行标注，主控执行）
+
+`### D3` 段里曾把 `src/dashboard/snapshot.ts:148` 的类型错误归因为「并发改写期间的瞬时现象、随后消失」，**该因果是错的**（D3 段已就地更正）。实况：
+
+- `snapshot.ts:138` 的 `const minutes = []` 依赖 TypeScript 的 evolving-array 推断；`tsconfig.scripts.json` 设了 `noImplicitAny: false`，该推断被关掉，空数组退化为 `never[]`，第 148 行的 push 因此报 TS2345。这是**确定性**的，不是并发产物。
+- 它只在 `tsc -p tsconfig.scripts.json` 里出现，因为 E3.1 重写的 `scripts/benchmark-live-performance.mjs` import 了 `src/dashboard/snapshot.ts`；HEAD 版脚本 297 行、只调 `PoolRegistry(...).snapshot()`、不 import dashboard，所以此前不暴露。`tsc --noEmit`（主项目，覆盖 `src/**` + `tests/**`）自始至终干净——这也是 D2 与主控各自独立得出的同一结论。
+- 修法（主控执行，一行标注，无行为变化）：`const minutes: TokenMinute[] = []`，并从 `./types.js` 引入 `TokenMinute`。
+- 验证（真实输出）：`pnpm exec tsc --noEmit` → 退出码 0；`pnpm exec tsc -p tsconfig.scripts.json` 中 `snapshot.ts` **零条**（其余红项是当时在飞的 E3 脚本，由 E3 自行收尾）；`pnpm exec vitest run tests/dashboard/snapshot.test.ts` → `Tests 12 passed (12)`；`pnpm exec prettier --check src/dashboard/snapshot.ts` → `All matched files use Prettier code style!`。
+
+### D3
+
+- 状态：完成（浏览器视觉检查未执行，原因见下）
+
+- 修改文件：
+  - `src/dashboard/server.ts`（新增 `/api/history` 批量路由、`/api/tokens/<address>/pools`、`/api/tokens/<address>/history`；失败→状态码映射；参数校验）
+  - `src/dashboard/web/app.ts`（总览改读 summary+批量分钟；详情按代币/代际/分页读取；AbortController 与代际校验；提示文案三分）
+  - `src/dashboard/web/view-model.ts`（新增纯函数 `overviewMinutes` / `requestNotice` / `summaryNotice` / `stillCurrent`；窗口与信号公式一行未动）
+  - `tests/dashboard/api-v2.test.ts`（新增，14 个用例）
+  - `tests/dashboard/view-model.test.ts`（新增 1 个 describe / 4 个用例）
+  - `src/dashboard/cli.ts`、`src/dashboard/web/index.html`：**未改**（CLI 在 D2 已接好 coordinator；页面结构与样式无需变更）
+  - 未触碰：`types.ts`、`read-model.ts`、`snapshot-worker.ts`、`snapshot-coordinator.ts`、`snapshot.ts`、`src/ingest/**`、`src/storage/**`、`src/registry/**`、lockfile、CI、config/、`tests/dashboard/snapshot-*.test.ts`、`docs/reviews/2026-09-15-live-performance-implementation.md`
+
+- RED（先写测试，未实现任何 D3 代码时运行）：
+
+```
+$ pnpm exec vitest run tests/dashboard/api-v2.test.ts tests/dashboard/view-model.test.ts
+
+ ❯ tests/dashboard/view-model.test.ts (12 tests | 4 failed) 14ms
+   ❯ dashboard request bookkeeping (4)
+     × asks for the drawn horizon plus the minute it compares against, inside the reader bound 2ms
+     × tells a viewer what can be done next, in the words of the page and not of the reader 0ms
+     × separates a first snapshot, a delayed one and an unusable one 0ms
+     × drops an answer that belongs to a generation or a token the page has moved on from 0ms
+ ❯ tests/dashboard/api-v2.test.ts (14 tests | 11 failed) 31551ms
+   × the overview batch route fans out over the reader and trims to the newest minutes 7ms
+   × the batch fans out under a bounded number of reader requests 2ms
+   × one unanswerable token fails the batch instead of shortening it in silence 2ms
+   × rejects every batch query that is not exactly one generation, a bounded address list and minutes 2ms
+   × a token page and a token history pass their query through and name failures on the wire 2ms
+   × rejects every detail query that is not one generation and one known window and page 1ms
+   × the new routes keep the local same-origin, read-only and CSP rules 6ms
+   × the worker really answers pages and histories for the generation it published 415ms
+   × a historical cutoff is answered by its own generation, and the live one stays live 30431ms
+   × a detail request that cannot be served in time is a retryable busy, not a hang 3ms
+   × no failure body ever carries a stack, a path or a database word 2ms
+
+ FAIL  tests/dashboard/api-v2.test.ts > the overview batch route fans out over the reader and trims to the newest minutes
+AssertionError: expected 404 to be 200 // Object.is equality
+ ❯ tests/dashboard/api-v2.test.ts:354:27
+ FAIL  tests/dashboard/api-v2.test.ts > rejects every batch query that is not exactly one generation, a bounded address list and minutes
+AssertionError: /api/history: expected 404 to be 400 // Object.is equality
+ ❯ tests/dashboard/api-v2.test.ts:425:52
+ FAIL  tests/dashboard/api-v2.test.ts > no failure body ever carries a stack, a path or a database word
+AssertionError: expected 404 to be 503 // Object.is equality
+ ❯ tests/dashboard/api-v2.test.ts:665:27
+ FAIL  tests/dashboard/view-model.test.ts > dashboard request bookkeeping > asks for the drawn horizon plus the minute it compares against, inside the reader bound
+TypeError: overviewMinutes is not a function
+ ❯ tests/dashboard/view-model.test.ts:84:12
+
+ Test Files  2 failed (2)
+      Tests  15 failed | 11 passed (26)
+```
+
+为什么是原问题：三个 D3 路由在服务端根本不存在——`/api/history`、`/api/tokens/*/pools`、`/api/tokens/*/history` 没有分支，落到静态白名单检查后一律 404 `Not found`，所以断言拿到 404 而不是 200/400/409/503；`view-model` 里的四个前端纯函数也不存在。也就是说测试失败的原因是能力缺失，不是环境、网络或夹具问题（同一文件里走**既有** `/api/snapshot` 的 3 个用例在 RED 阶段就是通过的：200 并发 summary、卡死 worker 下 p95、`at` 语法/语义两类）。
+
+RED 阶段另有 3 个用例即通过，属于**锁行为**而非新增能力，如实记录：`200 concurrent live summaries…`、`a stuck reader never delays an answer…`、`a cutoff that is not a minute end is rejected, an unavailable one is a renderable 200`（裁决一要求把这两类锁住，D2 已实现该行为）。
+
+- GREEN（实现后，全部为真实执行输出）：
+
+```
+$ pnpm exec vitest run tests/dashboard/api-v2.test.ts tests/dashboard/server.test.ts tests/dashboard/view-model.test.ts tests/dashboard/snapshot.test.ts
+ Test Files  4 passed (4)
+      Tests  41 passed (41)
+
+$ pnpm exec vitest run tests/dashboard/
+ Test Files  8 passed (8)
+      Tests  91 passed (91)
+
+$ pnpm exec tsc --noEmit
+（无输出，退出码 0）
+
+$ pnpm exec prettier --check src/dashboard/server.ts src/dashboard/web/app.ts src/dashboard/web/view-model.ts tests/dashboard/api-v2.test.ts tests/dashboard/view-model.test.ts
+All matched files use Prettier code style!
+
+$ pnpm build
+$ node scripts/clean-build.mjs && tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs
+（退出码 0，dist/cli.js、dist/dashboard/server.js、dist/dashboard/web/{app,view-model}.js、index.html、styles.css 均生成）
+```
+
+D3 指定测试集连续 8 次运行均 41/41。中途有 1 次单点失败，发生在另一路 agent 正在改写 `src/dashboard/snapshot.ts` / `scripts/benchmark-live-performance.mjs` 的当口，失败用例未捕获到具体名字，随后 8 次全部复现不了；不是本任务的改动面。
+
+关键用例与实测数字（`tests/dashboard/api-v2.test.ts`，真实 coordinator + 真实 worker 线程 + 真实夹具库）：
+  - `200 concurrent live summaries…`：200 个并发 GET 全部 200 且 `generation` 一致；`openWorkCounts()` 在整段时间内 `counts.counts` 深等于 `emptyWorkCounts()`（rawBatchDecodes / valuationComputes / evaluatedPools 全 0）；p95 < 1000ms。
+  - `a stuck reader never delays an answer…`：worker 只回一次 ready 后不再应答，200 个 GET 全部 200 + `status:'empty'` + `refreshing:true`；**worker 收到的 refresh 轮次恰好为 1**；p95 < 1000ms。
+  - `the worker really answers pages and histories…`：`limit=2` 走完 5 个池共 3 页，`seen.size === total`、无重复；`history` 与批量路由返回同一代际；`generation=g-none` → 409 `{code:'SNAPSHOT_EXPIRED',error:'Snapshot expired'}`。
+  - `a historical cutoff is answered by its own generation…`：`?at=4799` 的代际 ≠ live 代际，`selectedEndSec === 4799`，用历史代际取的 history 带的就是历史代际。
+  - `the batch fans out under a bounded number of reader requests`：40 个地址 → `peakDetailConcurrency <= SNAPSHOT_DETAIL_CONCURRENCY(8)` 且 `> 1`。
+  - `no failure body ever carries a stack…`：底层错误文本含 `SQLITE_CANTOPEN`、`E:\lp-monitor\...`，响应体里这些字符串一个都不出现，只有 `{code:'SNAPSHOT_UNAVAILABLE',error:'Snapshot is unavailable'}`。
+
+`pnpm build` 之后用**构建产物 + 临时库**真跑（`node dist/cli.js dashboard`，仅 127.0.0.1、自动选空闲端口、临时 config/watchlist/metadata/DB，全部建在系统临时目录，未连接运行库、未改原工作区任何文件；脚本留在仓库外 `%TEMP%\d3-e2e.mts`）：
+
+```
+snapshot { status: 'stale', apiVersion: 2, generation: '8d83616a962c341e85a724685afbcca0',
+  tokenCount: 5, byteLength: 12314,
+  firstTokenKeys: 'activePoolCount,address,category,poolCount,symbol,windows' }
+history { tokenAddress: '0x…0021', minutes: 80, first: {minuteStartSec:120,status:'closed',txCount:5}, last: {minuteStartSec:4860,status:'partial'} }
+pools page 1 { total: 5, nextOffset: 2, items: [ {…0101,txCount5m:2}, {…0102,txCount5m:1} ] }
+pools page 2 { total: 5, nextOffset: 4, poolIds: […0108, …0103], overlapWithPageOne: 0 }
+batch history { generation: '8d83…', minutes: 15, tokens: 5, perToken: 5×15 分钟 }
+batch size { batchBytes: 8553, bytesPerTokenMinute: 114, extrapolated194Tokens30Minutes: 685837, summaryBytes: 12314 }
+expired generation 409 { code: 'SNAPSHOT_EXPIRED', error: 'Snapshot expired' }
+bad address list 400 { error: 'Invalid detail query' }
+foreign origin 403 { error: 'Local same-origin requests only' }
+cutoff that is not a minute end 400 { error: 'Cutoff must be the final second of a minute' }
+exit { code: null, signal: 'SIGINT', stdout: 'Dashboard: http://127.0.0.1:<空闲端口> (read-only; Ctrl+C stops)', stderr: '' }
+exited true
+```
+
+（`status:'stale'` 是因为夹具的链上水位是 4860 秒，相对真实墙钟已经过期，属预期；`code: null / signal: 'SIGINT'` 是 Windows 上 `child.kill('SIGINT')` 直接终止进程而非投递控制台事件，因此没有退出码可读，进程确实已退出、无残留。）
+
+前端另做了一次**无浏览器**的执行检查（脚本同样在仓库外 `%TEMP%\d3-page-smoke.mts`：最小 DOM 桩 + 桩 fetch 加载 `dist/dashboard/web/app.js`）：
+
+```
+boot { rankRows: 2, heatRows: 2, statsCards: 4,
+       notice: '数据截止 … · 页面每 5 秒检查更新，统计以已采集链上时间为准。',
+       poolColumnUsesPoolCount: true, noPoolIdsColumn: true }
+select token { requests: [ '…/history?generation=gen-live',
+                           '…/pools?generation=gen-live&window=5m&offset=0&limit=20' ],
+               drawerHasTitle: true, drawerHasPools: true, drawerPoolCount: 2 }
+load-more button { attached: true, caption: '再显示 20 个池（已展示 2 / 5）' }
+load more { requests: [ '…/pools?generation=gen-live&window=5m&offset=2&limit=20' ],
+            poolCards: 4, distinctPoolIds: 4 }
+switch window { requests: [ '…/history?generation=gen-live',
+                            '…/pools?generation=gen-live&window=1h&offset=0&limit=20' ],
+                tableRange: '(08:21, 09:21] · 1h' }
+```
+
+这**不是**目测通过：它只证明页面能装载、选中某股票只发那两个请求、翻页按 `nextOffset` 发、切窗口按新窗口重取。**视觉检查未执行**——本环境没有可用的浏览器/截图工具，按要求不拿 server 单测或 DOM 桩冒充。
+
+- 行为差异：
+
+  1. **裁决一（`?at=` 语义越界不恢复 400）已照做并加测试锁定**：`/api/snapshot` 的语法校验（非负安全整数、`%60===59`、重复/未知 query 拒绝）逐字保留，全部仍 400，`error` 文案未改；语法合法但该时点不可用时仍是 **200 + `status:'error'` + 可渲染 message**，且 body 内不含 `stack`。测试 `a cutoff that is not a minute end is rejected, an unavailable one is a renderable 200` 同时锁住这两类。
+  2. **裁决二（总览分钟走新增批量路由）已实现**：新增 `GET /api/history?generation=&addresses=&minutes=`，实现对 `SnapshotCoordinator.history()` 的**有界扇出**，并发上限沿用 `SNAPSHOT_DETAIL_CONCURRENCY`（8），`addresses` ≤250、`minutes` ≤60 且为正整数（默认 30），地址重复会去重（同一 token 只问一次），未知/重复 query 参数、超限、坏地址一律 400；返回 `{generation, minutes, tokens:[{address, minutes}]}`，`minutes` 按 `minuteStartSec` 升序裁到最近 N 分钟（实测首尾为 150*60 … 179*60）。任一 token 失败**整请求失败**（映射为 409/503），不静默丢 token。路由走的是同一套 CSP / localhost / Host / Origin / remoteAddress / GET·HEAD 检查（测试逐条覆盖）。冻结的 `DashboardTokenSummary` 一个字段没加。
+  3. 新增三个路由的错误码：generation 不存在/被淘汰 → 409 `{code:'SNAPSHOT_EXPIRED',error:'Snapshot expired'}`；繁忙/超时 → 503 `{code:'SNAPSHOT_BUSY',error:'Snapshot is refreshing'}`；不可用 → 503 `{code:'SNAPSHOT_UNAVAILABLE',error:'Snapshot is unavailable'}`。任何路径都不回 `error.stack`、SQL 文本或本地路径。
+  4. `--legacy-snapshot` 显式模式**不提供**这三个明细路由，落到静态白名单后 404（旧路径本来就没有它们，不假装可用）。
+  5. 总览：`poolCount` 取代 `poolIds.length`（数值同义）；「活跃交易池」卡片改为**按代币把 `activePoolCount[窗口]` 求和**，双股票共池会各计一次——旧实现是按 `poolId` 去重的，因此**这个数字在存在共池时会变大**。卡片脚注相应从「池标识去重 · 当前筛选范围」改为「按代币归属合计 · 共池分别计入」，不再声称去重。其余搜索、排行、收藏、窗口选择、历史时点、金额/时间格式未动。
+  6. 详情抽屉：pool 列表改为服务端分页（`limit=20`，取 `nextOffset`，不再一次性下载全池）；「再显示 20 个池（已展示 N / 总数）」按钮改为按 offset 取下一页，并对重复 poolId 去重。分钟走势图仍走冻结的单 token 路由 `GET /api/tokens/<address>/history?generation=`。
+  7. 生成新 summary 时，当前详情切到新 generation 并从第一页刷新；409 只重取一次 summary（`recoverExpired`，若 generation 没变就只提示、不再请求），不做递归重试；503 显示「详情更新中，可重试。」并保留同代已有页。
+  8. 错误文案三分：`summaryNotice` 把 `empty`/`stale`/`error` 分别显示为「首次快照生成中」/「数据更新延迟」/「快照暂不可用」，reader 自带的可行动 message 才追加；只有 `status:'error'` 时才可能出现「无法读取本地数据；请检查数据库与配置版本。」。前端自身的失败提示（`requestNotice`）不出现 worker/SQL/线程/数据库连接等实现术语（有断言）。
+  9. 60m 视界的一处取舍：`overviewMinutes(60) === 60`（reader 上限就是一小时），因此 60m 档的「变化列表」实际比较 59 分钟而非 60 分钟；15m/30m 档（含默认 30m）不受影响。
+
+- 性能：
+  - 200 并发 `/api/snapshot` GET：主线程核心计数 `rawBatchDecodes` / `valuationComputes` / `evaluatedPools` 全为 0，p95 < 1s；reader 卡死时 200 个 GET 仍然 p95 < 1s，且只产生 1 个 refresh 轮次。
+  - 批量分钟路由响应大小：实测 114 字节 / (token·分钟)，194 token × 31 分钟外推 **≈686 KB**（< 1 MiB）；summary 本身 5 token 实测 12,314 字节。该批量请求只在 **generation 变化或视界变大**时发出（`seriesGeneration === generation && seriesMinutes >= wanted` 即跳过），不随 5 秒轮询重复。
+  - 详情分页每次只取 20 个池；测试夹具 5 个池用 `limit=2` 走出 3 页验证不重不漏。
+
+- 兼容性与未执行项：
+  - 未执行：浏览器/截图目测（本环境无可用浏览器工具）；真实运行库上的验证（明确禁止）；`pnpm test` 全量（按指示只跑 `tests/dashboard/`）；`--legacy-snapshot` 的端到端实跑（只用单测覆盖了 legacy 分支仍走旧 reader）。
+  - `pnpm typecheck` 当前**不能整条通过**，但错误不在本任务改动面：`pnpm exec tsc --noEmit`（覆盖 `src/**` + `tests/**`）**exit 0、0 条**；失败全部来自 `tsc -p tsconfig.scripts.json`：58 条 = 57 条在另一路 agent 正在重写的 `scripts/benchmark-live-performance.mjs` + 1 条 `src/dashboard/snapshot.ts:148`。
+    **（主控复验更正）** 那条 `snapshot.ts` 错误**不是**并发改写期间的瞬时现象，而是确定性的：`snapshot.ts:138` 的 `const minutes = []` 依赖 TS 的 evolving-array 推断，而 `tsconfig.scripts.json` 设了 `noImplicitAny: false`，该推断被关掉后退化为 `never[]`，push 报 TS2345。它出现在 scripts 程序里，是因为新脚本 import 了 `src/dashboard/snapshot.ts`（HEAD 版 297 行脚本只调 `PoolRegistry(...).snapshot()`、不 import dashboard，故此前不暴露）。修法是在该行补 `TokenMinute[]` 标注（一行，主控执行）。按要求未去修别人的文件。
+  - `tests/dashboard/` 全量 91/91 通过；但同一目录另有 agent 在改 `snapshot-worker.test.ts`/`snapshot-coordinator.test.ts`，其用例状态会随他们的编辑变动，本任务未触碰这两个文件。
+  - 未新增依赖，未引入前端框架，未改窗口/信号公式（`classifyHeat`/`heatIntensity`/`compareHeat`/`closedMinuteStarts`/`selectableCutoff`/`minuteOverlaps` 语义逐字保留，原有 `view-model.test.ts` 用例全绿）。
+  - 未提交：按指示不 commit / 不 push / 不 merge。
+
+- 主控复验（独立于实现者自证，2026-09-16）：
+  - 复跑 D3 指定的 4 个文件 → `Test Files 4 passed (4)` / `Tests 41 passed (41)`；`pnpm exec tsc --noEmit` → exit 0、0 条。
+  - mtime 取证：`types.ts`(02:18:29)、`cli.ts`(03:31:51) 均早于 D3 开工（D3 自己的文件 04:05–04:16）→ 冻结契约与 CLI 确未被 D3 触碰。
+  - 单点变异（锚点在 `server.ts` / `app.ts`）：M1 过期代际改 503、M2 批量路由改无界扇出、M3 不裁剪到最近 N 分钟、M4 单 token 失败被静默吞掉 → **4/4 CAUGHT，且还原后 sha256 与原文一致**。
+  - **M5（`app.ts:617` 去掉 `snapshot.generation !== data.generation`）未被捕获**，已定界为「无自动化宿主」而非等价变异体：`app.ts` 全文没有测试宿主（`tests/dashboard/` 仅在 `pool-page.test.ts:29`、`snapshot-worker.test.ts:115` 按「逐字保留」引用其比较器，`server.test.ts:51` 只把它当静态资源）；而持久状态上，换代清理由三处独立守卫兜住——`syncSeries` 的 `seriesGeneration` 判重（645 行）与应答 payload 的 generation/controller 双重校验（665、676–677 行）、`syncDetail` 的 `candidate.generation === generation` 判重（753–757 行）、`stillCurrent` 的应答接受（791–793、836–840 行），均已逐条读过。变异真正消掉的是**换代瞬间到新 series 落地之间的一帧**：未变异画「空」（可见在加载），变异后画「上一代分钟」（静默陈旧），随后自愈。该帧在无浏览器宿主下无法自动验证 → **记录为未验证边界，不返工**，与本节「视觉检查未执行」同类；不写「等价变异体」，因为那一帧是真实差异。
+
+- Commit：待办
+
+
+### E1
+
+- 状态：完成。计划 E1 的 10 条 checklist 全部落地；`src/ingest/fetch-range.ts` **未改动**（测试没有暴露真实契约缺口，Manager 响应完全走既有 fetchBoundedLogs 的拆分/guard/provider cap/retry/manifest 路径）。manager 模式未接入 recorder CLI 默认值、运行配置或任何生产开关，只有新增的离线实验入口使用它。
+
+- 修改文件：
+  - `src/ingest/filter-plan.ts`（改）：新增 `V4OperationMode` / `OperationPlanOptions`；`buildOperationShardFilters`、`buildOperationFilterPlan` 末尾追加可选 `options`；`v4OperationTopics` 由私有常量改为导出只读常量（供实验模块核对"请求真的还是那五个事件家族"）；新增 `ensureV4OperationMode` 拒绝非法 mode 而不是静默降级。
+  - `src/ingest/record-range.ts`（改）：`FetchRangeOptions` 增加可选 `v4OperationMode`；仅在 catalogue 路径把它传给 `buildOperationFilterPlan`；新增一条校验——`v4OperationMode:'manager'` 与 `registry`（模板索引路径）同时出现时直接报错 `Manager operation mode is planned from a catalogue, not from registry templates`，避免"调用方以为要 Manager，实际仍按 poolId 规划"。
+  - `src/ingest/v4-capture-experiment.ts`（新增）：`V4ExperimentResult`（字段逐字照抄计划）+ `V4CaptureExperimentOptions` + `runV4CaptureExperiment`。
+  - `tests/unit/v4-capture-plan.test.ts`（新增）：12 个用例。
+  - `src/ingest/fetch-range.ts`：未修改。
+
+- RED（两段，都是先写测试看它因正确原因失败）：
+  1. 计划层 RED —— 命令 `pnpm exec vitest run tests/unit/v4-capture-plan.test.ts`，退出码 1，逐字输出（`C:/Users/myron/AppData/Local/Temp/e1-red-1.txt`）：
+     ```
+     FAIL  tests/unit/v4-capture-plan.test.ts > manager operation filter > asks one manager address for the same five event families, with from/to preserved
+     AssertionError: expected [ …(2) ] to be undefined
+     + Received:
+     [
+       "0x0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a",
+       "0x0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b",
+     ]
+      ❯ tests/unit/v4-capture-plan.test.ts:415:37
+         415|     expect(v4[0]?.filter.topics[1]).toBeUndefined();
+     FAIL  tests/unit/v4-capture-plan.test.ts > manager operation filter > never shards by pool id, at any value limit
+     AssertionError: expected [ …(2) ] to be undefined
+     FAIL  tests/unit/v4-capture-plan.test.ts > manager operation filter > captures the manager universe even with no registered pool
+     AssertionError: expected [] to deeply equal [ 'operation-v4' ]
+     FAIL  tests/unit/v4-capture-plan.test.ts > catalogue scale > 77,628 V4 registrations stay 78 pool-id requests by default and 1 in manager mode
+     AssertionError: expected [ { id: 'operation-v4', …(2) }, …(77) ] to have a length of 1 but got 78
+           Tests  4 failed | 3 passed (7)
+     ```
+     为什么是原问题：改动前 `buildOperationFilterPlan` 没有第 6 个参数，`{v4OperationMode:'manager'}` 被运行时忽略，于是 manager 请求里仍然带着 poolId 主题（`topics[1]` 有值、filter 数为 78 而非 1），空目录更是连一个 filter 都不产生——正是"只改日志文字、不改过滤器"的失败形态。同一轮里 `frozen default path` 的 3 个用例是**通过**的，说明它们此时断言的就是既有默认输出，是回归网而不是新功能。
+  2. 实验层 RED —— 追加实验用例后同一命令，逐字输出（`C:/Users/myron/AppData/Local/Temp/e1-red-2.txt`）：
+     ```
+     Error: Cannot find module '../../src/ingest/v4-capture-experiment.js' imported from E:/lp-monitor/.worktrees/live-runtime-performance/tests/unit/v4-capture-plan.test.ts
+      ❯ tests/unit/v4-capture-plan.test.ts:26:1
+          26| import { runV4CaptureExperiment } from '../../src/ingest/v4-capture-ex…
+           | ^
+      Test Files  1 failed (1)
+           Tests  no tests
+     ```
+     为什么是原问题：watchedLogKeys/unknownLogKeys/eligibleForLive 这套判定此前根本不存在，也没有任何地方能在保留完整原始证据的前提下区分"已知 registry 依赖"与"未识别 poolId"。
+
+- GREEN（全部是我自己跑出来的真实命令与数字）：
+  ```
+  $ pnpm exec vitest run tests/unit/v4-capture-plan.test.ts
+   Test Files  1 passed (1)
+        Tests  12 passed (12)          Duration 698ms     exit=0
+
+  $ pnpm exec vitest run tests/unit/v4-capture-plan.test.ts tests/unit/operation-filter-index.test.ts
+   Test Files  2 passed (2)
+        Tests  21 passed (21)          exit=0
+  （operation-filter-index 是额外加的：它是 buildOperationShardFilters 默认路径最直接的回归网）
+
+  $ pnpm exec vitest run tests/integration/recorder.test.ts tests/integration/catalogue-follow.test.ts tests/unit/rpc-review.test.ts
+   Test Files  3 passed (3)
+        Tests  47 passed (47)          Duration 35.23s    exit=0
+
+  $ pnpm typecheck
+  $ tsc --noEmit && tsc -p tsconfig.scripts.json        exit=0
+
+  $ pnpm exec prettier --check src/ingest/filter-plan.ts src/ingest/record-range.ts src/ingest/v4-capture-experiment.ts tests/unit/v4-capture-plan.test.ts
+  All matched files use Prettier code style!            exit=0
+  ```
+
+- 默认路径零变化的独立证据（不是"测试没红"）：用同一个一次性快照脚本（`node_modules/.e1-snapshot/snapshot.mts`，位于被 git 忽略的目录，不进 diff）在改动前后各跑一次，输出写到 `C:/Users/myron/AppData/Local/Temp/e1-before.json` / `e1-after.json`，逐节比对：
+  ```
+  IDENTICAL scopeIds                          (operations 与 discovery-only 两个 scopeId)
+  IDENTICAL values                            (operationFilterValues)
+  IDENTICAL discoveryPlan                     (4 个 discovery filter 全量 JSON)
+  IDENTICAL operationPlanDefault              (缺省参数全量 JSON)
+  IDENTICAL operationPlanExplicitPoolIds      (显式 pool-ids 全量 JSON)
+  IDENTICAL operationPlanDefaultNarrowLimit   (maxFilterValues=2 全量 JSON)
+  IDENTICAL captureDefault                    (整批：id / filterPlanHash / manifestHash /
+                                               completeness / logKeys / poolRegistrations /
+                                               recordingErrors / manifest 全部 6 个 shard)
+  IDENTICAL captureExplicitPoolIds
+  仅 manager 相关字段变化：
+  CHANGED largePlan.manager  78 -> 1
+  CHANGED captureManager.filterPlanHash  e48718db… -> 9cb96509…
+  CHANGED captureManager.manifestHash    8830ecc4… -> fa3057af…
+  CHANGED operationPlanManager / operationPlanManagerNarrowLimit
+  ```
+  冻结值来自改动前的真实实现（本 worktree 基线 `ce62735`，改动前 `src/ingest/filter-plan.ts` 与 HEAD 一致），已作为 `FROZEN` 字面量写进测试常驻断言：`scopeIdOperations=scope-v1-49e6bdaf…`、`filterPlanHash=e48718db…`、`manifestHash=8830ecc4…`、`batchId=e4734b53…`、`requests=6`。
+  规模数字是**真的构造出来的**（断言，非估算）：77,628 条 V4 注册 + `maxFilterValues=1000` → 默认 78 个 `operation-v4` filter（前 77 个各 1,000 值、第 78 个 628 值，并集 77,628 个 id 无重复）；显式 `pool-ids` 与缺省逐字节相同；`manager` → 1 个 filter（`address:[v4Manager]`、`topics:[五个事件主题]`、无 `topics[1]`）。manager 模式下 V3 操作 filter 与 discovery plan 与默认完全相同（用例断言相等）。
+  事件家族是独立参考：测试直接由 `v4ManagerAbi` 推出 Initialize/ModifyLiquidity/Swap/Donate/ProtocolFeeUpdated 五个 selector 再与计划比对，删掉任何一个家族都会红。
+
+- 行为差异（数值/状态/输出契约）：
+  - 默认（缺省或显式 `pool-ids`）：filter、scopeId、filterPlanHash、manifestHash、batch id、请求序列**逐值不变**（见上）。
+  - 新增可选入参两处（`buildOperationShardFilters`/`buildOperationFilterPlan` 第 4/6 参、`FetchRangeOptions.v4OperationMode`），不传时行为与改动前完全一致；新增导出常量 `v4OperationTopics`（只读）。
+  - 新增两处显式拒绝：非法 mode 抛 `RangeError('v4OperationMode must be pool-ids or manager')`；`manager` + `registry` 抛 `Error(...not from registry templates)`（此前无人会传，属于新入口的防误用）。
+  - manager 模式下 filterPlanHash/manifestHash 自然不同（实验策略进了真实过滤器，不是日志文字）：同一 fixture 下 `e48718db…` → `9cb96509…`，已用用例断言 `forPoolIds.batch.filterPlanHash !== forManager.batch.filterPlanHash`。
+  - 实验模块 `V4ExperimentResult` 八字段与计划逐字一致；`eligibleForLive` 只在"完整捕获 + watch 目标仍被规划（读 manifest 里真实发出的请求，不是重算猜测）+ 无未识别 poolId 证据"三条同时成立时为 true；存在 unknown 时保持 false 且 `reasons` 增加 `unknown-pool-logs`。没有放宽任何 quality/完整性校验。
+  - `watchedLogKeys` 只由已知 registry 依赖产生：判定复用 `registry-dependencies.ts` 的 `referencedRegistrations`（manager 地址 + 已知事件主题 + 合法 poolId + 已登记 pool）与 view 的 `isDiscoveryRef`（本批新发现池的 Initialize 也算 watched），没有另造一套身份规则。
+  - `unknownLogKeys` 只收"manager 地址 + 已知事件主题 + 32 字节 poolId 形状但无已知池"的日志；未知原始证据保留在 `batch.logs`/manifest 中，不删除、不填空池 0。
+
+- 未通过项 / 已记录的边界：
+  - `eligibleForLive` 只是离线候选条件（完整、目标等价、无未解释证据），**不代表真实 provider 已验收**，也没有任何生产开关接线；manager 模式仍未接入 recorder CLI/运行配置（`grep v4OperationMode` 只命中 E1 的四个文件）。
+  - 实验只支持 catalogue（内存 `PoolRegistry`）路径：registry 模板索引路径无法在不改 `OperationFilterIndex` 的前提下表达 manager，故该组合被显式拒绝而不是静默忽略。使用独立内存目录，不触碰任何实时库/accepted ranges/`.env`/config。
+  - `unknownLogKeys` 只覆盖"未识别 poolId"这一类未知证据；manager 地址下未知事件主题的日志、以及非 manager 地址的未知合约日志不在这两个列表里（计划明确只要求未识别 poolId 单列）。
+  - 未跑全量 `pnpm test` / `pnpm build`（另一 agent 正在同 worktree 改 `src/dashboard/**`，按分工只跑 E1 相关文件）；未提交、未推送。
+  - 新增的 `manager + registry` 拒绝分支有用例覆盖（断言 `rejects.toThrow('registry templates')` 且 reader 零调用）。
+  - 快照脚本放在 `node_modules/.e1-snapshot/snapshot.mts`（git 忽略、不进 diff，pnpm install 可能清理），测试里的 `FROZEN` 注释写明了它的来源与基线 commit。
+
+- Commit：待办
+
+#### E1 核实补记（主控独立复验，非实现者自证）
+
+E1 的实现者按分工把记录写在仓库外的临时文件里（避免与并行改 `src/dashboard/**` 的另一路抢同一个记录文件），由我核验后合并到此处。下面是我**自己**跑出来的复验证据，不是转述它的「已完成」。
+
+- 复验 1：范围与越界检查。`git status --short -- src/ingest tests/unit` 只有允许的四个文件（`filter-plan.ts`、`record-range.ts` 改动，`v4-capture-experiment.ts`、`tests/unit/v4-capture-plan.test.ts` 新增）；`src/ingest/fetch-range.ts` **确实未改**；`src/dashboard/**` 无 ingest 侧写入。
+- 复验 2：测试与静态检查（我亲自跑）。
+  - `pnpm exec vitest run tests/unit/v4-capture-plan.test.ts tests/unit/operation-filter-index.test.ts` → `Test Files 2 passed (2)  Tests 21 passed (21)`。
+  - `pnpm exec vitest run tests/integration/recorder.test.ts tests/integration/catalogue-follow.test.ts tests/unit/rpc-review.test.ts` → `Test Files 3 passed (3)  Tests 47 passed (47)`。
+  - `pnpm exec prettier --check`（E1 四个文件）→ `All matched files use Prettier code style!`。
+  - `pnpm typecheck` 当时唯一报错在 `src/dashboard/cli.ts`（另一路并行任务的在改文件，`assetVersion` 尚未接上），`src/ingest/**` 与 `tests/unit/**` 零报错——E1 自身类型干净。
+- 复验 3：**默认路径逐值不变**，用与实现者无关的方法重做一遍。把 `git show HEAD:src/ingest/filter-plan.ts` 写成 `src/ingest/.e1-old-filter-plan.ts`（相对导入解析路径相同），同进程 import 新旧两个模块，对 7 种目录规模（0 / 1 / 3+2(V3) / 999 / 1000 / 1001 / **77,628**）× 4 种 `maxFilterValues`（缺省 / 1000 / 7 / 1）逐一深比较，并额外比较 `computeWatchScopeId`、`buildDiscoveryFilterPlan`、`operationFilterValues`、默认 `buildOperationShardFilters`。脚本跑完在 `finally` 删除临时文件并断言已删除。
+
+  ```
+  comparisons=88  mismatches=0
+  computeWatchScopeId: identical (b077a774ad4b0cec)
+  discoveryPlan:       identical (522e2314ad766a40)
+  operationFilterValues: identical (4d03164ebb08009c)
+  shardFilters-default:  identical (a66931447d1a6dcd)
+  v4= 77628 v3=12 limit=default shards= 79 hash=631f8ab67b386fb8   ← 78 个 operation-v4 + 1 个 operation-v3
+  manager: v4 shards=1 topics=[[…五个 selector…]]                    ← topics 只有一项，无 poolId 窄化
+  invalid mode: v4OperationMode must be pool-ids or manager
+  temporary removed=true
+  ```
+
+  缺省调用、显式 `pool-ids`、传 `{}` 三种写法两两一致；唯一按设计不同的是 `manager`（78 → 1 个 filter）。这份证据不依赖实现者写的 `FROZEN` 字面量，所以「默认路径零变化」是**被独立证实的**，而不是自证。
+- 复验 4：对 E1 的关键断言做单点变异（脚本在仓库外，逐条断言锚点唯一命中、跑 `vitest --bail=1`、`finally` 还原并对还原后的字节做 sha256 校验）：
+
+  | 变异 | 结果 | 还原 |
+  |---|---|---|
+  | M1 manager 模式退回按 poolId 分片 | CAUGHT（1 failed） | OK |
+  | M2 去掉 `unknown-pool-logs` 原因（放宽 `eligibleForLive`） | CAUGHT | OK |
+  | M3 manager 请求改用空 topics（抓所有合约事件） | CAUGHT | OK |
+  | M4 未识别 poolId 的日志被并进 `watchedLogKeys` | CAUGHT | OK |
+  | M5 去掉「请求必须覆盖全部五个事件家族」检查 | **MISSED** | OK |
+  | M6 把未知日志从 `batch.logs` 里删掉（计划明令禁止） | CAUGHT | OK |
+
+  M6 被抓住，说明「未知原始证据不得删除」确有测试守住；M2/M4 被抓住，说明 `eligibleForLive` 的三条判定不是摆设；M3 被抓住，说明事件家族集合由独立参考（`v4ManagerAbi` 推出的五个 selector）守着。
+
+- 未通过项 / 已记录的边界（我在实现者自述之外新增的一条）：
+  - **M5 变异漏网**：`v4-capture-experiment.ts` 里 `watchTargetsPlanned` 的这条
+    `if (!v4OperationTopics.every((topic) => plannedTopics.has(lower(topic)))) return false;`
+    没有任何测试能触发它的 false 分支。原因不是测试写少了，而是该分支在**完整批次里不可达**：manager 模式下 `buildOperationShardFilters` 无论目录是否为空都会产出带全部五个家族的那一个 filter，被 provider 上限拆分时各子请求的主题并集仍是这五个，所以「请求少问了某个家族」只可能伴随 `incomplete-capture` 一起出现（此时 `eligibleForLive` 本就为 false）。我选择**保留这段保护逻辑并按边界记录**，而不是为了让变异被抓住去构造一个真实链路产生不出来的批次（那等于在测试端手写理想场景）。真正守着「五个事件家族」契约的是计划层：M3 变异被捕获，且测试用 `v4ManagerAbi` 独立推导五个 selector。
+### E2
+
+- 状态：完成（离线部分）。未执行项见本节末尾「未通过项 / 已记录的边界」与 `docs/reviews/2026-09-15-v4-capture-experiment.md` 第 8 节。
+
+- 修改文件（worktree `E:\lp-monitor\.worktrees\live-runtime-performance`，分支 `codex/live-runtime-performance`）：
+  - 新增 `tests/integration/v4-capture-equivalence.test.ts`（10 个用例）
+  - 新增 `scripts/compare-v4-capture.mjs`
+  - 新增 `docs/reviews/2026-09-15-v4-capture-experiment.md`
+  - **未修改任何 `src/`、`tests/helpers/`、`tests/dashboard/`、lockfile、CI、config、迁移**（`git status --short` 中本任务只出现以上三个未跟踪文件）
+  - 未跟踪产物（供复核重跑，不提交）：`artifacts/performance/v4-capture-fixture.json`、`artifacts/performance/v4-capture-comparison/{comparison.json,summary.md}`
+
+- RED：
+
+  本任务**没有修改任何生产文件**，所以不存在「旧实现让新测试变红」这种 RED。这里的 RED 由两部分组成，都是真实执行过的：
+
+  **(a) 新测试第一次运行的真实输出**（夹具尚不成立时，逐字）：
+
+  ```
+   ❯ tests/integration/v4-capture-equivalence.test.ts (10 tests | 4 failed) 7676ms
+  AssertionError: expected [ { timestampSec: 1920, …(3) }, …(49) ] to deeply equal []
+  - Expected
+  + Received
+  - []
+  + [ { "fromBlock": 600n, "reason": "RPC budget", "timestampSec": 1920, "toBlock": 4800n }, … ]
+   ❯ commitCapture tests/integration/v4-capture-equivalence.test.ts:617:31
+  FAIL  … > a deadline that runs out mid-capture stops it without any further request
+  AssertionError: expected 5 to be 4
+   ❯ tests/integration/v4-capture-equivalence.test.ts:877:44
+   Test Files  1 failed (1)
+        Tests  4 failed | 6 passed (10)
+  ```
+
+  第二轮：
+
+  ```
+   Test Files  1 failed (1)
+        Tests  3 failed | 7 passed (10)
+  Error: Raw log is not persisted: 4663:0x…0258:0x…dbba1:1
+   ❯ SqliteRangeStore.rawId src/storage/raw-store.ts:1035:34
+   ❯ SqliteRangeStore.persistDerived src/storage/raw-store.ts:932:36
+  ```
+
+  第三轮：
+
+  ```
+  AssertionError: expected 'gap' to be 'closed' // Object.is equality
+  Expected: "closed"   Received: "gap"
+   ❯ tests/integration/v4-capture-equivalence.test.ts:718:40
+  ```
+
+  **为什么这些是原问题（而不是「断言写错」）**：三条都指向同一件事——夹具必须先真的成立，比较才有意义。
+  - `RPC budget` 那批失败的原因是我给 fixture reader 留了 `createChainReader` 的默认预算 150 次调用，而 `resolveLogTimes` 为 70 个分钟边界做二分需要的远不止 150；也就是说**当时根本没有走到「解释」这一步**，两策略的字典序比较是空的。修法是显式给足预算（预算用例再单独调低），不是放宽断言。
+  - `Raw log is not persisted` 说明我最初把目录写成 `seed-config`、`discoveredAt` 指向链上不存在的日志。`persistDerived` 拒绝它是对的：池的发现引用必须是本批真实存在的日志。修法是让这轮**真的去 discovery**（链上放 `Initialize`），而不是让存储放宽。
+  - `'gap' to be 'closed'` 说明我的「每 5 分钟一笔」栅格 `690, 990, …` 根本不是 60 的整数倍，落点跑到了别的分钟，正好压在 5m/1h 窗口左边界上；分钟粒度下窗口左边界的时间本来就应该未知。修法是换成真正对齐的分钟栅格 `720, 1020, …`，**不是**去放宽 `boundary-time-unknown`。
+
+  **(b) 两次「把被测行为打坏」的证伪运行**（证明断言真的绑在生产行为上，跑完已还原，还原后 10/10 通过）：
+
+  1. 让 provider 不再按请求过滤、任何请求都返回全部日志（本任务最容易作弊的点）：
+
+  ```
+   ❯ tests/integration/v4-capture-equivalence.test.ts (10 tests | 8 failed) 3268ms
+     × both strategies capture and interpret the same target pools, same-transaction logs included
+     × a shared pool is attributed to both stocks and stays one pool in both strategies
+     × an unknown pool is captured whole, listed, and kept out of the live candidate set
+     × a response at the cap is re-asked in smaller requests and only then called complete
+     × a single block that still exceeds the cap fails the capture instead of reporting it
+     × a rate-limited operation request is retried and the capture still completes
+     × a spent RPC budget stops the operation request and is recorded as a failure
+     × the same log key returned twice with different content is a conflict, not a duplicate
+  ```
+
+  2. 让 `manager` 被静默当成 `pool-ids` 规划（模拟 E1 忽略该参数）：
+
+  ```
+   ❯ tests/integration/v4-capture-equivalence.test.ts (10 tests | 3 failed) 5836ms
+     × both strategies capture and interpret the same target pools, same-transaction logs included
+     × an unknown pool is captured whole, listed, and kept out of the live candidate set
+     × a response at the cap is re-asked in smaller requests and only then called complete
+  AssertionError: expected 'e60c8045482ee0ec2b0aec71175004dad4e1f…' not to be 'e60c8045482ee0ec2b0aec71175004dad4e1f…'
+   ❯ tests/integration/v4-capture-equivalence.test.ts:701:51
+  ```
+
+  即：两种模式若被混为一谈，`filterPlanHash` 相等会立刻被抓住——比较不是「比了空气」。
+
+- GREEN（我自己跑出来的真实命令与数字）：
+
+  ```
+  $ pnpm exec vitest run tests/integration/v4-capture-equivalence.test.ts tests/integration/compact-batches.test.ts tests/integration/metrics-coverage.test.ts tests/integration/reorg.test.ts tests/integration/replay-export-integrity.test.ts
+   Test Files  5 passed (5)
+        Tests  44 passed (44)
+     Duration  18.62s
+  ```
+
+  ```
+  $ pnpm exec prettier --check tests/integration/v4-capture-equivalence.test.ts scripts/compare-v4-capture.mjs
+  Checking formatting...
+  All matched files use Prettier code style!
+  ```
+
+  ```
+  $ pnpm typecheck          # tsc --noEmit && tsc -p tsconfig.scripts.json
+  （无输出，退出码 0）
+  ```
+
+  本次 `pnpm typecheck` **没有**出现 `src/dashboard/**` 报错（另一路 agent 的改动此刻是干净的）；只有我自己的文件报过错，已修完，现在两段 tsc 全绿。`src/ingest/**`、`tests/integration/**`、`tests/helpers/**`、`scripts/compare-v4-capture.mjs` 零报错；`tests/helpers/**` 本任务未改动。
+
+  比较器真实运行（离线 fixture，无网络）：
+
+  ```
+  $ pnpm exec tsx scripts/compare-v4-capture.mjs --fixture artifacts/performance/v4-capture-fixture.json --out artifacts/performance/v4-capture-comparison
+  pool-ids: 5 requests, 22195 bytes, 18 log keys, complete
+  manager:  5 requests, 22195 bytes, 18 log keys, complete
+  decode equal: true; metrics equal: true
+  ```
+
+  拒绝 http(s)（退出码均为 1，且没有生成任何输出目录）：
+
+  ```
+  $ … --fixture https://example.invalid/logs.json --out artifacts/performance/should-not-exist
+  --fixture must be a local path, not a URL: https://example.invalid/logs.json      EXIT=1
+  $ … --fixture file:///tmp/x.json --out artifacts/performance/should-not-exist
+  --fixture must be a local path, not a URL: file:///tmp/x.json                     EXIT=1
+  $ … --fixture artifacts/performance/nope.json --out artifacts/performance/should-not-exist-2
+  --fixture does not exist: …\artifacts\performance\nope.json                       EXIT=1
+  $ … --fixture artifacts/performance/v4-capture-fixture.json --out artifacts/performance/v4-capture-comparison
+  --out already exists: …\artifacts\performance\v4-capture-comparison               EXIT=1
+  ```
+
+- 行为差异（数值 / 状态 / 输出契约）：
+
+  1. **无生产行为变化**：E2 只新增测试、脚本与文档。
+  2. 离线等价性（冻结链，区间 600..4800，终点 `0x…12c0`，3 个 v4 池由该轮自己的 `Initialize` 发现，其中一个是 rwaA/rwaB 共池）：
+     - 两策略日志按键与按内容逐条相等；同一笔交易里的两条 Swap 保持两条（logIndex 1 与 2，两个不同 key）。
+     - `filterPlanHash` 与 `expectedShardIds` **不同**（请求确实不同：一个按 poolId 目录、一个 manager 全域），而 `requestCount` 与 `responseBytes` 相等（本 fixture 目录覆盖了链上全部操作事件，所以回答相同）。
+     - 解释结果相等：四窗口（1m/5m/15m/1h）逐值、`coverage`/`qualityErrors`/`rwa` 逐值、`projectionSourceHash`、`alert_outbox` 的 kind/status/revision/poolId/logicalTimeSec/reasons/ruleVersion 与投递顺序全部相等。
+     - 唯一排除比较的字段是 `atBatchId`（两模式 manifest 不同 → 批次身份必然不同），测试**显式断言它确实不同**，不是静默丢弃。
+  3. **两种模式在有未知池时不等价，且差异已被量化**：manager 多采到的那条无法解释的 Swap 使其所在分钟 coverage 变 `incomplete`（reason `projection-quality-error`），覆盖该分钟的 1h 窗口随之 `coverage-gap`，5m 基线的样本数也减少（该历史窗口不再 closed）；5m 窗口自身数值不变，提醒流不变。测试断言差异方向（只能变差、且确实变差），不要求它伪装成与干净样本等价。
+  4. 边界逐项覆盖并断言到真实状态：响应上限二分、恰好等于上限（等于上限**不**当作答案）、单块仍超上限（`truncated`/`range-limit`/`incomplete`）、429 重试后恢复、预算耗尽（`failure:budget`，provider 只收到 4 个 discovery 请求）、deadline（`failure:deadline`，此后 provider 零请求）、同 key 不同内容（`conflicting-log:<key>` + `conflicting-log-identity`）、终点 hash 变化（`end-anchor-changed` + `failure:anchor-changed`）、未知池、两股票共池。
+  5. 不完整结果**不能**构造 coverage：对截断批次直接 `SqliteRangeStore.acceptRange` 断言抛 `IncompleteRangeError`、`acceptedTip` 仍为 `null`、批次不带 `poolRegistrations`；原有完整性校验一处未删未放宽。
+  6. 比较器输出契约：`--fixture <本地JSON> --out <不存在目录>`；fixture 带 `schemaVersion: 1` 与 `bigintCodec: "decimal-string"`；不读 `.env`、无端点选项、无默认 URL、无网络回退；不完整批次不进入解释，直接记 `incomplete-capture-cannot-build-coverage`；报告与 summary 都写明请求数/字节是离线事实、不是 provider 延迟，且不做两者换算。
+
+- 未通过项 / 已记录的边界：
+
+  1. 计划第 66–74 行的四条「未执行清单」**本次一条都没执行**，已原样保留在 `docs/reviews/2026-09-15-v4-capture-experiment.md` 第 8 节。**R05 = 离线候选已实现；真实 provider 验证及上线接线未执行**。文档里没有任何「在线请求从 N 降到 M」「延迟改善」之类没有实测的表述。
+  2. 本 fixture 目录只有 3 个池，两策略的 operation 请求都是 1 个，所以比较器里两列请求数相等。manager 相对 poolId 目录的请求数下降只在目录大到按 poolId 分片时出现（E1 单元测试在 77,628 条 v4 注册下量到 78 vs 1），本文档把它记为 E1 的证据，不重复也不外推。
+  3. `deadline` 用例模拟的是「进入采集后 deadline 已耗尽」：provider **零**收到请求（`state.requests.length === 4` 是 discovery 的 4 个，之后全部被 deadline 拦下）。这不等于「deadline 在真实时钟中途到期」，后者未测。
+  4. 「基线样本减少」的具体条数依赖该 fixture 的窗口布局，测试断言方向不锁条数。
+  5. `artifacts/performance/v4-capture-fixture.json` 由一次性生成脚本产出（脚本已删除、未留在仓库）；内容与测试文件里的链一致，但没有做成可重复生成的正式入口，复核者若要新 fixture 需按文档第 5 节的 schema 自备。
+  6. 未跑全量 `pnpm test` / `pnpm build`（按要求避免与另一路 dashboard agent 互相干扰）。
+  7. `scripts/compare-v4-capture.mjs` **无自动化测试**：它的比较逻辑只由手工运行覆盖。**主控复验补充（2026-09-16）**：为验证该比较不是同义反复，用**已知应当不等**的输入实跑了它——在 manager 地址上插入一条 `topic[1]` 不属于任何计划的日志（`0xffff…ff`），fixture 写到仓库外、`--out` 指向临时目录：
+     ```
+     pool-ids: 4 requests, 5090 bytes, 4 log keys, incomplete
+     manager:  5 requests, 24231 bytes, 19 log keys, incomplete
+     decode equal: false; metrics equal: true
+     ```
+     `logKeyDiff.onlyInManager = 15`、`onlyInPoolIds = 0`；两侧 reasons 均为 `incomplete-capture` / `failure:discovery-decode` / `unknown-pool-logs`。
+     结论：**比较非空洞**——两侧不同则报不同，并逐项列出日志键差异与各自的 quality reasons。诚实限定：该输入是**退化夹具**（未知池日志本身会让 discovery decode 失败），所以它证明的是「不等则报不等」，**不是**「干净的 topic 过滤差异」；后者由 `tests/integration/v4-capture-equivalence.test.ts` 的 M-A2/M-A3 证伪覆盖。本项仍记为**边界**（脚本本身无自动化测试），只是不再带有「比较可能空洞」的未知。
+
+- Commit：待办
+

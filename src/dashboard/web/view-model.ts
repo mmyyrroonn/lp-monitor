@@ -93,3 +93,56 @@ export function selectableCutoff(
 export function minuteOverlaps(minuteStart: number, start: number, end: number): boolean {
   return minuteStart + 59 > start && minuteStart <= end;
 }
+
+/**
+ * How many minutes the overview asks the reader for: the heatmap horizon, plus the one extra minute
+ * the change list compares its oldest drawn minute against. The reader refuses more than an hour, so
+ * at the longest horizon the comparison minute is the one that has to go.
+ */
+export function overviewMinutes(horizon: number): number {
+  return Math.min(60, Math.max(1, Math.trunc(horizon) + 1));
+}
+
+/**
+ * The one sentence a viewer reads when a request failed. A failure is described by what the page can
+ * still do — keep what it has, ask again, or wait — never by what the reader was doing.
+ */
+export function requestNotice(status: number, code: string | null): string {
+  if (status === 409) return '数据已更新，正在重新获取最新快照。';
+  if (status === 503 && code === 'SNAPSHOT_BUSY') return '详情更新中，可重试。';
+  if (status === 503) return '快照暂不可用，稍后会自动重试。';
+  if (status === 400) return '本地服务没有接受这次请求参数。';
+  return '本地服务暂时无法响应；保留上次结果。';
+}
+
+/**
+ * The three states a summary can be in, told apart on purpose: nothing published yet, published
+ * data that stopped moving, and a reader that cannot produce anything. A first snapshot and a
+ * delayed one are not the same problem, and neither is a database that will not open.
+ */
+export function summaryNotice(
+  status: 'ok' | 'empty' | 'stale' | 'error',
+  message: string | null,
+): string | null {
+  if (status === 'ok') return null;
+  if (status === 'empty') return message ?? '首次快照生成中';
+  if (status === 'stale') return message ?? '数据更新延迟';
+  return message ?? '快照暂不可用';
+}
+
+/**
+ * Whether an answer still belongs to what the page is showing. A page that switched token, window
+ * or cutoff while a request was in flight must drop the answer rather than paint it over the new
+ * selection.
+ */
+export function stillCurrent(
+  wanted: { generation: string | null; address: string | null },
+  answer: { generation: string; tokenAddress: string },
+): boolean {
+  return (
+    wanted.generation !== null &&
+    wanted.address !== null &&
+    answer.generation === wanted.generation &&
+    answer.tokenAddress.toLowerCase() === wanted.address.toLowerCase()
+  );
+}

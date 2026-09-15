@@ -31,6 +31,14 @@ export type WorkCounts = {
   liveEventRowsRead: number;
   /** Pools a live round selected for evaluation. */
   evaluatedWorksetPools: number;
+  /** Whole-catalogue indexes built by a dashboard read model (one per registry load). */
+  readModelIndexBuilds: number;
+  /** Pool registration rows scanned to build or rebuild one read-model index view. */
+  readModelRegistryScans: number;
+  /** Pool detail objects assembled to answer a dashboard page request. */
+  readModelPoolsBuilt: number;
+  /** Pool pages served from the read-model page cache instead of being rebuilt. */
+  readModelPageCacheHits: number;
 };
 
 export type WorkCounterKey = keyof WorkCounts;
@@ -48,6 +56,10 @@ export const WORK_COUNTER_KEYS: readonly WorkCounterKey[] = [
   'operationFilterValuesScanned',
   'liveEventRowsRead',
   'evaluatedWorksetPools',
+  'readModelIndexBuilds',
+  'readModelRegistryScans',
+  'readModelPoolsBuilt',
+  'readModelPageCacheHits',
 ];
 
 export function emptyWorkCounts(): WorkCounts {
@@ -64,6 +76,10 @@ export function emptyWorkCounts(): WorkCounts {
     operationFilterValuesScanned: 0,
     liveEventRowsRead: 0,
     evaluatedWorksetPools: 0,
+    readModelIndexBuilds: 0,
+    readModelRegistryScans: 0,
+    readModelPoolsBuilt: 0,
+    readModelPageCacheHits: 0,
   };
 }
 

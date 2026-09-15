@@ -77,3 +77,61 @@ it('only selects retained minute cutoffs and counts overlapping minute intervals
   expect(minuteOverlaps(180, 239, 299)).toBe(false);
   expect(minuteOverlaps(240, 239, 299)).toBe(true);
 });
+
+describe('dashboard request bookkeeping', () => {
+  it('asks for the drawn horizon plus the minute it compares against, inside the reader bound', async () => {
+    const { overviewMinutes } = await import('../../src/dashboard/web/view-model.js');
+    expect(overviewMinutes(15)).toBe(16);
+    expect(overviewMinutes(30)).toBe(31);
+    // The reader refuses more than an hour, so the overview never asks for one.
+    expect(overviewMinutes(60)).toBe(60);
+    expect(overviewMinutes(0)).toBe(1);
+  });
+  it('tells a viewer what can be done next, in the words of the page and not of the reader', async () => {
+    const { requestNotice } = await import('../../src/dashboard/web/view-model.js');
+    expect(requestNotice(503, 'SNAPSHOT_BUSY')).toBe('详情更新中，可重试。');
+    expect(requestNotice(503, 'SNAPSHOT_UNAVAILABLE')).toContain('快照暂不可用');
+    expect(requestNotice(409, 'SNAPSHOT_EXPIRED')).toContain('重新获取');
+    for (const status of [400, 500]) {
+      const notice = requestNotice(status, null);
+      expect(notice).not.toMatch(/worker|SQL|sqlite|线程|数据库连接/i);
+    }
+  });
+  it('separates a first snapshot, a delayed one and an unusable one', async () => {
+    const { summaryNotice } = await import('../../src/dashboard/web/view-model.js');
+    expect(summaryNotice('ok', null)).toBeNull();
+    expect(summaryNotice('empty', '正在生成首个快照')).toBe('正在生成首个快照');
+    expect(summaryNotice('empty', null)).toBe('首次快照生成中');
+    expect(summaryNotice('stale', null)).toBe('数据更新延迟');
+    expect(summaryNotice('error', null)).toBe('快照暂不可用');
+    // A reader that can say why keeps the floor.
+    expect(summaryNotice('error', '无法读取本地数据；请检查数据库与配置版本。')).toContain(
+      '无法读取本地数据',
+    );
+  });
+  it('drops an answer that belongs to a generation or a token the page has moved on from', async () => {
+    const { stillCurrent } = await import('../../src/dashboard/web/view-model.js');
+    const wanted = { generation: 'g2', address: '0xAA' };
+    expect(stillCurrent(wanted, { generation: 'g2', tokenAddress: '0xaa' })).toBe(true);
+    expect(stillCurrent(wanted, { generation: 'g1', tokenAddress: '0xaa' })).toBe(false);
+    expect(stillCurrent(wanted, { generation: 'g2', tokenAddress: '0xbb' })).toBe(false);
+    expect(
+      stillCurrent(
+        { generation: null, address: '0xaa' },
+        {
+          generation: 'g2',
+          tokenAddress: '0xaa',
+        },
+      ),
+    ).toBe(false);
+    expect(
+      stillCurrent(
+        { generation: 'g2', address: null },
+        {
+          generation: 'g2',
+          tokenAddress: '0xaa',
+        },
+      ),
+    ).toBe(false);
+  });
+});

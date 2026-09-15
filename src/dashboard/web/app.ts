@@ -1,4 +1,12 @@
-import type { DashboardSnapshot, DashboardToken, TokenMinute, WindowName } from '../types.js';
+import type {
+  DashboardPool,
+  DashboardSummary,
+  DashboardTokenSummary,
+  PoolPage,
+  TokenHistory,
+  TokenMinute,
+  WindowName,
+} from '../types.js';
 import {
   classifyHeat,
   closedMinuteStarts,
@@ -9,13 +17,17 @@ import {
   favoriteKey,
   formatMicros,
   heatIntensity,
+  overviewMinutes,
+  requestNotice,
+  stillCurrent,
+  summaryNotice,
   type HeatInput,
   type SortMode,
 } from './view-model.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(id: string) => document.getElementById(id) as T;
 const windows = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600 };
-let snapshot: DashboardSnapshot | null = null;
+let snapshot: DashboardSummary | null = null;
 let windowName: WindowName = '5m';
 let sort: SortMode = 'warming';
 let page: 'overview' | 'favorites' | 'health' = 'overview';
@@ -26,9 +38,8 @@ let historyAt: number | null = null;
 let favorites = new Set<string>();
 let favoritesNamespace = '';
 let selectedToken: string | null = null;
-let visiblePoolCount = 20;
 let transportError: string | null = null;
-let pending: DashboardSnapshot | null = null;
+let pending: DashboardSummary | null = null;
 let hovering = false;
 let focused = false;
 let timer: ReturnType<typeof setTimeout> | undefined;
@@ -36,6 +47,31 @@ let activeRequest: AbortController | null = null;
 let toastTimer: ReturnType<typeof setTimeout> | undefined;
 let lastFocus: HTMLElement | null = null;
 let expandedHeatmap = false;
+/**
+ * The overview's minute series, one batch request for every token, and the generation it belongs
+ * to. The summary itself carries no minutes: they are the only part big enough to matter, so they
+ * are asked for separately and dropped the moment the generation they describe is replaced.
+ */
+let series = new Map<string, TokenMinute[]>();
+let seriesGeneration: string | null = null;
+let seriesMinutes = 0;
+let seriesNotice: string | null = null;
+let seriesController: AbortController | null = null;
+/** What the open drawer is showing: one token, one generation, and the pages it has walked. */
+type Detail = {
+  address: string;
+  generation: string;
+  minutes: TokenMinute[];
+  pools: DashboardPool[];
+  total: number;
+  nextOffset: number | null;
+  notice: string | null;
+  loading: boolean;
+};
+let detail: Detail | null = null;
+let detailController: AbortController | null = null;
+/** The (token, generation) pair a request in flight is for, so a second one is not started. */
+let detailWanted: { address: string; generation: string } | null = null;
 const dialog = $<HTMLDialogElement>('token-dialog');
 const time = (sec: number | null, withDate = false) =>
   sec === null
@@ -50,15 +86,16 @@ const time = (sec: number | null, withDate = false) =>
 const number = (n: number | null | undefined) => (n == null ? '—' : n.toLocaleString('zh-CN'));
 const short = (a: string) => (a.length > 17 ? `${a.slice(0, 6)}…${a.slice(-4)}` : a);
 const selectedEnd = () => snapshot?.selectedEndSec ?? null;
-const closedMinutes = (t: DashboardToken) =>
-  t.minutes.filter((m) => m.minuteStartSec + 59 <= (selectedEnd() ?? 0));
-const heatInput = (t: DashboardToken): HeatInput => ({
+const seriesOf = (t: DashboardTokenSummary) => series.get(t.address.toLowerCase()) ?? [];
+const closedMinutes = (minutes: readonly TokenMinute[]) =>
+  minutes.filter((m) => m.minuteStartSec + 59 <= (selectedEnd() ?? 0));
+const heatInput = (t: DashboardTokenSummary): HeatInput => ({
   current: t.windows[windowName].current.txCount,
   previous: t.windows[windowName].previous.txCount,
-  minutes: closedMinutes(t),
+  minutes: closedMinutes(seriesOf(t)),
 });
-const heat = (t: DashboardToken) => classifyHeat(heatInput(t));
-const badge = (t: DashboardToken) => {
+const heat = (t: DashboardTokenSummary) => classifyHeat(heatInput(t));
+const badge = (t: DashboardTokenSummary) => {
   const h = heat(t);
   return `<span class="heat-badge ${h.kind}">${h.label}</span>`;
 };
@@ -158,9 +195,9 @@ function chart(values: (number | null)[], kind: string, large = false, label = '
   flush();
   return `<svg class="${large ? 'detail-chart' : 'spark'} ${e(kind)}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${e(label)}；缺失分钟不连线"><path class="gap-line" d="M0 ${height - 3}H${width}"/>${paths}${points}</svg>`;
 }
-function trendMinutes(t: DashboardToken, count: number) {
+function trendMinutes(minutes: readonly TokenMinute[], count: number) {
   const starts = closedMinuteStarts(selectedEnd() ?? 0, count);
-  const map = new Map(t.minutes.map((m) => [m.minuteStartSec, m]));
+  const map = new Map(minutes.map((m) => [m.minuteStartSec, m]));
   return starts.map((sec) => map.get(sec) ?? null);
 }
 function renderStatus() {
@@ -182,14 +219,20 @@ function renderStatus() {
   $('data-time').textContent = `链上数据时间 ${time(s?.sourceChainTimeSec ?? null, true)}`;
   const notice = $('notice');
   notice.classList.toggle('good', !stale && historyAt === null);
-  let message = transportError ?? s?.message ?? (!s ? '正在读取监控数据库…' : '');
+  // The reader's own sentence is only ever added to the state it belongs to: a first snapshot, a
+  // delayed one and an unusable one are three different things to tell a viewer about.
+  let message =
+    transportError ??
+    (s === null ? '正在读取监控数据库…' : (summaryNotice(s.status, s.message) ?? ''));
   if (s?.tokens.length && !transportError) {
     message =
       historyAt !== null
         ? `历史回看 · 截止 ${time(s.selectedEndSec, true)}。排行使用该时点已留存的窗口证据。`
         : `数据截止 ${time(s.sourceChainTimeSec, true)}${sourceAge !== null && sourceAge > 60 ? `，距现在 ${Math.floor(sourceAge / 60).toLocaleString()} 分钟；当前展示已录制数据。` : ' · 页面每 5 秒检查更新，统计以已采集链上时间为准。'}`;
-    if (s.message) message += ` ${s.message}`;
+    const reader = summaryNotice(s.status, s.message);
+    if (reader) message += ` ${reader}`;
   }
+  if (seriesNotice) message += ` ${seriesNotice}`;
   notice.replaceChildren(
     document.createTextNode(message || '数据已连接 · 数据覆盖与窗口可用性见下方。'),
   );
@@ -204,7 +247,7 @@ function renderStatus() {
   }
   $('rank-refresh').textContent = pending ? '正在查看表格 · 更新暂缓应用' : '每 5 秒检查更新';
 }
-function renderStats(tokens: DashboardToken[]) {
+function renderStats(tokens: DashboardTokenSummary[]) {
   const known = tokens.filter((t) => t.windows[windowName].current.available);
   const active = known.filter((t) => (t.windows[windowName].current.txCount ?? 0) > 0).length;
   const warm = tokens.filter(
@@ -212,11 +255,10 @@ function renderStats(tokens: DashboardToken[]) {
       ['warming', 'new'].includes(heat(t).kind) &&
       (t.windows[windowName].current.txCount ?? 0) >= 10,
   ).length;
-  const activePools = new Set(
-    tokens.flatMap((t) =>
-      t.pools.filter((p) => (p.windows[windowName]?.txCount ?? 0) > 0).map((p) => p.poolId),
-    ),
-  ).size;
+  // Each token counts the pools it is a side of, exactly as its own metrics do; a pool shared by two
+  // stocks is counted on both. The summary carries no pool identities, and carrying them to
+  // de-duplicate a headline number is what made the old summary too large to send at all.
+  const activePools = tokens.reduce((sum, t) => sum + (t.activePoolCount[windowName] ?? 0), 0);
   const end = selectedEnd();
   const selectedCoverage =
     snapshot?.coverage.filter(
@@ -236,7 +278,7 @@ function renderStats(tokens: DashboardToken[]) {
       '活跃交易池',
       known.length ? number(activePools) : '—',
       '个',
-      '池标识去重 · 当前筛选范围',
+      '按代币归属合计 · 共池分别计入',
       '◫',
     ],
     [
@@ -254,7 +296,7 @@ function renderStats(tokens: DashboardToken[]) {
     )
     .join('');
 }
-function renderRanking(tokens: DashboardToken[]) {
+function renderRanking(tokens: DashboardTokenSummary[]) {
   $('count-heading').textContent = windowName;
   $('rank-count').textContent = `${tokens.length} TOKENS`;
   $('sort-explanation').textContent = {
@@ -278,9 +320,9 @@ function renderRanking(tokens: DashboardToken[]) {
             : '—'
           : `${h.changePercent > 0 ? '+' : ''}${h.changePercent.toLocaleString('zh-CN', { maximumFractionDigits: 1 })}%`;
       return `<tr><td><button class="star ${favorites.has(t.address) ? 'selected' : ''}" data-favorite="${e(t.address)}" aria-label="${favorites.has(t.address) ? '取消' : '添加'}自选 ${e(t.symbol)}" aria-pressed="${favorites.has(t.address)}">${favorites.has(t.address) ? '★' : '☆'}</button></td><td><div class="token-cell"><span class="rank-index">${String(index + 1).padStart(2, '0')}</span><span class="token-avatar" aria-hidden="true">${e(t.symbol.slice(0, 2))}</span><button class="token-name" data-token="${e(t.address)}">${e(t.symbol)}<small>${e(short(t.address))}</small></button></div></td><td>${badge(t)}</td><td class="numeric" title="${e(reasons(current.reasons))}">${number(current.txCount)}</td><td class="numeric ${h.delta === null || h.delta === 0 ? 'neutral' : h.delta > 0 ? 'positive' : 'negative'}">${e(change)}<small class="delta-sub">${h.delta === null ? '前窗数据不足' : `${h.delta > 0 ? '+' : ''}${number(h.delta)} 笔`}</small></td><td class="numeric" title="${current.usdMicros === null ? '估值或窗口证据不足' : 'USDG = USD 为展示假设；各股票参与量不能相加当作全市场量'}">${formatMicros(current.usdMicros)}</td><td>${chart(
-        trendMinutes(t, 15).map((m) => (m?.status === 'closed' ? m.txCount : null)),
+        trendMinutes(seriesOf(t), 15).map((m) => (m?.status === 'closed' ? m.txCount : null)),
         h.kind,
-      )}</td><td class="numeric neutral">${t.poolIds.length}</td></tr>`;
+      )}</td><td class="numeric neutral" title="该代币当前登记的池数；明细按窗口分页读取">${t.poolCount}</td></tr>`;
     })
     .join('');
   const empty = $('rank-empty');
@@ -308,10 +350,10 @@ function renderRanking(tokens: DashboardToken[]) {
 function renderHeatmap() {
   const end = Math.floor((snapshot?.sourceChainTimeSec ?? 0) / 60) * 60;
   const starts = Array.from({ length: horizon }, (_, i) => end - (horizon - 1 - i) * 60);
-  const peak = (t: DashboardToken) =>
+  const peak = (t: DashboardTokenSummary) =>
     Math.max(
       0,
-      ...t.minutes
+      ...seriesOf(t)
         .filter((m) => m.minuteStartSec >= starts[0]!)
         .map((m) => (m.status === 'closed' ? (m.txCount ?? 0) : 0)),
     );
@@ -326,7 +368,7 @@ function renderHeatmap() {
   $('heatmap').innerHTML =
     tokens
       .map((t) => {
-        const map = new Map(t.minutes.map((m) => [m.minuteStartSec, m]));
+        const map = new Map(seriesOf(t).map((m) => [m.minuteStartSec, m]));
         const localMax = Math.max(1, peak(t));
         return `<div class="heat-row"><button class="heat-name" data-token="${e(t.address)}" title="${e(t.symbol)} ${e(t.address)}">${e(t.symbol)}</button><div class="heat-cells">${starts
           .map((sec) => {
@@ -363,14 +405,15 @@ function renderHeatmap() {
 function renderChanges() {
   const since = (snapshot?.sourceChainTimeSec ?? 0) - horizon * 60;
   const changes: {
-    t: DashboardToken;
+    t: DashboardTokenSummary;
     m: TokenMinute;
     previous: number;
     h: ReturnType<typeof classifyHeat>;
   }[] = [];
   for (const t of listTokens()) {
-    const map = new Map(t.minutes.map((m) => [m.minuteStartSec, m]));
-    for (const m of t.minutes) {
+    const minutes = seriesOf(t);
+    const map = new Map(minutes.map((m) => [m.minuteStartSec, m]));
+    for (const m of minutes) {
       const previous = map.get(m.minuteStartSec - 60);
       if (
         m.minuteStartSec < since ||
@@ -458,20 +501,17 @@ function renderDetail() {
         '<div class="empty-state"><h3>当前快照中没有此代币</h3><p>监控范围或源数据可能已变化。</p></div>';
     return;
   }
-  const sortedPools = [...t.pools].sort((a, b) => {
-    const aa = a.windows[windowName].txCount,
-      bb = b.windows[windowName].txCount;
-    return aa === null || bb === null
-      ? aa === bb
-        ? a.poolId.localeCompare(b.poolId)
-        : aa === null
-          ? 1
-          : -1
-      : bb - aa || a.poolId.localeCompare(b.poolId);
-  });
+  // The drawer draws only what it has read for THIS token and THIS generation: a page left over
+  // from the previous selection is never painted under the new title.
+  const view =
+    detail !== null && detail.address.toLowerCase() === t.address.toLowerCase() ? detail : null;
+  // The reader already ordered the page by this window's activity; the drawer keeps that order and
+  // asks for the next page instead of holding every pool in the browser.
+  const pools = view?.pools ?? [];
+  const totalPools = view?.total ?? t.poolCount;
   const current = t.windows[windowName].current,
     previous = t.windows[windowName].previous;
-  const minutes = trendMinutes(t, 30),
+  const minutes = trendMinutes(view?.minutes ?? [], 30),
     allReasons = [...new Set([...current.reasons, ...previous.reasons])];
   const symbol = (address: string) =>
     snapshot?.tokens.find((t) => t.address.toLowerCase() === address.toLowerCase())?.symbol ??
@@ -487,25 +527,28 @@ function renderDetail() {
       minutes.map((m) => (m?.status === 'closed' ? m.txCount : null)),
       'warming',
       true,
-    )}<div class="chart-caption"><span>${time((selectedEnd() ?? 0) - 1800)}</span><span>缺失分钟断开，不补零</span><span>${time(selectedEnd())}</span></div><h3>每分钟 USDG 等值参与量</h3>${chart(finiteUsd, 'warming', true, '每分钟 USDG 等值量')}<div class="chart-caption"><span>图形近似缩放；精确金额见窗口数据</span><span>${finiteUsd.every((v) => v === null) ? '暂无可靠估值' : 'USDG = USD 展示假设'}</span></div></section><section class="detail-section"><h3>活跃池与登记池 <span class="muted">/ ${t.pools.length}</span></h3>${
-      sortedPools
-        .slice(0, visiblePoolCount)
+    )}<div class="chart-caption"><span>${time((selectedEnd() ?? 0) - 1800)}</span><span>缺失分钟断开，不补零</span><span>${time(selectedEnd())}</span></div><h3>每分钟 USDG 等值参与量</h3>${chart(finiteUsd, 'warming', true, '每分钟 USDG 等值量')}<div class="chart-caption"><span>图形近似缩放；精确金额见窗口数据</span><span>${finiteUsd.every((v) => v === null) ? '暂无可靠估值' : 'USDG = USD 展示假设'}</span></div></section><section class="detail-section"><h3>活跃池与登记池 <span class="muted">/ ${totalPools}</span></h3>${
+      (pools
         .map(
           (p) =>
             `<div class="pool-card"><div class="pool-top"><span class="chip">${e(p.protocol.toUpperCase())}</span>${e(symbol(p.token0))} / ${e(symbol(p.token1))}</div><div class="pool-id">${e(p.poolId)}<br>${e(p.token0)}<br>${e(p.token1)}</div><div class="pool-metrics"><span>${windowName} ${number(p.windows[windowName]?.txCount)} 笔</span><span>USDG ${formatMicros(p.windows[windowName]?.usdMicros ?? null)}</span></div><div class="pool-id">最后精确 Swap 时间 ${time(p.lastSwapTimeSec, true)}</div></div>`,
         )
-        .join('') || '<p class="detail-note">当前范围内尚无已登记池，不能据此推断全链没有成交。</p>'
+        .join('') ||
+        (view === null
+          ? '<p class="detail-note">正在读取该代币的池明细…</p>'
+          : '<p class="detail-note">当前范围内尚无已登记池，不能据此推断全链没有成交。</p>')) +
+      (view?.notice ? `<p class="detail-note">${e(view.notice)}</p>` : '')
     }</section><section class="detail-section"><h3>数据说明</h3><p class="detail-note">${e(allReasons.length ? reasons(allReasons) : '当前与前一窗口覆盖可用；估值仍可能独立缺失。')}<br>窗口截止 ${time(selectedEnd(), true)}。详情趋势展示完整分钟。<br>同一交易跨池去重；多只股票共池时分别计参与量，不能相加作为全市场成交额。<br>未登记的对手币使用地址显示，名称和 Meme 分类不作推断。</p></section>`;
-  if (sortedPools.length > visiblePoolCount) {
+  // One page is on screen; the next one is asked for by offset, never by downloading the rest.
+  if (view !== null && view.nextOffset !== null) {
     const more = document.createElement('button');
     more.className = 'more-pools';
     more.id = 'more-pools';
-    more.textContent = `再显示 20 个池（已展示 ${visiblePoolCount} / ${sortedPools.length}）`;
+    more.textContent = `再显示 20 个池（已展示 ${pools.length} / ${totalPools}）`;
     dialog.querySelector('.pool-card:last-child')?.parentElement?.append(more);
     more.addEventListener('click', () => {
-      visiblePoolCount += 20;
-      renderDetail();
-      $('more-pools')?.focus();
+      more.disabled = true;
+      void loadPoolPage(view.nextOffset!);
     });
   }
   $('copy-address').addEventListener('click', () => {
@@ -550,19 +593,264 @@ function render() {
     if (focusedFavorite) dialog.querySelector<HTMLButtonElement>('[data-favorite]')?.focus();
   }
 }
-function applySnapshot(data: DashboardSnapshot) {
+/** What a failed response says about retrying, if it says anything. */
+async function failureCode(response: Response): Promise<string | null> {
+  try {
+    const body = (await response.json()) as { code?: unknown };
+    return typeof body.code === 'string' ? body.code : null;
+  } catch {
+    return null;
+  }
+}
+
+function applySnapshot(data: DashboardSummary) {
   if (
     (data.status === 'error' || data.status === 'stale') &&
     !data.tokens.length &&
     snapshot?.tokens.length &&
     data.scopeId === snapshot.scopeId
   ) {
-    transportError = `${data.message ?? '数据源暂时不可用'}；保留上次结果，截止 ${time(snapshot.selectedEndSec, true)}。`;
-  } else {
-    snapshot = data;
-    transportError = null;
+    transportError = `${summaryNotice(data.status, data.message) ?? '数据源暂时不可用'}；保留上次结果，截止 ${time(snapshot.selectedEndSec, true)}。`;
+    render();
+    return;
+  }
+  const replaced = snapshot === null || snapshot.generation !== data.generation;
+  snapshot = data;
+  transportError = null;
+  if (replaced) {
+    // A generation answers for its own minutes and its own pool pages. Keeping the previous ones
+    // would put two versions of the same minute on one screen.
+    series = new Map();
+    seriesGeneration = null;
+    seriesMinutes = 0;
+    seriesNotice = null;
+    detail = null;
+    detailWanted = null;
+    detailController?.abort();
   }
   render();
+  void syncSeries();
+  syncDetail();
+}
+
+/**
+ * The overview's minute series: one request for every token at the horizon the page draws. The
+ * summary is small enough to poll every five seconds; three hours of minutes for every token is
+ * not, so the series is asked for once per generation and again only when the horizon grows.
+ */
+async function syncSeries(): Promise<void> {
+  const current = snapshot,
+    wanted = overviewMinutes(horizon);
+  if (current === null || current.generation === null) return;
+  if (seriesGeneration === current.generation && seriesMinutes >= wanted) return;
+  seriesController?.abort();
+  const controller = new AbortController();
+  seriesController = controller;
+  const generation = current.generation,
+    addresses = current.tokens.map((t) => t.address);
+  if (!addresses.length) {
+    series = new Map();
+    seriesGeneration = generation;
+    seriesMinutes = wanted;
+    seriesNotice = null;
+    render();
+    return;
+  }
+  try {
+    const query = `generation=${encodeURIComponent(generation)}&addresses=${addresses.join(',')}&minutes=${wanted}`;
+    const response = await fetch(`/api/history?${query}`, {
+      signal: controller.signal,
+      cache: 'no-store',
+    });
+    if (seriesController !== controller) return;
+    if (!response.ok) {
+      seriesNotice = requestNotice(response.status, await failureCode(response));
+      renderStatus();
+      return;
+    }
+    const data = (await response.json()) as {
+      generation?: unknown;
+      minutes?: unknown;
+      tokens?: unknown;
+    };
+    if (seriesController !== controller) return;
+    if (data.generation !== generation || !Array.isArray(data.tokens)) return;
+    series = new Map(
+      (data.tokens as { address: string; minutes: TokenMinute[] }[]).map((entry) => [
+        entry.address.toLowerCase(),
+        entry.minutes,
+      ]),
+    );
+    seriesGeneration = generation;
+    seriesMinutes = typeof data.minutes === 'number' ? data.minutes : wanted;
+    seriesNotice = null;
+    render();
+  } catch {
+    if (seriesController === controller) {
+      seriesNotice = '分钟明细暂时无法读取，稍后会自动重试。';
+      renderStatus();
+    }
+  }
+}
+
+/** The drawer shows one token, one generation and the pages walked so far. */
+function setDetailNotice(notice: string): void {
+  if (detail !== null) detail = { ...detail, loading: false, notice };
+  renderDetail();
+}
+
+/**
+ * A generation that has been replaced is worth exactly one fresh summary, never a retry loop: the
+ * summary that comes back reopens the drawer on whatever generation is published by then.
+ */
+async function recoverExpired(): Promise<void> {
+  const before = snapshot?.generation ?? null;
+  await refresh(true);
+  if ((snapshot?.generation ?? null) === before) {
+    setDetailNotice('数据已更新，请稍后重试。');
+    return;
+  }
+  syncDetail();
+}
+
+/** Reads one detail route, so a failure is described by a status and never by a stack. */
+async function requestDetail<T>(
+  path: string,
+  controller: AbortController,
+): Promise<
+  { ok: true; data: T } | { ok: false; aborted: boolean; status: number; code: string | null }
+> {
+  try {
+    const response = await fetch(path, { signal: controller.signal, cache: 'no-store' });
+    if (!response.ok)
+      return {
+        ok: false,
+        aborted: false,
+        status: response.status,
+        code: await failureCode(response),
+      };
+    const data = (await response.json()) as T & { generation?: unknown; tokenAddress?: unknown };
+    // Both detail routes answer with the generation and the token they describe. Something else is
+    // not a page to draw half of: it is reported as a failure the viewer can retry.
+    if (typeof data?.generation !== 'string' || typeof data.tokenAddress !== 'string')
+      return { ok: false, aborted: false, status: 0, code: null };
+    return { ok: true, data };
+  } catch {
+    return {
+      ok: false,
+      aborted: controller.signal.aborted,
+      status: 0,
+      code: null,
+    };
+  }
+}
+
+/** The drawer is only ever showing, or waiting for, one token and one generation. */
+function syncDetail(): void {
+  if (!dialog.open || selectedToken === null) return;
+  const generation = snapshot?.generation ?? null;
+  if (generation === null) return;
+  const same = (candidate: { address: string; generation: string } | null) =>
+    candidate !== null &&
+    candidate.generation === generation &&
+    candidate.address.toLowerCase() === selectedToken!.toLowerCase();
+  if (same(detail) || same(detailWanted)) return;
+  void loadDetail(selectedToken, generation);
+}
+
+/**
+ * Opens one token's drawer: its minute series and its first pool page, both for the same
+ * generation. Neither is drawn if the answer belongs to a token or a generation the page has
+ * already moved on from.
+ */
+async function loadDetail(address: string, generation: string): Promise<void> {
+  detailController?.abort();
+  const controller = new AbortController();
+  detailController = controller;
+  detailWanted = { address, generation };
+  detail = {
+    address,
+    generation,
+    minutes: [],
+    pools: [],
+    total: 0,
+    nextOffset: null,
+    notice: null,
+    loading: true,
+  };
+  renderDetail();
+  const base = `/api/tokens/${encodeURIComponent(address)}`,
+    query = `generation=${encodeURIComponent(generation)}`;
+  const [lens, page] = await Promise.all([
+    requestDetail<TokenHistory>(`${base}/history?${query}`, controller),
+    requestDetail<PoolPage>(
+      `${base}/pools?${query}&window=${windowName}&offset=0&limit=20`,
+      controller,
+    ),
+  ]);
+  const current = (answer: { generation: string; tokenAddress: string }) =>
+    detailController === controller &&
+    stillCurrent({ generation: snapshot?.generation ?? null, address: selectedToken }, answer);
+  if (lens.ok && page.ok) {
+    if (!current(page.data)) return;
+    detail = {
+      address,
+      generation,
+      minutes: lens.data.minutes,
+      pools: page.data.items,
+      total: page.data.total,
+      nextOffset: page.data.nextOffset,
+      notice: null,
+      loading: false,
+    };
+    renderDetail();
+    return;
+  }
+  const failure = !lens.ok ? lens : !page.ok ? page : null;
+  if (failure === null || failure.aborted || detailController !== controller) return;
+  if (failure.status === 409) {
+    await recoverExpired();
+    return;
+  }
+  setDetailNotice(requestNotice(failure.status, failure.code));
+}
+
+/** The next page of the token already on screen; what is already drawn stays where it is. */
+async function loadPoolPage(offset: number): Promise<void> {
+  const view = detail;
+  if (view === null) return;
+  const controller = new AbortController();
+  detailController = controller;
+  const { address, generation } = view;
+  const path = `/api/tokens/${encodeURIComponent(address)}/pools?generation=${encodeURIComponent(generation)}&window=${windowName}&offset=${offset}&limit=20`;
+  const result = await requestDetail<PoolPage>(path, controller);
+  if (!result.ok) {
+    if (result.aborted || detailController !== controller) return;
+    if (result.status === 409) {
+      await recoverExpired();
+      return;
+    }
+    setDetailNotice(requestNotice(result.status, result.code));
+    return;
+  }
+  if (
+    detailController !== controller ||
+    !stillCurrent({ generation: snapshot?.generation ?? null, address: selectedToken }, result.data)
+  )
+    return;
+  const drawn = detail;
+  if (drawn === null) return;
+  const known = new Set(drawn.pools.map((p) => p.poolId));
+  detail = {
+    ...drawn,
+    pools: [...drawn.pools, ...result.data.items.filter((p) => !known.has(p.poolId))],
+    total: result.data.total,
+    nextOffset: result.data.nextOffset,
+    notice: null,
+    loading: false,
+  };
+  renderDetail();
+  $('more-pools')?.focus();
 }
 async function refresh(force = false) {
   clearTimeout(timer);
@@ -578,14 +866,15 @@ async function refresh(force = false) {
       signal: controller.signal,
       cache: 'no-store',
     });
-    if (!response.ok) throw new Error(`本地接口返回 ${response.status}`);
-    const data: DashboardSnapshot = await response.json();
+    if (!response.ok) throw new Error(requestNotice(response.status, await failureCode(response)));
+    const data = (await response.json()) as DashboardSummary;
     if (
+      data.apiVersion !== 2 ||
       !Array.isArray(data.tokens) ||
       !Array.isArray(data.coverage) ||
       typeof data.generatedAtMs !== 'number'
     )
-      throw new Error('本地接口数据格式异常');
+      throw new Error('本地服务返回的不是本页可以渲染的快照格式');
     if (activeRequest !== controller) return;
     if (
       !force &&
@@ -646,10 +935,13 @@ document.addEventListener('click', (event) => {
   }
   if (button.dataset.token) {
     selectedToken = button.dataset.token;
-    visiblePoolCount = 20;
     lastFocus = button;
-    renderDetail();
+    detail = null;
     if (!dialog.open) dialog.showModal();
+    // The drawer only reads its own token, and only once it has been asked for.
+    const generation = snapshot?.generation ?? null;
+    if (generation === null) renderDetail();
+    else void loadDetail(selectedToken, generation);
     return;
   }
   if (button.dataset.at) {
@@ -672,6 +964,8 @@ document.addEventListener('click', (event) => {
     windowName = button.dataset.window as WindowName;
     activate('windows', 'data-window', windowName);
     render();
+    // A pool page is sorted and measured by one window, so the open drawer reads it again.
+    if (dialog.open && detail !== null) void loadDetail(detail.address, detail.generation);
     return;
   }
   if (button.dataset.sort) {
@@ -685,6 +979,8 @@ document.addEventListener('click', (event) => {
     activate('horizons', 'data-horizon', String(horizon));
     renderHeatmap();
     renderChanges();
+    // A longer horizon draws minutes the page has not read yet; a shorter one needs nothing new.
+    void syncSeries();
     return;
   }
   if (button.dataset.scale) {
@@ -710,6 +1006,10 @@ dialog.addEventListener('click', (event) => {
 });
 dialog.addEventListener('close', () => {
   selectedToken = null;
+  // Whatever the drawer was still reading is nobody's answer now.
+  detailController?.abort();
+  detail = null;
+  detailWanted = null;
   releasePending();
   if (lastFocus?.isConnected) lastFocus.focus();
   else $('search').focus();

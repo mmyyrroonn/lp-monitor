@@ -10,14 +10,15 @@ import {
 } from '../storage/metric-store.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
 import { PoolRegistry, poolRegistrationId, type PoolRegistration } from '../registry/pools.js';
-import { aggregateRwa } from '../metrics/rwa-aggregate.js';
-import { inRollingWindow, rollingCoverage, ROLLING_DURATIONS } from '../metrics/rolling.js';
+import { inRollingWindow, ROLLING_DURATIONS } from '../metrics/rolling.js';
 import type { SwapValuation } from '../metrics/notional.js';
 import { inspectDatabaseStatus } from '../ops/status.js';
+import { aggregateWindow } from './read-model.js';
 import type {
   DashboardSnapshot,
   DashboardToken,
   Metric,
+  TokenMinute,
   WindowName,
   RuntimeHealth,
 } from './types.js';
@@ -28,6 +29,28 @@ export const unavailableHealth = (): RuntimeHealth => ({
   headLagSeconds: null,
   coverage: null,
 });
+/**
+ * The three fixed footnotes every dashboard answer carries after the report's own notes.
+ *
+ * Shared rather than copied: the worker publishes the same summary the legacy path publishes, and
+ * two spellings of "what this page does not cover" would drift the moment one of them is edited.
+ */
+export const SNAPSHOT_NOTES: readonly string[] = [
+  '仅分类登记的 RWA；Meme 分类不可用。',
+  '统计范围仅包含本地已登记池；默认实时采集不补历史，未登记老池的覆盖未知。',
+  '链上最终性为 provisional。窗口采用 (start, end]；历史分钟截止于该分钟最后一秒。',
+];
+/** The one freshness rule: a watermark more than a minute behind the wall clock is stale. */
+export function snapshotFreshness(
+  watermarkSec: number,
+  nowMs: number,
+): { status: 'ok' | 'stale'; message: string | null } {
+  const stale = nowMs - watermarkSec * 1000 > 60000;
+  return {
+    status: stale ? 'stale' : 'ok',
+    message: stale ? '链上数据已超过 60 秒未更新；当前显示保留的观测数据。' : null,
+  };
+}
 export function emptySnapshot(
   input: Pick<MetricInput, 'scopeId' | 'assets'>,
   status: DashboardSnapshot['status'],
@@ -50,6 +73,7 @@ export function emptySnapshot(
     notes: [],
   };
 }
+/** The legacy window rule, now shared with the read model so both cannot drift apart. */
 function aggregate(
   swaps: readonly SwapValuation[],
   report: MetricsReport,
@@ -57,36 +81,7 @@ function aggregate(
   endSec: number,
   pools: readonly PoolRegistration[],
 ): Metric {
-  const coverageStart = startSec % 60 === 59 ? startSec + 1 : startSec;
-  const reasons = rollingCoverage(report.coverage, coverageStart, endSec, report.at.timestampSec);
-  for (const pool of pools)
-    if (pool.source !== 'seed-config')
-      reasons.push(
-        ...rollingCoverage(
-          report.coverage,
-          coverageStart,
-          endSec,
-          report.at.timestampSec,
-          pool.discoveredAt.blockNumber,
-        ),
-      );
-  if (pools.length === 0) reasons.push('no-registered-pools');
-  const selected = swaps.filter((s) => {
-    const included = inRollingWindow(s.time, startSec, endSec, endSec === report.at.timestampSec);
-    if (included === null) reasons.push('boundary-time-unknown');
-    return included === true;
-  });
-  const available = reasons.length === 0;
-  const activity = available ? aggregateRwa(selected) : null;
-  return {
-    available,
-    startSec,
-    endSec,
-    txCount: activity?.txCount ?? null,
-    swapCount: activity?.swapCount ?? null,
-    usdMicros: activity?.poolActivityUsdMicros?.toString() ?? null,
-    reasons: [...new Set(reasons)],
-  };
+  return aggregateWindow(swaps, report.coverage, report.at.timestampSec, startSec, endSec, pools);
 }
 /** Only accepts read-only handles: buildMetricsReport's live mode must never sync caches here. */
 export function buildDashboardSnapshot(
@@ -141,7 +136,7 @@ export function buildDashboardSnapshot(
         swaps = r.valuations ?? [];
       const metric = (start: number, finish: number) =>
         aggregate(swaps, report, start, finish, pools);
-      const minutes = [];
+      const minutes: TokenMinute[] = [];
       for (
         let minuteStartSec = from;
         minuteStartSec <= Math.floor(report.at.timestampSec / 60) * 60;
@@ -208,9 +203,9 @@ export function buildDashboardSnapshot(
         }),
       };
     });
-    const stale = nowMs - report.at.timestampSec * 1000 > 60000;
+    const freshness = snapshotFreshness(report.at.timestampSec, nowMs);
     return {
-      status: stale ? 'stale' : 'ok',
+      status: freshness.status,
       generatedAtMs: nowMs,
       sourceChainTimeSec: report.at.timestampSec,
       selectedEndSec: end,
@@ -227,13 +222,8 @@ export function buildDashboardSnapshot(
           reasons: [...c.reasons],
         })),
       health: unavailableHealth(),
-      message: stale ? '链上数据已超过 60 秒未更新；当前显示保留的观测数据。' : null,
-      notes: [
-        ...report.notes,
-        '仅分类登记的 RWA；Meme 分类不可用。',
-        '统计范围仅包含本地已登记池；默认实时采集不补历史，未登记老池的覆盖未知。',
-        '链上最终性为 provisional。窗口采用 (start, end]；历史分钟截止于该分钟最后一秒。',
-      ],
+      message: freshness.message,
+      notes: [...report.notes, ...SNAPSHOT_NOTES],
     };
   })();
 }
@@ -248,7 +238,7 @@ export function readDashboardSnapshot(
   try {
     db = openDatabase(path, { readonly: true });
     const snapshot = buildDashboardSnapshot(db, input, { at });
-    attachDashboardHealth(path, input, snapshot);
+    snapshot.health = runtimeHealth(path, input.scopeId);
     return snapshot;
   } catch (error) {
     if (error instanceof RangeError) throw error;
@@ -258,41 +248,46 @@ export function readDashboardSnapshot(
   }
 }
 
-function attachDashboardHealth(
-  path: string,
-  input: MetricInput,
-  snapshot: DashboardSnapshot,
-): void {
+/**
+ * The runtime health a dashboard answer reports, read from the persisted sidecar facts.
+ *
+ * A caller that cannot read them gets the honest "unavailable" value rather than an invented one,
+ * and never an error: health is optional and must not expose filesystem or provider details.
+ */
+export function runtimeHealth(path: string, scopeId: string): RuntimeHealth {
   try {
-    const health = inspectDatabaseStatus(path, { scopeId: input.scopeId });
-    const number = (value: unknown): number | null =>
-      typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
-    const rpc = Object.values(health.rpc);
-    snapshot.health = {
-      status: health.sidecarFreshness === 'fresh' ? 'available' : 'unavailable',
-      updatedAtMs: health.sidecarSampledAtMs,
-      headLagBlocks:
-        health.headGapBlocks !== null && health.headGapBlocks <= BigInt(Number.MAX_SAFE_INTEGER)
-          ? number(Number(health.headGapBlocks))
-          : null,
-      headLagSeconds: number(health.headGapSeconds),
-      coverage: health.gap === null ? null : health.gap ? 'gap' : 'complete',
-      runtimeState: health.runtimeState ?? null,
-      sidecarFreshness: health.sidecarFreshness,
-      scannedBlock: health.scanned?.blockNumber.toString() ?? null,
-      projectedBlock: health.projected?.blockNumber.toString() ?? null,
-      outboxPending: number(health.outboxPending),
-      dbBytes: number(health.dbBytes),
-      walBytes: number(health.walBytes),
-      processingLatencyMs: number(health.processingLatencyMs),
-      rpcCalls:
-        rpc.length > 0 && rpc.every((v) => number(v) !== null)
-          ? number(rpc.reduce((a, b) => a + b, 0))
-          : null,
-    };
+    return mapDatabaseHealth(inspectDatabaseStatus(path, { scopeId }));
   } catch {
-    /* Health is optional and must not expose filesystem or provider details. */
+    return unavailableHealth();
   }
+}
+
+function mapDatabaseHealth(health: ReturnType<typeof inspectDatabaseStatus>): RuntimeHealth {
+  const number = (value: unknown): number | null =>
+    typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null;
+  const rpc = Object.values(health.rpc);
+  return {
+    status: health.sidecarFreshness === 'fresh' ? 'available' : 'unavailable',
+    updatedAtMs: health.sidecarSampledAtMs,
+    headLagBlocks:
+      health.headGapBlocks !== null && health.headGapBlocks <= BigInt(Number.MAX_SAFE_INTEGER)
+        ? number(Number(health.headGapBlocks))
+        : null,
+    headLagSeconds: number(health.headGapSeconds),
+    coverage: health.gap === null ? null : health.gap ? 'gap' : 'complete',
+    runtimeState: health.runtimeState ?? null,
+    sidecarFreshness: health.sidecarFreshness,
+    scannedBlock: health.scanned?.blockNumber.toString() ?? null,
+    projectedBlock: health.projected?.blockNumber.toString() ?? null,
+    outboxPending: number(health.outboxPending),
+    dbBytes: number(health.dbBytes),
+    walBytes: number(health.walBytes),
+    processingLatencyMs: number(health.processingLatencyMs),
+    rpcCalls:
+      rpc.length > 0 && rpc.every((v) => number(v) !== null)
+        ? number(rpc.reduce((a, b) => a + b, 0))
+        : null,
+  };
 }
 
 const LEGACY_NOTE = '旧库只读快照 · 不自动跟随写入；重启重新核验';
@@ -379,7 +374,7 @@ export function createDashboardReader(
           result.message = [result.message, LEGACY_NOTE].filter(Boolean).join(' ');
           return result;
         })();
-        attachDashboardHealth(path, input, snapshot);
+        snapshot.health = runtimeHealth(path, input.scopeId);
         return snapshot;
       } catch (error) {
         if (error instanceof RangeError) throw error;

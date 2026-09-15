@@ -34,7 +34,14 @@ export interface AssetRegistry {
   has(address: Address): boolean;
 }
 
-function buildAssetRegistry(version: string, assets: readonly AssetRegistration[]): AssetRegistry {
+/**
+ * The one constructor both loaders share, exported so a worker rebuilt from serializable inputs
+ * keeps the very same validation and symbol handling the file loader applies.
+ */
+export function buildAssetRegistry(
+  version: string,
+  assets: readonly AssetRegistration[],
+): AssetRegistry {
   if (version.trim().length === 0) throw new RangeError('Asset version must not be empty');
   const normalized = assets
     .map((asset) => ({ ...asset, address: asset.address.toLowerCase() as Address }))

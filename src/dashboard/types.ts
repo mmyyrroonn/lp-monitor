@@ -54,6 +54,31 @@ export interface RuntimeHealth {
   processingLatencyMs?: number | null;
   rpcCalls?: number | null;
 }
+export type DashboardTokenSummary = Omit<DashboardToken, 'poolIds' | 'pools' | 'minutes'> & {
+  poolCount: number;
+  activePoolCount: Record<WindowName, number>;
+};
+export type DashboardSummary = Omit<DashboardSnapshot, 'tokens'> & {
+  apiVersion: 2;
+  generation: string | null;
+  refreshing: boolean;
+  tokens: DashboardTokenSummary[];
+};
+export type PoolPage = {
+  generation: string;
+  tokenAddress: string;
+  window: WindowName;
+  offset: number;
+  limit: number;
+  total: number;
+  nextOffset: number | null;
+  items: DashboardPool[];
+};
+export type TokenHistory = {
+  generation: string;
+  tokenAddress: string;
+  minutes: TokenMinute[];
+};
 export interface DashboardSnapshot {
   status: 'ok' | 'empty' | 'stale' | 'error';
   generatedAtMs: number;

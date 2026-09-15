@@ -5,9 +5,20 @@ import { join, sep } from 'node:path';
 import Database from 'better-sqlite3';
 import { openDatabase } from '../../src/storage/database.js';
 import { runCli } from '../../src/cli.js';
+import { openDashboardFixture, type DashboardFixture } from '../helpers/dashboard-fixture.js';
+import {
+  DashboardWorkerHarness,
+  appendBatch,
+  snapshotWorkerInit,
+} from '../helpers/dashboard-worker.js';
+import type { SnapshotWorkerResponse } from '../../src/dashboard/snapshot-worker.js';
 const dirs: string[] = [];
-afterEach(() => {
+const fixtures: DashboardFixture[] = [];
+const harnesses: DashboardWorkerHarness[] = [];
+afterEach(async () => {
   vi.restoreAllMocks();
+  for (const harness of harnesses.splice(0)) await harness.terminate();
+  for (const fixture of fixtures.splice(0)) fixture.close();
   for (const dir of dirs.splice(0)) {
     const base = realpathSync(tmpdir());
     const real = realpathSync(dir);
@@ -16,6 +27,64 @@ afterEach(() => {
     rmSync(real, { recursive: true, force: true });
   }
 });
+
+function projectedFixture(): DashboardFixture {
+  const fixture = openDashboardFixture();
+  fixtures.push(fixture);
+  return fixture;
+}
+
+function worker(): DashboardWorkerHarness {
+  const harness = new DashboardWorkerHarness();
+  harnesses.push(harness);
+  return harness;
+}
+
+/** The persisted facts a reader is allowed to leave exactly as it found them. */
+const BUSINESS_TABLES = [
+  'raw_logs',
+  'active_logs',
+  'log_times',
+  'pools',
+  'accepted_ranges',
+  'minute_boundaries',
+  'registry_changes',
+  'live_events',
+  'live_observations',
+  'live_quality_errors',
+  'live_projection_cursors',
+  'live_source_revisions',
+  'metric_windows',
+] as const;
+
+/**
+ * What one connection can see of the database's identity and contents. `total_changes` and
+ * `data_version` are that connection's own view, so a single handle read before and after says
+ * whether anybody else committed in between — including this reader's own worker.
+ */
+function databaseIdentity(db: Database.Database) {
+  const count = (table: string) =>
+    (db.prepare(`select count(*) as n from ${table}`).get() as { n: number }).n;
+  return {
+    schemaVersion: db.pragma('schema_version', { simple: true }),
+    totalChanges: db.pragma('total_changes', { simple: true }),
+    dataVersion: db.pragma('data_version', { simple: true }),
+    rows: Object.fromEntries(BUSINESS_TABLES.map((table) => [table, count(table)])),
+  };
+}
+
+/** The next answer to a refresh, whatever it is, so a test can speak about either outcome. */
+async function refreshed(
+  harness: DashboardWorkerHarness,
+  key = 'live',
+): Promise<Extract<SnapshotWorkerResponse, { type: 'summary' | 'failed' | 'unchanged' }>> {
+  return (await harness.next(
+    (value) =>
+      (value.type === 'summary' && value.key === key) ||
+      (value.type === 'unchanged' && value.key === key) ||
+      value.type === 'failed',
+  )) as Extract<SnapshotWorkerResponse, { type: 'summary' | 'failed' | 'unchanged' }>;
+}
 function setup() {
   const dir = mkdtempSync(join(tmpdir(), 'p2-ro-'));
   dirs.push(dir);
@@ -118,3 +187,104 @@ test('readonly schema validation preserves transient SQLite lock errors', () => 
     db.close();
   }
 }, 15000);
+
+test('the dashboard worker reads a projected database without changing it', async () => {
+  const fixture = projectedFixture(),
+    // One handle read before and after: its own change counters say whether anyone wrote at all.
+    watch = openDatabase(fixture.path, { readonly: true });
+  try {
+    const before = databaseIdentity(watch),
+      harness = worker();
+    await harness.start(snapshotWorkerInit(fixture));
+    harness.send({ type: 'refresh', key: 'live' });
+    const published = await refreshed(harness);
+    expect(published.type).toBe('summary');
+    const generation = published.type === 'summary' ? published.summary.generation! : '';
+    const address = fixture.input.assets.assets[0]!.address;
+    harness.send({
+      type: 'poolPage',
+      id: 1,
+      generation,
+      address,
+      window: '5m',
+      offset: 0,
+      limit: 20,
+    });
+    expect((await harness.next((value) => value.type === 'page')).type).toBe('page');
+    harness.send({ type: 'tokenHistory', id: 2, generation, address });
+    expect((await harness.next((value) => value.type === 'history')).type).toBe('history');
+    await harness.terminate();
+    expect(databaseIdentity(watch)).toEqual(before);
+  } finally {
+    watch.close();
+  }
+});
+
+test('a write committed while the reader is live moves the generation and leaves the old page alone', async () => {
+  const fixture = projectedFixture(),
+    harness = worker(),
+    address = fixture.input.assets.assets[0]!.address;
+  await harness.start(snapshotWorkerInit(fixture));
+  harness.send({ type: 'refresh', key: 'live' });
+  const first = await refreshed(harness);
+  expect(first.type).toBe('summary');
+  const generation = first.type === 'summary' ? first.summary.generation! : '';
+  harness.send({
+    type: 'poolPage',
+    id: 1,
+    generation,
+    address,
+    window: '5m',
+    offset: 0,
+    limit: 100,
+  });
+  const served = (await harness.next((value) => value.type === 'page')) as Extract<
+    SnapshotWorkerResponse,
+    { type: 'page' }
+  >;
+
+  // The writer commits a whole range, projection included, while the reader is running.
+  appendBatch(fixture, {
+    events: [{ pool: 13, block: 4860, tx: 201, usdgUnits: 5000 }],
+    discovered: [{ index: 13, token0: address, token1: fixture.input.usdg }],
+    toBlock: 4900,
+    boundaryFromSec: 4920,
+    boundaryToSec: 4920,
+  });
+
+  harness.send({ type: 'refresh', key: 'live' });
+  const second = await refreshed(harness);
+  expect(second.type).toBe('summary');
+  expect(second.type === 'summary' && second.summary.generation).not.toBe(generation);
+  // The generation already served is answered from the catalogue it was published against.
+  harness.send({
+    type: 'poolPage',
+    id: 2,
+    generation,
+    address,
+    window: '5m',
+    offset: 0,
+    limit: 100,
+  });
+  const again = (await harness.next((value) => value.type === 'page')) as Extract<
+    SnapshotWorkerResponse,
+    { type: 'page' }
+  >;
+  expect(again.page).toEqual(served.page);
+  // While the newer one has moved on, so the page really did change underneath.
+  const moved = second.type === 'summary' ? second.summary.generation! : '';
+  harness.send({
+    type: 'poolPage',
+    id: 3,
+    generation: moved,
+    address,
+    window: '5m',
+    offset: 0,
+    limit: 100,
+  });
+  const current = (await harness.next(
+    (value) => value.type === 'page' && value.id === 3,
+  )) as Extract<SnapshotWorkerResponse, { type: 'page' }>;
+  expect(current.page.total).toBe(served.page.total + 1);
+  await harness.terminate();
+});
