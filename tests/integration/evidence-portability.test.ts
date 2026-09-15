@@ -6,7 +6,10 @@ import { expect, test } from 'vitest';
 
 function relocated() {
   const root = mkdtempSync(join(tmpdir(), 'p0-relocated-'));
-  for (const directory of ['artifacts', 'scripts'])
+  // The audit reads the P0 evidence tree and nothing else, so relocating exactly that is what
+  // path portability means here. Copying all of artifacts/ drags in however many gigabytes of
+  // unrelated run output happen to be on the machine, which tests disk throughput instead.
+  for (const directory of ['artifacts/p0', 'scripts'])
     cpSync(directory, join(root, directory), { recursive: true });
   return root;
 }

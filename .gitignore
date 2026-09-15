@@ -51,3 +51,8 @@ artifacts/**/requests.jsonl.*
 /artifacts/p6/**/*.sqlite-wal
 /artifacts/p6/**/*.sqlite-shm
 /artifacts/p6/save-raw-reproduction/range.json
+
+# Catalogue discovery run outputs stay local. The per-range evidence payloads are large and
+# are reconstructible from the recorder database, so importing them wholesale would only
+# put gigabytes into the index. Publish the pool list from the database instead.
+/artifacts/catalogue/
