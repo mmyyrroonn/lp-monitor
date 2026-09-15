@@ -883,7 +883,7 @@
   7. **窗口之外的估值报价不在本任务范围内**：计划要求「必要时按 token 索引取窗口之前最后一个合法 quote」，那属于 C2 的 quote 依赖与缓存键设计；C1 只提供 token→窗口内事件池的倒排。
   8. 真实 provider 验证、运行时迁移与生产切换均**未执行**（属验收阶段，见后续记录）。
 
-- Commit：待子计划 03 提交后补写（与 01/02 同做法，单一提交 `perf: bound live evaluation and schedule metadata outside batch commits` 覆盖 C1–C5）。
+- Commit：随子计划 03 提交（见 C5 末尾汇总行）。
 
 ### C2
 
@@ -1018,7 +1018,7 @@
   8. **`src/storage/live-metric-cache.ts` 一行未改，这是有意的**。计划原文要求「持久缓存作为恢复层保留」。C2 的新增路径是「索引命中 → 直接返回」，未命中 → `cache.memo(...)`；所以持久缓存在有界路径上仍然是**唯一的重启恢复机制**，且它在 C1 已被 `tests/integration/live-metric-cache.test.ts` 完整覆盖。删掉它或把它降级成纯哈希表都会让重启后第一轮重新估值整个窗口，而这一轮的成本没有测量数据支持。**如果审查者认为索引使持久缓存变成死代码，请指出**——我的判断是它在冷启动与跨进程场景下不可替代，但这一点没有独立的性能样本佐证（属子计划 05）。
   9. 真实 provider 验证、运行时迁移与生产切换均**未执行**（属验收阶段，见后续记录）。
 
-- Commit：待子计划 03 提交后补写（同 C1，单一提交 `perf: bound live evaluation and schedule metadata outside batch commits` 覆盖 C1–C5）。
+- Commit：随子计划 03 提交（同 C1，见 C5 末尾汇总行）。
 
 
 ### C3
@@ -1118,7 +1118,7 @@
   9. **12 池样本每一轮的选择都等于全部 12**：历史窗口（180 分钟 = 10800 块）比整个样本（约 8700 块）还长，样本里没有「选择小于目录」的轮次；那一面由新增的 400 注册用例承担，不是由 golden 样本承担。
   10. 本节引用的 `file:line` 取自当前工作树。前六份记录是分阶段写的，行号以各自当时为准；C1/C2 一节里对 `live-workset.ts` 接口的描述（`select` 单方法、`commit(watermarkSec)`）已被本次的 `arm` / `commit` 拆分取代，以代码为准。
 
-- Commit：待子计划 03 提交后补写（同 C1/C2，单一提交 `perf: bound live evaluation and schedule metadata outside batch commits` 覆盖 C1–C5）。
+- Commit：随子计划 03 提交（同 C1/C2，见 C5 末尾汇总行）。
 
 
 ### C4
@@ -1262,7 +1262,7 @@
   6. **「无逐轮完整 metadata 候选构造」是链式证据，不是单条端到端断言**：`metadata-index.test.ts`（同一对象只建一次索引，用 Proxy 读计数取证）、`token-metadata.test.ts::an unchanged cache comes back as the same object…`（缓存对象跨轮同一）、`live-metrics.test.ts::hands consecutive rounds the same metadata object…`（报告路径上两次 build 拿回同一对象）。三条都是点测试；没有一条端到端驱动 recorder 多轮循环并统计索引重建次数，`evaluatedWorksetPools` / `valuationComputes` 那类端到端计数在 C2 的记录里。
   7. 真实 provider 验证、运行时迁移与生产切换均**未执行**（属验收阶段，见后续记录）。
 
-- Commit：待子计划 03 提交后补写（同 C1–C3，单一提交 `perf: bound live evaluation and schedule metadata outside batch commits` 覆盖 C1–C5）。
+- Commit：随子计划 03 提交（同 C1–C3，见 C5 末尾汇总行）。
 
 ### C5
 
@@ -1518,4 +1518,4 @@
   8. **`pnpm lint` 整体是红的（HEAD 起就红，与本任务无关）**：`src/metrics/coverage.ts`、`src/replay/export.ts`、`src/replay/reader.ts`、`src/replay/runner.ts`、`src/storage/batch-coverage.ts`、`tests/integration/batch-coverage-cache.test.ts`、`tests/integration/referenced-batch-replay.test.ts`、`tests/unit/operation-filter-index.test.ts` 八个文件不过 `prettier --check`；这八个都不在本次改动列表里（`git status` 可核），我没有为了跑绿而重排它们的格式。`node scripts/check-scripts.mjs` 一节通过。
   9. 真实 provider 的端到端验证、运行时迁移与生产切换均**未执行**（属验收阶段，见后续记录）。
 
-- Commit：待子计划 03 提交后补写（同 C1–C4，单一提交 `perf: bound live evaluation and schedule metadata outside batch commits` 覆盖 C1–C5）。
+- Commit：`a9e28a82d64431bdb3762c5d741c0c1d54648a5e`（子计划 03 单一提交，C1–C5 全部在内，29 文件 / +7802 −263，且**未**包含 00–05 计划、spec 与 review 这些输入文件）。本行哈希的补写位于其后的一个小提交（与子计划 01/02 同一做法）。
