@@ -80,7 +80,7 @@
   - 兼容：新增文件均为纯新增；生产改动为默认关闭的可选回调；旧库、旧批次格式、`dist`、原工作区 `data/recorder.sqlite` 均未被读写或改写；基准脚本用 `finally` 删除 `os.tmpdir()` 临时库，且拒绝写入已存在的 `--out` 目录。
   - 未执行：真实 provider 验证；运行中 follow/dashboard 重启或迁移；线上 Manager 切换；新 RPC 采样；两小时 soak；160k 规模样本（E3 验收）；20 次迭代的正式样本（本记录为 3 次）；merge/push。
 
-- Commit：待补（子计划 01 完成后补实际 hash）
+- Commit：`eb206cb9ec3af99e90f3a82139ad7cecc401d8db`（子计划 01 单一提交，A1–A4 全部在内；本行哈希的补写位于其后的一个小提交）
 
 ---
 
@@ -159,7 +159,7 @@
   - 兼容：所有新增均为可选参数/可选字段；产出的 manifest 只是多了字段，旧读取方（按需取字段）不受影响；旧库与旧批次格式未改；未触碰原工作区运行中的 follow/dashboard、`.env`、实际 config 或 `data` 数据库。
   - 未执行：真实 provider 验证；运行中 follow/dashboard 重启或迁移；线上 Manager 切换；新 RPC 采样；两小时 soak；80k/160k 正式样本（E3）；merge/push。
 
-- Commit：待补（子计划 01 完成后补实际 hash）
+- Commit：`eb206cb9ec3af99e90f3a82139ad7cecc401d8db`（子计划 01 单一提交，A1–A4 全部在内；本行哈希的补写位于其后的一个小提交）
 
 ---
 
@@ -210,7 +210,7 @@
   - 兼容：`RateLimiter` 构造签名、`acquire`/`enter`/`defer`/`penalize`/`succeed` 全部保留，`state()` 为纯新增只读快照；`additional` 参数语义保留并加强。
   - 未执行：真实 provider 验证；运行中 follow/dashboard 重启或迁移；线上 Manager 切换；新 RPC 采样；两小时 soak；80k/160k 正式样本；merge/push。
 
-- Commit：待补（子计划 01 完成后补实际 hash）
+- Commit：`eb206cb9ec3af99e90f3a82139ad7cecc401d8db`（子计划 01 单一提交，A1–A4 全部在内；本行哈希的补写位于其后的一个小提交）
 
 ---
 
@@ -263,7 +263,7 @@
   - 兼容：`buildRollingMetrics` 默认签名与返回结构未变；`prepareRollingCoverage` 为纯新增导出；`rollingCoverage` 旧调用兼容。
   - 未执行：真实 provider 验证；运行中 follow/dashboard 重启或迁移；线上 Manager 切换；新 RPC 采样；两小时 soak；80k/160k 正式样本（E3）；merge/push。
 
-- Commit：待补（子计划 01 完成后补实际 hash）
+- Commit：`eb206cb9ec3af99e90f3a82139ad7cecc401d8db`（子计划 01 单一提交，A1–A4 全部在内；本行哈希的补写位于其后的一个小提交）
 
 - 附注（对 A2 记录的一处更正）：A3 收尾跑全套 `pnpm typecheck` 时发现 A2 新增的 `batch-timing` 日志解析块用了过窄的 `as { event?: string }`，导致 4 处 `TS2339`。已在 `tests/integration/runtime-recorder.test.ts` 补全该断言类型（`stageMs`/`counts`/`headObservedAgeMs`/`acceptedDataAgeMs`），并重跑 A2 目标测试（2 文件 / 11 用例通过）与 `pnpm typecheck`（退出码 0）。A2 记录中「typecheck 退出码 0」以本次修复后的树为准。
 
