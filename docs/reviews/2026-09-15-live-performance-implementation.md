@@ -488,6 +488,8 @@
   1. `prepare()` 的快照读序。B2 首版把「读两个 revision」放在 `reload()` **之前**：同一个读快照里先取到的 revision 可能早于随后读到的行，加载期间落地的写入就既在行里、又会被按 journal 回放一次。已改为先 `reload()` 再读两个 revision（`src/storage/registry-cache.ts:168-173`）。B2 记录「缓存的三条路径 → 首次」描述的是修正后的行为。
   2. 「未提交工作只在自己视图里可见」用例的陈旧期望。该用例原先在 `stage([staged])` 之后**不写 `pools` 行**就断言 `publish()` 后视图仍持有该池。真实路径不是这样：`recorder` 的 `publish()` 发生在 accepted transaction 提交之后，行已经在 `pools` 里；而 `publish()` 从 B2 起就按 `derivePool()` 折叠行、不采信「批次要求了什么」（这正是「批次拒绝落库的注册不会成为本视图声称的池」的保证）。已把该用例改为写入 accepted transaction 会写的那一行（`seed(database, REGISTRY_SCOPE, [staged])`）再 `publish()`，断言收在「视图与目录逐条相同」+「下一次 `prepare()` 的 `registryRowsRead`/`registryChangesRead` 均为 0」（证明是折入而非重读）。B2 记录里引用到的那条失败文本（`expected undefined to deeply equal { pool: … }`）出自修改前的用例体：同一变异（`if (true)`）在修改后的用例下仍失败 5/11，其中三条断言文本逐字不变（`expected 80000 to be +0`、`expected 5 to be +0`、`expected +0 to be 1`），另外两条本次首先触发的是 `expected 4 to be 3` 与 `expected 2 to be +0`。
 
+- Commit：随子计划 02 提交（见 B6 末尾汇总行）。
+
 
 ---
 
@@ -557,6 +559,8 @@
   - 未知池/无关日志不伪造注册：`keeps an unresolvable log as raw evidence and fabricates no registration for it` 让 provider 主动返回 3 条没人请求的日志（陌生池地址的 V3 swap、非操作事件的 manager 事件、本目录不持有的 poolId），批次把 4 条原始日志全部保留，注册数组仍只有目录那条记录。V4 只在「部署的 Manager + 已支持的操作事件 topic + 32 字节 poolId」三条同时成立时才识别，任意 topic[1] 不当 poolId。
   - 事务语义未变：`prepare()`/`stage()` 仍在 accepted transaction **之前**，`publish()` 在提交**之后**，`finally` 里 `discard()`；`prepare()` 会先丢弃上一轮未结算的 lease（未提交批次不留下成员）。
   - 无 schema/DDL 变化，无配置默认值变化，无窗口/信号公式改动。
+
+- Commit：随子计划 02 提交（见 B6 末尾汇总行）。
 
 ### B5
 
@@ -633,6 +637,8 @@
   - **寄存器写入与证据同批抵达**：`acceptRange(b)` 之后才 `adoptUpTo(b.end.number - 1n)`；证据已在本帧的池本帧可见，其上的池不可见，尚不可落地的行进 `deferred` 等下一次 adoption，不写也不丢。
   - 旧批次不可变、坏引用拒收的边界未动：`transportJson` 的不可改写比对、`readBatch` 对 `batch-ref-v1` / `batch-ref-v2` 的分块校验与 gzip 上限、`registryMode` 缺省即旧读法。
   - 无 schema/DDL 变化，无配置默认值变化，无窗口/信号公式改动。
+
+- Commit：随子计划 02 提交（见 B6 末尾汇总行）。
 
 - 未通过项 / 已记录的边界：
   1. **RED 敏感性**：变异 4（并集丢标记）只被用例 9 的数据保真断言抓到，任何窗口/信号输出都不变——因为 `registryMode` 目前没有行为消费者。如实记录，不额外造一个消费者来把它变成行为测试。
@@ -735,3 +741,5 @@
   3. **全局 epoch 是保守失效**：任何 `raw_logs` / `payload_objects` 的真实变更都会递增全局 epoch，使**所有**证明失效回到严格路径，直到被显式预热或重新接受。live 常规轮次只增不改，因此稳态下不会触发；但一次离群变更（或任何树外进程直接改这两张表）会把读取打回严格路径。这是安全方向上的选择，不额外做按 scope / 按批次细化的 epoch。
   4. **证明是「本库的行」的证明，不是载荷的证明**：`checkBatchIntegrity`（严格审计）仍解压并逐项重核哈希，有意不查证明——它的签名里根本没有 `Database`，结构上查不到；导出路径 `src/replay/export.ts:275-277` 也是先 `readBatch` 再交给它（`src/replay/integrity.ts:10-15` 已写明）。证明也不声称任何 RPC 事实、不缓存任何窗口/信号输出；物理文件损坏仍由 strict 审计处理，不宣称「有证明就无需核验原文件」。该要求由第 15 条用例固定（变异 5）。
   5. 真实 provider 验证、运行时迁移与生产切换均**未执行**（属验收阶段，见后续记录）。
+
+- Commit：`129d5b61d93abd2fd2bc6fd3001074eb8917a3b6`（子计划 02 单一提交，B1–B6 全部在内，36 文件 / +6836 −762，且**未**包含 00–05 计划、spec 与 review 这些输入文件）。本行哈希的补写位于其后的一个小提交（与子计划 01 同一做法）。
