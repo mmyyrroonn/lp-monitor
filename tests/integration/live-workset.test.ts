@@ -333,24 +333,32 @@ test('an unknown-time event without a boundary keeps its pool in the round and s
   expect(index.windowContextIncomplete).toBe(true);
 });
 
-test('a snapshot counts as memory when any business field differs from the initial one', () => {
+test('a snapshot counts as memory exactly when the state machine has something to read back', () => {
   expect(snapshotHasMemory(initialSignalSnapshot())).toBe(false);
-  // Every field counts, including one this test has never heard of: the two objects are compared
-  // key by key, so a memory shorter than the state machine actually keeps is not expressible here.
+  // Every field the state machine reads back counts, the optional ones included.
   expect(
     snapshotHasMemory({ ...initialSignalSnapshot(), candidateFingerprint: 'f', lastHeatSec: 7 }),
   ).toBe(true);
-  expect(snapshotHasMemory({ ...initialSignalSnapshot(), extra: 1 } as SignalSnapshot)).toBe(true);
   expect(snapshotHasMemory({ ...initialSignalSnapshot(), state: 'cooling' })).toBe(true);
   expect(snapshotHasMemory({ ...initialSignalSnapshot(), episodeId: 'episode' })).toBe(true);
   expect(snapshotHasMemory({ ...initialSignalSnapshot(), lastAlertSec: 1 })).toBe(true);
   expect(snapshotHasMemory({ ...initialSignalSnapshot(), lastAlertVolume: 1n })).toBe(true);
   expect(snapshotHasMemory({ ...initialSignalSnapshot(), lastAlertScale: '5m' })).toBe(true);
-  expect(snapshotHasMemory({ ...initialSignalSnapshot(), lastFiveEndSec: 1 })).toBe(true);
   expect(snapshotHasMemory({ ...initialSignalSnapshot(), lowBuckets: 1 })).toBe(true);
   expect(snapshotHasMemory({ ...initialSignalSnapshot(), entryThreshold: 1n })).toBe(true);
   expect(snapshotHasMemory({ ...initialSignalSnapshot(), lastAlertKind: 'hot' })).toBe(true);
   expect(snapshotHasMemory({ ...initialSignalSnapshot(), candidateMinuteStartSec: 1 })).toBe(true);
+  // Two fields are not memory, and neither is written by a decision. `evaluateSignal` stamps the
+  // config version on every snapshot it writes, and sets the 5m watermark on every round that
+  // closes a bucket, so counting either one keeps every pool ever evaluated in the workset for good
+  // — the catalogue this table exists to bound. The row keeps both, so a pool that is selected
+  // again reads its watermark back exactly as it left it.
+  expect(snapshotHasMemory({ ...initialSignalSnapshot(), configVersion: 'sig:1' })).toBe(false);
+  expect(snapshotHasMemory({ ...initialSignalSnapshot(), lastFiveEndSec: 1 })).toBe(false);
+  // A field this test has never heard of is not memory either: the fields above are the whole of
+  // what the state machine reads back, and a predicate that counted anything else would be back to
+  // remembering every pool a round merely touched.
+  expect(snapshotHasMemory({ ...initialSignalSnapshot(), extra: 1 } as SignalSnapshot)).toBe(false);
 });
 
 test('the first fill is a one-time scan, and a rolled back fill is a fill that never happened', () => {

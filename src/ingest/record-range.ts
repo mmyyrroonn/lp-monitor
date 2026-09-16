@@ -9,6 +9,7 @@ import {
   type FetchMode,
   type PlannedFilter,
   type ProtocolDeployments,
+  type V4OperationMode,
 } from './filter-plan.js';
 import { fetchBoundedLogs, type FetchFragment, type FetchResult } from './fetch-range.js';
 import type { AssetRegistry } from '../registry/assets.js';
@@ -51,6 +52,11 @@ export interface FetchRangeOptions extends ProtocolDeployments {
   readonly logResponseGuard?: number;
   readonly maxLogsPerResponse?: number | null;
   readonly maxFilterValues?: number;
+  /**
+   * How this range's V4 operation requests are planned. Absent keeps the live default, `pool-ids`;
+   * `manager` is the offline experiment's explicit choice and is never set by the recorder.
+   */
+  readonly v4OperationMode?: V4OperationMode;
   readonly maxRangeBlocks?: number | bigint;
   readonly discoveryMaxRangeBlocks?: number | bigint;
   readonly observedAtMs: number;
@@ -229,6 +235,14 @@ function validateRange(options: FetchRangeOptions, maxFilterValues: number): voi
   if ((options.pools === undefined) === (options.registry === undefined)) {
     throw new Error('A range is planned from a registry context or a catalogue, not both');
   }
+  if (options.v4OperationMode === 'manager' && options.registry !== undefined) {
+    // The registry path plans from request templates, which hold the pool-id values this mode is
+    // defined by leaving out. Ignoring the option there would plan pool ids while the caller
+    // believes it asked for the manager universe, so the combination is refused instead.
+    throw new Error(
+      'Manager operation mode is planned from a catalogue, not from registry templates',
+    );
+  }
   if (options.registry !== undefined && options.mode === 'operations') {
     // The requests must be planned from the same registry the batch will be decoded against, and
     // only an index holds the sorted values that planning must not re-derive for every batch.
@@ -325,6 +339,7 @@ export async function fetchRange(
           options.fromBlock,
           options.toBlock,
           maxFilterValues,
+          { v4OperationMode: options.v4OperationMode },
         );
       } else {
         // This round's own discoveries join the templates before it is planned, so a pool created

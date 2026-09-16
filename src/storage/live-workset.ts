@@ -22,18 +22,45 @@ export interface LiveWorkset {
 }
 
 /**
+ * The signal fields that are memory: the state machine's own state, and everything it reads back to
+ * keep it. This list is the whole of the test below — a field that is not here cannot hold a pool
+ * in the workset.
+ *
+ * Two fields of `SignalSnapshot` are deliberately absent. `configVersion` is a stamp
+ * `evaluateSignal` writes on every snapshot it touches, and `lastFiveEndSec` is the 5m watermark it
+ * advances on every round that closes a bucket; both are written by the act of evaluating rather
+ * than by a decision, so counting either one would keep every pool ever evaluated in the workset
+ * for good — the catalogue this table exists to bound. The row keeps both, so a pool that is
+ * selected again reads its watermark back exactly as it left it.
+ */
+const MEMORY_FIELDS = [
+  'state',
+  'episodeId',
+  'lastAlertSec',
+  'lastAlertVolume',
+  'lastAlertScale',
+  'lastAlertKind',
+  'lowBuckets',
+  'entryThreshold',
+  'candidateMinuteStartSec',
+  'candidateFingerprint',
+  'lastHeatSec',
+] as const;
+
+/**
  * Whether a stored signal still carries something the initial snapshot does not.
  *
- * This is the only test that may retire a pool from the workset. Every field counts, including the
- * ones added after the first release, so a snapshot that differs from `initialSignalSnapshot()` in
- * any business field — a live state, an episode, an alert, a cooldown, a candidate fingerprint, a
- * heat mark, an entry threshold — keeps its pool in the workset. Inventing a shorter memory than
- * the one the state machine actually keeps would drop a pool mid-cooldown.
+ * This is the only test that may retire a pool from the workset, and it is a whitelist: a snapshot
+ * that differs from `initialSignalSnapshot()` in any field the state machine reads back — a live
+ * state, an episode, an alert, a cooldown, a candidate fingerprint, a heat mark, an entry threshold
+ * — keeps its pool in the workset. Inventing a shorter memory than the one the state machine
+ * actually keeps would drop a pool mid-cooldown, so a field added to `SignalSnapshot` belongs in
+ * `MEMORY_FIELDS` the moment the state machine starts reading it back.
  */
 export function snapshotHasMemory(snapshot: SignalSnapshot): boolean {
   const initial = initialSignalSnapshot() as unknown as Record<string, unknown>;
   const stored = snapshot as unknown as Record<string, unknown>;
-  for (const key of new Set([...Object.keys(initial), ...Object.keys(stored)]))
+  for (const key of MEMORY_FIELDS)
     if ((stored[key] ?? null) !== (initial[key] ?? null)) return true;
   return false;
 }

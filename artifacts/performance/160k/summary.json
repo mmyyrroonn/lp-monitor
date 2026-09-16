@@ -1,0 +1,84 @@
+{
+  "out": "E:\\lp-monitor\\.worktrees\\live-runtime-performance\\artifacts\\performance\\160k",
+  "allocation": {
+    "iterations": 20,
+    "fresh": 14,
+    "advance": 3,
+    "repeat": 3,
+    "normalTotal": 20,
+    "repairTotal": 3
+  },
+  "init": {
+    "fixtureMs": 313.155,
+    "catalogueMs": 48256.69,
+    "coverageMs": 145668.788,
+    "totalMs": 194238.634,
+    "registrations": 160000,
+    "activePools": 400,
+    "coverageMinutes": 181,
+    "window": {
+      "fromBlock": "63999100",
+      "toBlock": "64000000"
+    },
+    "catalogueLogs": 160000,
+    "catalogueShards": 2,
+    "operationsScope": "scope-v1-281d71e6797cd8bf73f008c09698d5bfb0bf5026ef35e77ad3ec0ef1cd6c8314",
+    "registryScopeId": "scope-v1-e62d003438737671596fe98e293098c98137086a7c006c0df6a4da1a4d684dd0",
+    "boundaryRows": 191,
+    "windowRoundLogs": 0,
+    "windowRoundShards": 164,
+    "getLogsRequests": 164,
+    "anchorRequests": 594
+  },
+  "normal": {
+    "count": 20,
+    "p50Ms": 6240,
+    "p95Ms": 7017,
+    "localProcessingMs": {
+      "count": 20,
+      "p50Ms": 3972,
+      "p95Ms": 4506,
+      "maxMs": 4545
+    }
+  },
+  "repairs": [
+    {
+      "kind": "new-registration-first-swap",
+      "totalMs": 5274,
+      "localProcessingMs": 4549
+    },
+    {
+      "kind": "metadata-backfill",
+      "totalMs": 9573,
+      "localProcessingMs": 6523
+    },
+    {
+      "kind": "history-revision",
+      "totalMs": 7857,
+      "localProcessingMs": 4892
+    }
+  ],
+  "filterPlan": {
+    "v4PoolIdValues": 156000,
+    "v4ShardCount": 156,
+    "v3ShardCount": 4,
+    "perShardRequestBytes": {
+      "count": 3200,
+      "p50Bytes": 69462,
+      "p95Bytes": 69462,
+      "maxBytes": 69462
+    },
+    "manifestBytesPerRound": {
+      "count": 20,
+      "p50Bytes": 11173228,
+      "p95Bytes": 11173228,
+      "maxBytes": 11173228
+    }
+  },
+  "http": {
+    "count": 26,
+    "p50Ms": 33,
+    "p95Ms": 48,
+    "maxMs": 71
+  }
+}

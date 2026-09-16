@@ -930,3 +930,122 @@ test('a branch replaced at the same height reconsiders the pool whose only input
   // not invent one. The extra count is the selection's, which is what this test is about.
   expect(scope.counts.evaluatedPools).toBe(POOL_COUNT);
 });
+
+/**
+ * The durable workset membership, read from the table rather than from a counter: a counter can
+ * only report what one round selected, and the question here is what the round left behind.
+ */
+function worksetMembers(db: Database.Database): string[] {
+  return (
+    db.prepare('select pool_id from live_signal_workset order by pool_id').all() as {
+      pool_id: string;
+    }[]
+  ).map((row) => row.pool_id);
+}
+
+/**
+ * The side of the workset the catalogue test above cannot reach: the round that a quiet catalogue is
+ * registered *by*, and the round after it.
+ *
+ * `2026-09-15-live-performance-03-live-pipeline.md` asks for a pool whose last event left the window
+ * to be evaluated once and moved out only once the round has established it has no window input, no
+ * signal memory and no revision. Nothing else in this file walks that road: the catalogue test
+ * absorbs its four hundred registrations in a sync of its own *before* the measured round, so they
+ * are never that round's input, never evaluated, and never anywhere the workset could keep them.
+ * Here the four hundred arrive inside the batch — the registry journal hands them to the round as
+ * its own input — so the round evaluates them and writes each one a snapshot. That snapshot is the
+ * only state from which a later round could carry them, and what the memory test makes of it decides
+ * whether a quiet catalogue costs one round or every round after it.
+ *
+ * The numbers are the ones the real path reports, not the ideal ones: the measured round evaluates
+ * four hundred and twelve pools because it genuinely has four hundred and twelve to evaluate, and
+ * the round after it evaluates twelve because it genuinely has twelve.
+ */
+test('a round that evaluates a quiet catalogue does not carry it into the next round', () => {
+  const { db } = runSample();
+  const CROWD = 400;
+  const crowd = new Set(seedQuietCatalogue(db, CROWD));
+  const crowdList = [...crowd];
+  const inCrowd = `in (${crowdList.map(() => '?').join(',')})`;
+  // The three pools the sample leaves holding real memory — alpha's candidate fingerprint, bravo's
+  // cooling episode and charlie's candidate. A crowd id left in the table would appear among them as
+  // its own raw id, since `poolLabel` only knows the sample's twelve.
+  const MEMBERS = ['alpha', 'bravo', 'charlie'];
+
+  // The round that meets the registrations itself, with no sync outside the batch. The sample's last
+  // accepted range ends at block 8700, so this one continues from it at the sample's own tip: a
+  // quiet range, which is what makes the four hundred registrations the round's only new input.
+  const registeringWatermarkSec = REVISION_WATERMARK_SEC;
+  const registeringToBlock = registeringWatermarkSec - 60;
+  const registeringFromBlock = registeringToBlock - 59;
+  const registering = worksetBatch({
+    id: 'batch-16',
+    batchNumber: BATCH_COUNT + 2,
+    fromBlock: registeringFromBlock,
+    toBlock: registeringToBlock,
+    previous: anchor(registeringFromBlock - 1),
+    logs: logsBetween(registeringFromBlock, registeringToBlock, false),
+    boundaries: minuteBoundaries(WATERMARKS.at(-1)!, registeringWatermarkSec),
+  });
+  const first = openWorkCounts();
+  try {
+    commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, registering);
+  } finally {
+    first.close();
+  }
+
+  // This round evaluates the whole catalogue it was registered in: the sample's twelve pools and
+  // all four hundred of the crowd. Without this the next round's silence about them would prove
+  // nothing — a round that never looked cannot be said to have let them go.
+  expect(first.counts.evaluatedWorksetPools).toBe(POOL_COUNT + CROWD);
+  // The crowd is not merely selected: a registered pool with no events of its own still gets a
+  // window assembled, so each one of the four hundred is evaluated and left with a snapshot.
+  expect(first.counts.evaluatedPools).toBe(POOL_COUNT + CROWD);
+  expect(
+    db
+      .prepare(`select count(*) as n from signal_snapshots where pool_id ${inCrowd}`)
+      .get(...crowdList),
+  ).toEqual({ n: CROWD });
+  // And not one of those snapshots is memory: the round that evaluated them keeps none of them,
+  // and the pools it keeps are the three the sample left mid-episode.
+  expect(worksetMembers(db).map(poolLabel).sort()).toEqual(MEMBERS);
+
+  // The round after it advances the watermark with nothing else: no logs in the range, no new
+  // registration, nothing revised. The chain moved, so the standing watermark does not answer for
+  // this round and the pools with memory are reconsidered — but those are the same three, and they
+  // are already among the twelve pools whose events are still inside the retained window.
+  const quietWatermarkSec = registeringWatermarkSec + 60;
+  const quietToBlock = quietWatermarkSec - 60;
+  const quietFromBlock = quietToBlock - 59;
+  const quiet = worksetBatch({
+    id: 'batch-17',
+    batchNumber: BATCH_COUNT + 3,
+    fromBlock: quietFromBlock,
+    toBlock: quietToBlock,
+    previous: anchor(quietFromBlock - 1),
+    logs: logsBetween(quietFromBlock, quietToBlock, false),
+    boundaries: minuteBoundaries(registeringWatermarkSec, quietWatermarkSec),
+  });
+  const second = openWorkCounts();
+  try {
+    commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, quiet);
+  } finally {
+    second.close();
+  }
+
+  // Twelve, not four hundred and twelve: this round has window input for the sample's twelve pools
+  // and nothing at all for the crowd — no event, no memory of one, no revision of one — so the
+  // catalogue it registered one round earlier costs it nothing.
+  expect(second.counts.evaluatedWorksetPools).toBe(POOL_COUNT);
+  // The same twelve are the pools whose windows this round assembles: the selection is the whole of
+  // what the round evaluated, not a cheap one it then made up for elsewhere.
+  expect(second.counts.evaluatedPools).toBe(POOL_COUNT);
+  // The crowd is not merely unselected: it is not in the durable table either, so the round after
+  // this one does not reconsider it a second time.
+  expect(
+    db
+      .prepare(`select count(*) as n from live_signal_workset where pool_id ${inCrowd}`)
+      .get(...crowdList),
+  ).toEqual({ n: 0 });
+  expect(worksetMembers(db).map(poolLabel).sort()).toEqual(MEMBERS);
+});

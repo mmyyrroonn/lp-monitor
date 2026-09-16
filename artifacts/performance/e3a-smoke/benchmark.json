@@ -1,0 +1,1162 @@
+{
+  "generatedAt": "2026-09-16T01:43:19.357Z",
+  "environment": {
+    "node": "v24.5.0",
+    "platform": "win32 x64",
+    "cpuModel": "AMD Ryzen 9 9950X 16-Core Processor            ",
+    "cpuCount": 32,
+    "totalMemoryBytes": 100558983168,
+    "freeMemoryBytes": 72488480768,
+    "loadAverage": [
+      0,
+      0,
+      0
+    ],
+    "parallelLoad": "dashboard snapshot worker thread (in-process, started by this run); operator report: none stated",
+    "gitHead": "7c3c39ba2d868612b4fc76ab7d94aea6cd0b3f82"
+  },
+  "options": {
+    "pools": 2000,
+    "active": 2000,
+    "iterations": 5,
+    "assetCount": 194,
+    "historyMinutes": 180,
+    "out": "E:\\lp-monitor\\.worktrees\\live-runtime-performance\\artifacts\\performance\\e3a-smoke"
+  },
+  "stageAccounting": {
+    "exclusive": [
+      "rpcAcquisition",
+      "notify"
+    ],
+    "insideLocalProcessing": [
+      "rawPersist",
+      "artifactPersist",
+      "coverage",
+      "registry",
+      "projection",
+      "valuation",
+      "windows",
+      "signals",
+      "commitOther"
+    ],
+    "note": "localProcessingMs is the wall clock from the mocked RPC answers being complete to the accepted transaction being durable: storing the raw batch, resolving the chain time, writing the artifact, deriving the projection, the windows, the valuations and the signals, and committing them. Every stage inside it is measured once and they partition that one window, so their sum is at most it. rpcAcquisition and notify stand outside it. networkWaitMsAfterFetch is the part of the window that was spent inside the transport rather than computing, and the background metadata apply is inside it by construction: its CPU is this process's work while its network is not counted in any stage."
+  },
+  "percentileDefinition": "ascending[Math.ceil(0.95 * n) - 1]",
+  "boundary": {
+    "network": "mocked in process: fetch answers JSON-RPC from a synthetic chain",
+    "provider": "none: no HTTP request leaves this process",
+    "pacing": "the mock reader runs unpaced and unbudgeted; config/robinhood.json pacing unexercised",
+    "database": "temporary SQLite under the OS temp directory, removed at exit",
+    "clock": "wall clock, so RSS and the dashboard worker thread are part of the measurement"
+  },
+  "fixtureMs": 5.144,
+  "init": {
+    "fixtureMs": 5.144,
+    "catalogueMs": 424.519,
+    "coverageMs": 8721.075,
+    "totalMs": 9150.737,
+    "registrations": 2000,
+    "activePools": 2000,
+    "coverageMinutes": 181,
+    "window": {
+      "fromBlock": "63999100",
+      "toBlock": "64000000"
+    },
+    "catalogueLogs": 2000,
+    "catalogueShards": 2,
+    "operationsScope": "scope-v1-281d71e6797cd8bf73f008c09698d5bfb0bf5026ef35e77ad3ec0ef1cd6c8314",
+    "registryScopeId": "scope-v1-e62d003438737671596fe98e293098c98137086a7c006c0df6a4da1a4d684dd0",
+    "boundaryRows": 191,
+    "windowRoundLogs": 0,
+    "windowRoundShards": 7,
+    "getLogsRequests": 7,
+    "anchorRequests": 594
+  },
+  "allocation": {
+    "iterations": 5,
+    "fresh": 4,
+    "advance": 0,
+    "repeat": 1,
+    "normalTotal": 5,
+    "repairTotal": 3
+  },
+  "warmup": {
+    "rounds": 3,
+    "samples": [
+      {
+        "index": 0,
+        "kind": "warmup",
+        "fromBlock": "64000001",
+        "toBlock": "64000005",
+        "logs": 2021,
+        "manifestShards": 7,
+        "registrationsCarried": 2000,
+        "newlyDiscovered": 0,
+        "batchId": "554b242b63afad7a523a157cc87901420bab7f60ba92322e658afa0f8e1d1981",
+        "perShardRequestBytes": [
+          2665,
+          69462,
+          66012
+        ],
+        "totalMs": 9594,
+        "rpcAcquisitionMs": 195,
+        "localProcessingMs": 9399,
+        "networkWaitMsAfterFetch": 16,
+        "notifyMs": 0.039,
+        "stageMs": {
+          "rpcAcquisition": 195.236,
+          "rawPersist": 109.018,
+          "coverage": 174.032,
+          "artifactPersist": 29.134,
+          "projection": 2506.21,
+          "valuation": 67.343,
+          "windows": 4634.726,
+          "signals": 226.872,
+          "notify": 0.039
+        },
+        "counts": {
+          "registryRowsRead": 4000,
+          "registryRowsSerialized": 12000,
+          "rawBatchDecodes": 1,
+          "valuationComputes": 2023,
+          "evaluatedPools": 2000,
+          "metadataCandidates": 0,
+          "coverageIndexBuilds": 777,
+          "registryChangesRead": 6000,
+          "operationFilterRebuilds": 0,
+          "operationFilterValuesScanned": 0,
+          "liveEventRowsRead": 0,
+          "evaluatedWorksetPools": 2000,
+          "readModelIndexBuilds": 0,
+          "readModelRegistryScans": 0,
+          "readModelPoolsBuilt": 0,
+          "readModelPageCacheHits": 0
+        },
+        "metadataApplied": {
+          "resolved": 1,
+          "failed": 0,
+          "stale": 0
+        },
+        "rawBatchBytes": 3662165,
+        "poolRegistrationsBytes": 1315781,
+        "manifestBytes": 483434,
+        "http": {
+          "status": 200,
+          "latencyMs": 192,
+          "responseBytes": 508
+        },
+        "rssBytes": 695037952
+      },
+      {
+        "index": 1,
+        "kind": "warmup",
+        "fromBlock": "64000006",
+        "toBlock": "64000010",
+        "logs": 2021,
+        "manifestShards": 7,
+        "registrationsCarried": 2000,
+        "newlyDiscovered": 0,
+        "batchId": "9b95112154fca5f1ee6ee0e29be1dae17323ed8fa96a192186f7b74b2af4a629",
+        "perShardRequestBytes": [
+          2665,
+          69462,
+          66012
+        ],
+        "totalMs": 7939,
+        "rpcAcquisitionMs": 257,
+        "localProcessingMs": 7682,
+        "networkWaitMsAfterFetch": 45,
+        "notifyMs": 0.045,
+        "stageMs": {
+          "rpcAcquisition": 256.359,
+          "rawPersist": 91.203,
+          "coverage": 364.033,
+          "artifactPersist": 31.281,
+          "projection": 1027.909,
+          "valuation": 87.541,
+          "windows": 5380.163,
+          "signals": 207.553,
+          "notify": 0.045
+        },
+        "counts": {
+          "registryRowsRead": 0,
+          "registryRowsSerialized": 0,
+          "rawBatchDecodes": 1,
+          "valuationComputes": 2093,
+          "evaluatedPools": 2000,
+          "metadataCandidates": 0,
+          "coverageIndexBuilds": 777,
+          "registryChangesRead": 0,
+          "operationFilterRebuilds": 0,
+          "operationFilterValuesScanned": 0,
+          "liveEventRowsRead": 0,
+          "evaluatedWorksetPools": 2000,
+          "readModelIndexBuilds": 0,
+          "readModelRegistryScans": 0,
+          "readModelPoolsBuilt": 0,
+          "readModelPageCacheHits": 0
+        },
+        "metadataApplied": {
+          "resolved": 6,
+          "failed": 0,
+          "stale": 0
+        },
+        "rawBatchBytes": 3662165,
+        "poolRegistrationsBytes": 1315781,
+        "manifestBytes": 483434,
+        "http": {
+          "status": 200,
+          "latencyMs": 122,
+          "responseBytes": 272863
+        },
+        "rssBytes": 1440964608
+      },
+      {
+        "index": 2,
+        "kind": "warmup",
+        "fromBlock": "64000011",
+        "toBlock": "64000015",
+        "logs": 2021,
+        "manifestShards": 7,
+        "registrationsCarried": 2000,
+        "newlyDiscovered": 0,
+        "batchId": "d875078887e2bd1b67cd74746523ff2d4d78e0e641f379f207a7dcba647843c1",
+        "perShardRequestBytes": [
+          2665,
+          69462,
+          66012
+        ],
+        "totalMs": 8373,
+        "rpcAcquisitionMs": 227,
+        "localProcessingMs": 8146,
+        "networkWaitMsAfterFetch": 65,
+        "notifyMs": 0.037,
+        "stageMs": {
+          "rpcAcquisition": 226.947,
+          "rawPersist": 91.551,
+          "coverage": 580.335,
+          "artifactPersist": 30.376,
+          "projection": 1069.773,
+          "valuation": 113.678,
+          "windows": 5382.327,
+          "signals": 202.072,
+          "notify": 0.037
+        },
+        "counts": {
+          "registryRowsRead": 0,
+          "registryRowsSerialized": 0,
+          "rawBatchDecodes": 1,
+          "valuationComputes": 2155,
+          "evaluatedPools": 2000,
+          "metadataCandidates": 0,
+          "coverageIndexBuilds": 777,
+          "registryChangesRead": 0,
+          "operationFilterRebuilds": 0,
+          "operationFilterValuesScanned": 0,
+          "liveEventRowsRead": 0,
+          "evaluatedWorksetPools": 2000,
+          "readModelIndexBuilds": 0,
+          "readModelRegistryScans": 0,
+          "readModelPoolsBuilt": 0,
+          "readModelPageCacheHits": 0
+        },
+        "metadataApplied": {
+          "resolved": 6,
+          "failed": 0,
+          "stale": 0
+        },
+        "rawBatchBytes": 3662165,
+        "poolRegistrationsBytes": 1315781,
+        "manifestBytes": 483434,
+        "http": {
+          "status": 200,
+          "latencyMs": 103,
+          "responseBytes": 272728
+        },
+        "rssBytes": 1657253888
+      }
+    ]
+  },
+  "normal": {
+    "samples": [
+      {
+        "index": 0,
+        "kind": "fresh",
+        "fromBlock": "64000016",
+        "toBlock": "64000020",
+        "logs": 2021,
+        "manifestShards": 7,
+        "registrationsCarried": 2000,
+        "newlyDiscovered": 0,
+        "batchId": "9dbdfde7fc0e6941ec28155497d36a92f47e88a18531417ceb6b45765ed9556d",
+        "perShardRequestBytes": [
+          2665,
+          69462,
+          66012
+        ],
+        "totalMs": 13052,
+        "rpcAcquisitionMs": 254,
+        "localProcessingMs": 12798,
+        "networkWaitMsAfterFetch": 16,
+        "notifyMs": 0.168,
+        "stageMs": {
+          "rpcAcquisition": 253.511,
+          "rawPersist": 99.047,
+          "coverage": 1306.989,
+          "artifactPersist": 33.08,
+          "projection": 1489.4,
+          "valuation": 238.788,
+          "windows": 8092.947,
+          "signals": 236.332,
+          "notify": 0.168
+        },
+        "counts": {
+          "registryRowsRead": 0,
+          "registryRowsSerialized": 0,
+          "rawBatchDecodes": 1,
+          "valuationComputes": 2155,
+          "evaluatedPools": 2000,
+          "metadataCandidates": 0,
+          "coverageIndexBuilds": 777,
+          "registryChangesRead": 0,
+          "operationFilterRebuilds": 0,
+          "operationFilterValuesScanned": 0,
+          "liveEventRowsRead": 0,
+          "evaluatedWorksetPools": 2000,
+          "readModelIndexBuilds": 0,
+          "readModelRegistryScans": 0,
+          "readModelPoolsBuilt": 0,
+          "readModelPageCacheHits": 0
+        },
+        "metadataApplied": {
+          "resolved": 4,
+          "failed": 0,
+          "stale": 0
+        },
+        "rawBatchBytes": 3662165,
+        "poolRegistrationsBytes": 1315781,
+        "manifestBytes": 483434,
+        "http": {
+          "status": 200,
+          "latencyMs": 185,
+          "responseBytes": 272728
+        },
+        "rssBytes": 1653698560
+      },
+      {
+        "index": 1,
+        "kind": "fresh",
+        "fromBlock": "64000021",
+        "toBlock": "64000025",
+        "logs": 2021,
+        "manifestShards": 7,
+        "registrationsCarried": 2000,
+        "newlyDiscovered": 0,
+        "batchId": "99d747f638e724f1586fbfdfa9716ab57e4c4b42473015aa613b2aff510c23a3",
+        "perShardRequestBytes": [
+          2665,
+          69462,
+          66012
+        ],
+        "totalMs": 13433,
+        "rpcAcquisitionMs": 356,
+        "localProcessingMs": 13077,
+        "networkWaitMsAfterFetch": 85,
+        "notifyMs": 0.138,
+        "stageMs": {
+          "rpcAcquisition": 355.666,
+          "rawPersist": 132.951,
+          "coverage": 1600.308,
+          "artifactPersist": 30.683,
+          "projection": 1657.871,
+          "valuation": 227.788,
+          "windows": 7910.442,
+          "signals": 288.352,
+          "notify": 0.138
+        },
+        "counts": {
+          "registryRowsRead": 0,
+          "registryRowsSerialized": 0,
+          "rawBatchDecodes": 1,
+          "valuationComputes": 2375,
+          "evaluatedPools": 2000,
+          "metadataCandidates": 0,
+          "coverageIndexBuilds": 777,
+          "registryChangesRead": 0,
+          "operationFilterRebuilds": 0,
+          "operationFilterValuesScanned": 0,
+          "liveEventRowsRead": 0,
+          "evaluatedWorksetPools": 2000,
+          "readModelIndexBuilds": 0,
+          "readModelRegistryScans": 0,
+          "readModelPoolsBuilt": 0,
+          "readModelPageCacheHits": 0
+        },
+        "metadataApplied": {
+          "resolved": 8,
+          "failed": 0,
+          "stale": 0
+        },
+        "rawBatchBytes": 3662165,
+        "poolRegistrationsBytes": 1315781,
+        "manifestBytes": 483434,
+        "http": {
+          "status": 200,
+          "latencyMs": 142,
+          "responseBytes": 272728
+        },
+        "rssBytes": 1527885824
+      },
+      {
+        "index": 2,
+        "kind": "fresh",
+        "fromBlock": "64000026",
+        "toBlock": "64000030",
+        "logs": 2021,
+        "manifestShards": 7,
+        "registrationsCarried": 2000,
+        "newlyDiscovered": 0,
+        "batchId": "de72fd56cb490b575abcff5e44bc197a7bf909b157125962414784ee870ee4a4",
+        "perShardRequestBytes": [
+          2665,
+          69462,
+          66012
+        ],
+        "totalMs": 13010,
+        "rpcAcquisitionMs": 292,
+        "localProcessingMs": 12717,
+        "networkWaitMsAfterFetch": 78,
+        "notifyMs": 0.107,
+        "stageMs": {
+          "rpcAcquisition": 292.21,
+          "rawPersist": 117.064,
+          "coverage": 1913.555,
+          "artifactPersist": 31,
+          "projection": 1322.652,
+          "valuation": 319.207,
+          "windows": 7275.751,
+          "signals": 259.086,
+          "notify": 0.107
+        },
+        "counts": {
+          "registryRowsRead": 0,
+          "registryRowsSerialized": 0,
+          "rawBatchDecodes": 1,
+          "valuationComputes": 2298,
+          "evaluatedPools": 2000,
+          "metadataCandidates": 0,
+          "coverageIndexBuilds": 777,
+          "registryChangesRead": 0,
+          "operationFilterRebuilds": 0,
+          "operationFilterValuesScanned": 0,
+          "liveEventRowsRead": 0,
+          "evaluatedWorksetPools": 2000,
+          "readModelIndexBuilds": 0,
+          "readModelRegistryScans": 0,
+          "readModelPoolsBuilt": 0,
+          "readModelPageCacheHits": 0
+        },
+        "metadataApplied": {
+          "resolved": 5,
+          "failed": 0,
+          "stale": 0
+        },
+        "rawBatchBytes": 3662165,
+        "poolRegistrationsBytes": 1315781,
+        "manifestBytes": 483434,
+        "http": {
+          "status": 200,
+          "latencyMs": 137,
+          "responseBytes": 282674
+        },
+        "rssBytes": 2220830720
+      },
+      {
+        "index": 3,
+        "kind": "fresh",
+        "fromBlock": "64000031",
+        "toBlock": "64000035",
+        "logs": 2021,
+        "manifestShards": 7,
+        "registrationsCarried": 2000,
+        "newlyDiscovered": 0,
+        "batchId": "f913515ea36b96e9b3ea9869f1d5468f7c6912654eda5e5694c420bd75df70b1",
+        "perShardRequestBytes": [
+          2665,
+          69462,
+          66012
+        ],
+        "totalMs": 13172,
+        "rpcAcquisitionMs": 217,
+        "localProcessingMs": 12955,
+        "networkWaitMsAfterFetch": 16,
+        "notifyMs": 0.128,
+        "stageMs": {
+          "rpcAcquisition": 217.495,
+          "rawPersist": 130.314,
+          "coverage": 1900.379,
+          "artifactPersist": 42.593,
+          "projection": 1455.616,
+          "valuation": 257.541,
+          "windows": 7444.629,
+          "signals": 244.101,
+          "notify": 0.128
+        },
+        "counts": {
+          "registryRowsRead": 0,
+          "registryRowsSerialized": 0,
+          "rawBatchDecodes": 1,
+          "valuationComputes": 2209,
+          "evaluatedPools": 2000,
+          "metadataCandidates": 0,
+          "coverageIndexBuilds": 777,
+          "registryChangesRead": 0,
+          "operationFilterRebuilds": 0,
+          "operationFilterValuesScanned": 0,
+          "liveEventRowsRead": 0,
+          "evaluatedWorksetPools": 2000,
+          "readModelIndexBuilds": 0,
+          "readModelRegistryScans": 0,
+          "readModelPoolsBuilt": 0,
+          "readModelPageCacheHits": 0
+        },
+        "metadataApplied": {
+          "resolved": 3,
+          "failed": 0,
+          "stale": 0
+        },
+        "rawBatchBytes": 3662165,
+        "poolRegistrationsBytes": 1315781,
+        "manifestBytes": 483434,
+        "http": {
+          "status": 200,
+          "latencyMs": 234,
+          "responseBytes": 282674
+        },
+        "rssBytes": 1890246656
+      },
+      {
+        "index": 4,
+        "kind": "repeat",
+        "fromBlock": "64000016",
+        "toBlock": "64000040",
+        "logs": 8084,
+        "manifestShards": 7,
+        "registrationsCarried": 2000,
+        "newlyDiscovered": 0,
+        "batchId": "e550a8212f421976471ae4f1ae1f5761dac90e7e6b1fd90acc2c7a50bb1c6720",
+        "perShardRequestBytes": [
+          2665,
+          69462,
+          66012
+        ],
+        "totalMs": 16118,
+        "rpcAcquisitionMs": 1000,
+        "localProcessingMs": 15118,
+        "networkWaitMsAfterFetch": 86,
+        "notifyMs": 0.173,
+        "stageMs": {
+          "rpcAcquisition": 999.923,
+          "rawPersist": 289.64,
+          "coverage": 1911.903,
+          "artifactPersist": 115.231,
+          "projection": 2518.339,
+          "valuation": 244.812,
+          "windows": 8138.713,
+          "signals": 305.671,
+          "notify": 0.173
+        },
+        "counts": {
+          "registryRowsRead": 0,
+          "registryRowsSerialized": 0,
+          "rawBatchDecodes": 1,
+          "valuationComputes": 490,
+          "evaluatedPools": 2000,
+          "metadataCandidates": 0,
+          "coverageIndexBuilds": 777,
+          "registryChangesRead": 0,
+          "operationFilterRebuilds": 0,
+          "operationFilterValuesScanned": 0,
+          "liveEventRowsRead": 0,
+          "evaluatedWorksetPools": 2000,
+          "readModelIndexBuilds": 0,
+          "readModelRegistryScans": 0,
+          "readModelPoolsBuilt": 0,
+          "readModelPageCacheHits": 0
+        },
+        "metadataApplied": {
+          "resolved": 7,
+          "failed": 0,
+          "stale": 0
+        },
+        "rawBatchBytes": 10115533,
+        "poolRegistrationsBytes": 1315781,
+        "manifestBytes": 1350445,
+        "http": {
+          "status": 200,
+          "latencyMs": 193,
+          "responseBytes": 282674
+        },
+        "rssBytes": 1450663936
+      }
+    ],
+    "durationsMs": [
+      13052,
+      13433,
+      13010,
+      13172,
+      16118
+    ],
+    "p50Ms": 13172,
+    "p95Ms": 16118,
+    "maxMs": 16118,
+    "percentileDefinition": "ascending[Math.ceil(0.95 * n) - 1]",
+    "localProcessingMs": {
+      "count": 5,
+      "p50Ms": 12955,
+      "p95Ms": 15118,
+      "maxMs": 15118
+    },
+    "rpcAcquisitionMs": {
+      "count": 5,
+      "p50Ms": 292,
+      "p95Ms": 1000,
+      "maxMs": 1000
+    },
+    "rawBatchBytes": {
+      "count": 5,
+      "p50Bytes": 3662165,
+      "p95Bytes": 10115533,
+      "maxBytes": 10115533
+    },
+    "manifestBytes": {
+      "count": 5,
+      "p50Bytes": 483434,
+      "p95Bytes": 1350445,
+      "maxBytes": 1350445
+    },
+    "stages": {
+      "rawPersist": {
+        "count": 5,
+        "p50Ms": 130.314,
+        "p95Ms": 289.64,
+        "maxMs": 289.64
+      },
+      "artifactPersist": {
+        "count": 5,
+        "p50Ms": 33.08,
+        "p95Ms": 115.231,
+        "maxMs": 115.231
+      },
+      "coverage": {
+        "count": 5,
+        "p50Ms": 1900.379,
+        "p95Ms": 1913.555,
+        "maxMs": 1913.555
+      },
+      "projection": {
+        "count": 5,
+        "p50Ms": 1489.4,
+        "p95Ms": 2518.339,
+        "maxMs": 2518.339
+      },
+      "valuation": {
+        "count": 5,
+        "p50Ms": 244.812,
+        "p95Ms": 319.207,
+        "maxMs": 319.207
+      },
+      "windows": {
+        "count": 5,
+        "p50Ms": 7910.442,
+        "p95Ms": 8138.713,
+        "maxMs": 8138.713
+      },
+      "signals": {
+        "count": 5,
+        "p50Ms": 259.086,
+        "p95Ms": 305.671,
+        "maxMs": 305.671
+      },
+      "rpcAcquisition": {
+        "count": 5,
+        "p50Ms": 292.21,
+        "p95Ms": 999.923,
+        "maxMs": 999.923
+      },
+      "notify": {
+        "count": 5,
+        "p50Ms": 0.138,
+        "p95Ms": 0.173,
+        "maxMs": 0.173
+      }
+    },
+    "counters": {
+      "registryRowsRead": {
+        "count": 5,
+        "p50Ms": 0,
+        "p95Ms": 0,
+        "maxMs": 0
+      },
+      "registryRowsSerialized": {
+        "count": 5,
+        "p50Ms": 0,
+        "p95Ms": 0,
+        "maxMs": 0
+      },
+      "rawBatchDecodes": {
+        "count": 5,
+        "p50Ms": 1,
+        "p95Ms": 1,
+        "maxMs": 1
+      },
+      "valuationComputes": {
+        "count": 5,
+        "p50Ms": 2209,
+        "p95Ms": 2375,
+        "maxMs": 2375
+      },
+      "evaluatedPools": {
+        "count": 5,
+        "p50Ms": 2000,
+        "p95Ms": 2000,
+        "maxMs": 2000
+      },
+      "metadataCandidates": {
+        "count": 5,
+        "p50Ms": 0,
+        "p95Ms": 0,
+        "maxMs": 0
+      },
+      "coverageIndexBuilds": {
+        "count": 5,
+        "p50Ms": 777,
+        "p95Ms": 777,
+        "maxMs": 777
+      },
+      "registryChangesRead": {
+        "count": 5,
+        "p50Ms": 0,
+        "p95Ms": 0,
+        "maxMs": 0
+      },
+      "operationFilterRebuilds": {
+        "count": 5,
+        "p50Ms": 0,
+        "p95Ms": 0,
+        "maxMs": 0
+      },
+      "operationFilterValuesScanned": {
+        "count": 5,
+        "p50Ms": 0,
+        "p95Ms": 0,
+        "maxMs": 0
+      },
+      "liveEventRowsRead": {
+        "count": 5,
+        "p50Ms": 0,
+        "p95Ms": 0,
+        "maxMs": 0
+      },
+      "evaluatedWorksetPools": {
+        "count": 5,
+        "p50Ms": 2000,
+        "p95Ms": 2000,
+        "maxMs": 2000
+      },
+      "readModelIndexBuilds": {
+        "count": 5,
+        "p50Ms": 0,
+        "p95Ms": 0,
+        "maxMs": 0
+      },
+      "readModelRegistryScans": {
+        "count": 5,
+        "p50Ms": 0,
+        "p95Ms": 0,
+        "maxMs": 0
+      },
+      "readModelPoolsBuilt": {
+        "count": 5,
+        "p50Ms": 0,
+        "p95Ms": 0,
+        "maxMs": 0
+      },
+      "readModelPageCacheHits": {
+        "count": 5,
+        "p50Ms": 0,
+        "p95Ms": 0,
+        "maxMs": 0
+      }
+    },
+    "perRound": {
+      "evaluatedPools": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "evaluatedWorksetPools": [
+        2000,
+        2000,
+        2000,
+        2000,
+        2000
+      ],
+      "registryRowsRead": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "registryRowsSerialized": [
+        0,
+        0,
+        0,
+        0,
+        0
+      ]
+    }
+  },
+  "repairs": [
+    {
+      "index": 0,
+      "kind": "new-registration-first-swap",
+      "fromBlock": "64000041",
+      "toBlock": "64000045",
+      "logs": 2,
+      "manifestShards": 7,
+      "registrationsCarried": 1,
+      "newlyDiscovered": 1,
+      "batchId": "5d3745d3fca5a1f9eb7cd0f744222f4c69a4cd432d705ac9c82d67a0bb0e9992",
+      "perShardRequestBytes": [
+        2665,
+        69462,
+        66081
+      ],
+      "totalMs": 12324,
+      "rpcAcquisitionMs": 148,
+      "localProcessingMs": 12176,
+      "networkWaitMsAfterFetch": 56,
+      "notifyMs": 0.063,
+      "stageMs": {
+        "rpcAcquisition": 147.11,
+        "rawPersist": 5.176,
+        "coverage": 2068.017,
+        "artifactPersist": 8.778,
+        "projection": 236.085,
+        "valuation": 207.954,
+        "windows": 7773.921,
+        "signals": 326.194,
+        "notify": 0.063
+      },
+      "counts": {
+        "registryRowsRead": 0,
+        "registryRowsSerialized": 2,
+        "rawBatchDecodes": 1,
+        "valuationComputes": 491,
+        "evaluatedPools": 2001,
+        "metadataCandidates": 0,
+        "coverageIndexBuilds": 777,
+        "registryChangesRead": 3,
+        "operationFilterRebuilds": 1,
+        "operationFilterValuesScanned": 1951,
+        "liveEventRowsRead": 0,
+        "evaluatedWorksetPools": 2001,
+        "readModelIndexBuilds": 0,
+        "readModelRegistryScans": 0,
+        "readModelPoolsBuilt": 0,
+        "readModelPageCacheHits": 0
+      },
+      "metadataApplied": {
+        "resolved": 7,
+        "failed": 0,
+        "stale": 0
+      },
+      "rawBatchBytes": 198977,
+      "poolRegistrationsBytes": 1371,
+      "manifestBytes": 194924,
+      "http": {
+        "status": 200,
+        "latencyMs": 33,
+        "responseBytes": 282674
+      },
+      "rssBytes": 2334588928,
+      "newPoolId": "0xb04edcb0dee0b0f6585470c014eb5afbc01534fdd6180c2c0b098786e29016d6"
+    },
+    {
+      "index": 1,
+      "kind": "metadata-backfill",
+      "fromBlock": "64000046",
+      "toBlock": "64000050",
+      "logs": 2021,
+      "manifestShards": 7,
+      "registrationsCarried": 2000,
+      "newlyDiscovered": 0,
+      "batchId": "2e0a4f0d61b01662e985fd401de3dc434219603a0a8d0c843eb9837f03ec5179",
+      "perShardRequestBytes": [
+        2665,
+        69462,
+        66081
+      ],
+      "totalMs": 14447,
+      "rpcAcquisitionMs": 228,
+      "localProcessingMs": 14219,
+      "networkWaitMsAfterFetch": 26,
+      "notifyMs": 0.045,
+      "stageMs": {
+        "rpcAcquisition": 227.416,
+        "rawPersist": 115.307,
+        "coverage": 2069.571,
+        "artifactPersist": 39.365,
+        "projection": 1465.269,
+        "valuation": 454.56,
+        "windows": 7533.195,
+        "signals": 265.841,
+        "notify": 0.045
+      },
+      "counts": {
+        "registryRowsRead": 0,
+        "registryRowsSerialized": 0,
+        "rawBatchDecodes": 1,
+        "valuationComputes": 5663,
+        "evaluatedPools": 2001,
+        "metadataCandidates": 0,
+        "coverageIndexBuilds": 777,
+        "registryChangesRead": 0,
+        "operationFilterRebuilds": 1,
+        "operationFilterValuesScanned": 1951,
+        "liveEventRowsRead": 0,
+        "evaluatedWorksetPools": 2001,
+        "readModelIndexBuilds": 0,
+        "readModelRegistryScans": 0,
+        "readModelPoolsBuilt": 0,
+        "readModelPageCacheHits": 0
+      },
+      "metadataApplied": {
+        "resolved": 63,
+        "failed": 0,
+        "stale": 0
+      },
+      "rawBatchBytes": 3662234,
+      "poolRegistrationsBytes": 1315781,
+      "manifestBytes": 483503,
+      "http": {
+        "status": 200,
+        "latencyMs": 167,
+        "responseBytes": 276929
+      },
+      "rssBytes": 2475495424,
+      "queueBeforeDrain": {
+        "eligible": 50,
+        "retryWaiting": 0,
+        "inflight": 1
+      },
+      "dependencyTokens": 12
+    },
+    {
+      "index": 2,
+      "kind": "history-revision",
+      "fromBlock": "64000048",
+      "toBlock": "64000055",
+      "logs": 1212,
+      "manifestShards": 7,
+      "registrationsCarried": 1200,
+      "newlyDiscovered": 0,
+      "batchId": "c33434f6ad3370a7c92ebcf066f9ea2037a8fa5a989e2c4ae5252857b7dc54cd",
+      "perShardRequestBytes": [
+        2665,
+        69462,
+        66081
+      ],
+      "totalMs": 11816,
+      "rpcAcquisitionMs": 118,
+      "localProcessingMs": 11669,
+      "networkWaitMsAfterFetch": 17,
+      "notifyMs": 0.027,
+      "stageMs": {
+        "rpcAcquisition": 117.702,
+        "rawPersist": 77.533,
+        "coverage": 2251.592,
+        "artifactPersist": 32.889,
+        "projection": 994.739,
+        "valuation": 596.376,
+        "windows": 5479.577,
+        "signals": 894.262,
+        "notify": 0.027
+      },
+      "counts": {
+        "registryRowsRead": 4001,
+        "registryRowsSerialized": 4000,
+        "rawBatchDecodes": 1,
+        "valuationComputes": 1212,
+        "evaluatedPools": 2001,
+        "metadataCandidates": 0,
+        "coverageIndexBuilds": 777,
+        "registryChangesRead": 0,
+        "operationFilterRebuilds": 0,
+        "operationFilterValuesScanned": 0,
+        "liveEventRowsRead": 0,
+        "evaluatedWorksetPools": 2001,
+        "readModelIndexBuilds": 0,
+        "readModelRegistryScans": 0,
+        "readModelPoolsBuilt": 0,
+        "readModelPageCacheHits": 0
+      },
+      "metadataApplied": {
+        "resolved": 0,
+        "failed": 0,
+        "stale": 0
+      },
+      "rawBatchBytes": 2271971,
+      "poolRegistrationsBytes": 787909,
+      "manifestBytes": 367815,
+      "http": {
+        "status": 200,
+        "latencyMs": 85,
+        "responseBytes": 282750
+      },
+      "rssBytes": 2940981248,
+      "retractedLogs": 1212,
+      "revisionLogs": 1212
+    }
+  ],
+  "filterPlan": {
+    "strategy": "pool-ids (the live default; the manager experiment is not wired into production)",
+    "maxFilterValues": 1000,
+    "v3AddressValues": 50,
+    "v4PoolIdValues": 1950,
+    "v3ShardCount": 1,
+    "v4ShardCount": 2,
+    "operationFilterRebuilds": 1,
+    "operationFilterValuesScanned": 1951,
+    "perShardRequestBytes": {
+      "count": 15,
+      "p50Bytes": 66012,
+      "p95Bytes": 69462,
+      "maxBytes": 69462
+    },
+    "manifestBytesPerRound": {
+      "count": 5,
+      "p50Bytes": 483434,
+      "p95Bytes": 1350445,
+      "maxBytes": 1350445
+    },
+    "rawBatchBytesPerRound": {
+      "count": 5,
+      "p50Bytes": 3662165,
+      "p95Bytes": 10115533,
+      "maxBytes": 10115533
+    },
+    "poolRegistrationsBytesPerRound": {
+      "count": 5,
+      "p50Bytes": 1315781,
+      "p95Bytes": 1315781,
+      "maxBytes": 1315781
+    },
+    "shardsPerRound": {
+      "count": 5,
+      "p50Ms": 7,
+      "p95Ms": 7,
+      "maxMs": 7
+    },
+    "getLogsRequests": 84,
+    "anchorRequests": 859,
+    "callRequests": 110
+  },
+  "http": {
+    "url": "/api/snapshot",
+    "samples": [
+      {
+        "status": 200,
+        "latencyMs": 192,
+        "responseBytes": 508
+      },
+      {
+        "status": 200,
+        "latencyMs": 122,
+        "responseBytes": 272863
+      },
+      {
+        "status": 200,
+        "latencyMs": 103,
+        "responseBytes": 272728
+      },
+      {
+        "status": 200,
+        "latencyMs": 185,
+        "responseBytes": 272728
+      },
+      {
+        "status": 200,
+        "latencyMs": 142,
+        "responseBytes": 272728
+      },
+      {
+        "status": 200,
+        "latencyMs": 137,
+        "responseBytes": 282674
+      },
+      {
+        "status": 200,
+        "latencyMs": 234,
+        "responseBytes": 282674
+      },
+      {
+        "status": 200,
+        "latencyMs": 193,
+        "responseBytes": 282674
+      },
+      {
+        "status": 200,
+        "latencyMs": 33,
+        "responseBytes": 282674
+      },
+      {
+        "status": 200,
+        "latencyMs": 167,
+        "responseBytes": 276929
+      },
+      {
+        "status": 200,
+        "latencyMs": 85,
+        "responseBytes": 282750
+      }
+    ],
+    "latencyMs": {
+      "count": 11,
+      "p50Ms": 142,
+      "p95Ms": 234,
+      "maxMs": 234
+    },
+    "responseBytes": {
+      "count": 11,
+      "p50Ms": 276929,
+      "p95Ms": 282750,
+      "maxMs": 282750
+    },
+    "note": "A summary GET answered from the published snapshot: the request asks for a newer generation and is answered from what is published now rather than waiting for one."
+  },
+  "metadata": {
+    "applied": {
+      "resolved": 110,
+      "failed": 0,
+      "stale": 0
+    },
+    "candidates": 38426,
+    "queue": {
+      "eligible": 0,
+      "retryWaiting": 0,
+      "inflight": 0
+    },
+    "seedEntries": 98,
+    "assetsWithoutSeed": 96
+  },
+  "alerts": {
+    "delivered": 0
+  },
+  "rssBytes": 2941075456,
+  "databaseBytes": 766238720
+}

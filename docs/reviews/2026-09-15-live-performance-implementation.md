@@ -2598,3 +2598,314 @@ E1 的实现者按分工把记录写在仓库外的临时文件里（避免与�
 
 - Commit：待办
 
+
+### E3-a
+
+- 状态：**完成**（子计划 05 的 E3.1 全部交付）。E3.2 的三次大样本测量（80k / 160k 对比、2k 全活跃压测的正式记录）按要求**未执行**，留给主控在机器静默时统一跑；本记录里的数字全部来自 2k 及以下规模的验收跑，**不得**当作大样本结论引用。
+- 修改文件（工作树 `E:\lp-monitor\.worktrees\live-runtime-performance`，分支 `codex/live-runtime-performance`，未提交）：
+  - `scripts/benchmark-live-performance.mjs` —— 重写：297 行 → 1509 行（`git diff --stat`：1 file changed, +1424 −212）。原本是一份自给自足的合成基准，现在改为驱动真实管道：`fetchRange` → 真实解码 → `saveRaw` → `liveTimeContext`/`resolveLogTimes` → `saveJson` 产物 → `commitAcceptedSignalBatch`（单事务：`acceptRange` + `LiveProjectionStore.sync` + `projectSignals`）+ 告警 outbox 排空。
+  - `tests/integration/live-performance-contract.test.ts` —— 新增，231 行，10 个测试。
+  - 产物：`artifacts/performance/e3a-smoke/{benchmark.json,summary.json}`（新后缀，未覆盖 `baseline-80k` / `baseline-80k-recheck` / `v4-capture-comparison` / `v4-capture-fixture.json`）。
+  - **未碰**：`src/**`（工作树里 `src/ingest/filter-plan.ts`、`src/ingest/record-range.ts` 的改动属于 E1-v4-capture，不是我）、`scripts/compare-v4-capture.mjs`（同属 E1）、`tests/helpers/**`、其他既有测试、lockfile、CI、`config/`、`.env`。
+
+#### RED
+
+RED 原文由**当前契约测试对重写前的脚本**复现得到（不是翻旧日志）：把 `git show HEAD:scripts/benchmark-live-performance.mjs`（297 行，sha256 `79ede5130a8712121cd7430bb735f0e8422601a254e8da962a2e6087b6fc612d`）临时放回原位跑一次，跑完按哈希还原为冻结版（`37a6852ae19e6f3133db1f8ace3f091178b20b4bb7bf97cf427ec5a0cda51955`，`cmp` 逐字节一致）。
+
+命令：`pnpm exec vitest run tests/integration/live-performance-contract.test.ts`
+退出码：`1`
+
+```
+ RUN  v5.0.0 E:/lp-monitor/.worktrees/live-runtime-performance
+
+ ❯ tests/integration/live-performance-contract.test.ts (10 tests | 9 failed) 23771ms
+   × p95 is the documented order statistic over every raw sample, next to p50 2464ms
+   × --iterations allocates new/advance/repeat deterministically and sums to the request 4454ms
+   × the default allocation is the plan’s 14 new, 3 advance-only and 3 repeat rounds 2462ms
+   × initialization is timed on its own and the three warm-up rounds stay out of the batch 1347ms
+   × the three repair samples are listed on their own and never enter the normal batch 1332ms
+   × every sample carries the decomposition, and raw payload is kept apart from the manifest 1350ms
+   × stage timings are mutually exclusive, and local processing is not their sum 1332ms
+   × the report states the machine, the load and the revision it ran at 1360ms
+   × the default pool-ids filter cost and the manifest size are reported, not hidden 6224ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 9 ⎯⎯⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  tests/integration/live-performance-contract.test.ts > p95 is the documented order statistic over every raw sample, next to p50
+TypeError: Cannot read properties of undefined (reading 'durationsMs')
+ ❯ tests/integration/live-performance-contract.test.ts:54:45
+     52| test('p95 is the documented order statistic over every raw sample, nex…
+     53|   const report = benchmark(['--pools', '300', '--active', '80', '--ite…
+     54|   const durations: number[] = report.normal.durationsMs;
+       |                                             ^
+     55|
+     56|   expect(durations).toHaveLength(20);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/9]⎯
+
+ FAIL  tests/integration/live-performance-contract.test.ts > --iterations allocates new/advance/repeat deterministically and sums to the request
+AssertionError: expected undefined to match object { iterations: 17, fresh: 12, …(1) }
+
+- Expected:
+{
+  "advance": 2,
+  "fresh": 12,
+  "iterations": 17,
+}
+
++ Received:
+undefined
+
+ ❯ tests/integration/live-performance-contract.test.ts:73:17
+     71|
+     72|   expect(first).toEqual(second);
+     73|   expect(first).toMatchObject({
+
+ Test Files  1 failed (1)
+      Tests  9 failed | 1 passed (10)
+   Start at  09:46:25
+   Duration  23.89s (tests 100%)
+```
+
+为什么这是原问题：重写前的脚本产出的报告是**一份自成一体的合成结果**，根本没有 `normal` / `warmup` / `repairs` / `filterPlan` / `environment` 这些段——它自己造数、自己算分位，从不经过真实管道。10 条断言里 9 条正是在读这些字段，于是全部死在 `undefined` 上。唯一通过的那条是「输出目录已存在则拒绝覆盖」——该守卫旧脚本也有，如实记录，不把 RED 说成 10/10。
+
+#### GREEN
+
+全部为本轮前台实跑，逐条贴真实输出。
+
+1. 契约测试（对冻结版脚本，sha256 `37a6852a…`）
+
+```
+$ pnpm exec vitest run tests/integration/live-performance-contract.test.ts
+ RUN  v5.0.0 E:/lp-monitor/.worktrees/live-runtime-performance
+ Test Files  1 passed (1)
+      Tests  10 passed (10)
+   Start at  09:34:37
+   Duration  353.54s (tests 100%)
+EXIT=0
+```
+
+2. 两条 typecheck，退出码均为 0
+
+```
+$ pnpm exec tsc --noEmit
+EXIT=0
+
+$ pnpm exec tsc -p tsconfig.scripts.json
+EXIT=0
+```
+
+`tsconfig.scripts.json` 为 `{ allowJs: true, checkJs: true, noEmit: true, noImplicitAny: false, include: ["scripts/**/*.mjs"] }`；`--listFiles` 确认脚本本体在 program 内。为排除「空跑」，做了反向对照：临时追加 `const __negativeControl: number = "not a number";` →
+
+```
+scripts/benchmark-live-performance.mjs(1511,26): error TS8010: Type annotations can only be used in TypeScript files.
+NEGATIVE_CONTROL_EXIT=1
+```
+
+随后按字节还原（`sha_before == sha_after == 37a6852a…`）。主控此前记录的 scripts 一路 57 条错误，现为 0。
+
+3. prettier
+
+```
+$ pnpm exec prettier --check scripts/benchmark-live-performance.mjs tests/integration/live-performance-contract.test.ts
+Checking formatting...
+All matched files use Prettier code style!
+PRETTIER_EXIT=0
+```
+
+4. 基准脚本本体（2k 规模，未跑 80k/160k）
+
+```
+$ pnpm exec tsx scripts/benchmark-live-performance.mjs --pools 2000 --active 2000 --iterations 5 --out artifacts/performance/e3a-smoke
+benchmark init registrations=2000 catalogue=424.519ms window=8721.075ms shards=7 getLogs=7
+benchmark warmup 1/3 total=9594ms local=9399ms logs=2021
+benchmark warmup 2/3 total=7939ms local=7682ms logs=2021
+benchmark warmup 3/3 total=8373ms local=8146ms logs=2021
+benchmark round 1/5 fresh total=13052ms local=12798ms logs=2021 evaluated=2000 rss=1577MB
+benchmark round 2/5 fresh total=13433ms local=13077ms logs=2021 evaluated=2000 rss=1457MB
+benchmark round 3/5 fresh total=13010ms local=12717ms logs=2021 evaluated=2000 rss=2118MB
+benchmark round 4/5 fresh total=13172ms local=12955ms logs=2021 evaluated=2000 rss=1803MB
+benchmark round 5/5 repeat total=16118ms local=15118ms logs=8084 evaluated=2000 rss=1383MB
+benchmark repair new-registration-first-swap total=12324ms discovered=1
+benchmark repair metadata-backfill total=14447ms resolved=63
+benchmark repair history-revision total=11816ms retracted=1212 logs=1212
+{"out":"...\\artifacts\\performance\\e3a-smoke","normal":16118}
+EXIT=0
+```
+
+`benchmark.json` 关键字段（原样摘录）：
+
+- `percentileDefinition: "ascending[Math.ceil(0.95 * n) - 1]"`
+- `allocation: {"iterations":5,"fresh":4,"advance":0,"repeat":1,"normalTotal":5,"repairTotal":3}`；实际 kind 序列 `fresh,fresh,fresh,fresh,repeat`，与分配一致
+- `normal.durationsMs: [13052,13433,13010,13172,16118]`；p50 13172 / p95 16118 / max 16118；`normal.percentileDefinition` 同顶层
+- `normal.localProcessingMs: {p50Ms:12955,p95Ms:15118}`；`normal.rpcAcquisitionMs: {p50Ms:292,p95Ms:1000}`
+- `normal.rawBatchBytes: {p50Bytes:3662165,p95Bytes:10115533}`；`normal.manifestBytes: {p50Bytes:483434,p95Bytes:1350445}` —— 原始载荷与 manifest 是**两个独立字段**，没有塞进任何 other
+- `normal.stages` p95：`{rawPersist:289.64, artifactPersist:115.231, coverage:1913.555, projection:2518.339, valuation:319.207, windows:8138.713, signals:305.671, rpcAcquisition:999.923, notify:0.173}`
+- `stageAccounting: {exclusive:["rpcAcquisition","notify"], insideLocalProcessing:["rawPersist","artifactPersist","coverage","registry","projection","valuation","windows","signals","commitOther"], note:"…"}`
+- 单样本字段（第 4 轮）：`{kind:"fresh", logs:2021, registrationsCarried:2000, newlyDiscovered:0, totalMs:13172, localProcessingMs:12955, networkWaitMsAfterFetch:16, notifyMs:0.128, rawBatchBytes:3662165, poolRegistrationsBytes:1315781, manifestBytes:483434, metadataApplied:{resolved:3,failed:0,stale:0}, http:{status:200,latencyMs:234,responseBytes:282674}, rssBytes:1890246656}`
+- `init: {fixtureMs:5.144, catalogueMs:424.519, coverageMs:8721.075, totalMs:9150.737, registrations:2000, activePools:2000, coverageMinutes:181, catalogueLogs:2000, catalogueShards:2, boundaryRows:191, getLogsRequests:7, anchorRequests:594}` —— 初始化单独计时，未混入正常样本
+- 3 个修复轮 `batchId` 与 warmup/normal 的 8 个 `batchId` 全集不相交（契约测试断言，`repair ids disjoint: true`）；三者总耗时 12324 / 14447 / 11816 ms，**从不进入** `normal` 的 p95
+- `filterPlan: {strategy:"pool-ids (the live default; the manager experiment is not wired into production)", maxFilterValues:1000, v3AddressValues:50, v4PoolIdValues:1950, v3ShardCount:1, v4ShardCount:2, operationFilterRebuilds:1, operationFilterValuesScanned:1951, getLogsRequests:84, anchorRequests:859, callRequests:110}`；`v4ShardCount === ceil(1950/1000) === 2`
+- 字节分布：`perShardRequestBytes.p95Bytes 69462`（15 个 shard 请求）、`manifestBytesPerRound.p95Bytes 1350445`、`rawBatchBytesPerRound.p95Bytes 10115533`、`poolRegistrationsBytesPerRound.p95Bytes 1315781`、`shardsPerRound.p95Ms 7`
+- `environment: {node:"v24.5.0", platform:"win32 x64", cpuModel:"AMD Ryzen 9 9950X 16-Core Processor", cpuCount:32, loadAverage:[0,0,0], parallelLoad:"dashboard snapshot worker thread (in-process, started by this run); operator report: none stated", gitHead:"7c3c39ba2d868612b4fc76ab7d94aea6cd0b3f82"}`
+- `http: {url:"/api/snapshot", latencyMs:{p50Ms:142,p95Ms:234}, responseBytes:{p50Ms:276929,p95Ms:282750}}`（11 次采样，全部 200）
+- `metadata: {applied:{resolved:110,failed:0,stale:0}, candidates:38426, seedEntries:98, assetsWithoutSeed:96}`；`alerts.delivered:0`；`rssBytes: 2941075456`；`databaseBytes: 766238720`
+- 计数器（p95，5 轮）：`evaluatedPools 2000 / evaluatedWorksetPools 2000 / valuationComputes 2375 / coverageIndexBuilds 777 / rawBatchDecodes 1 / registryRowsRead 0 / liveEventRowsRead 0`
+
+#### 行为差异
+
+- 脚本从「自己造数的合成基准」变为「驱动真实管道的端到端基准」。**唯一被 mock 的网络边界**是 `createChainReader(env, { fetchFn: transport })`（`scripts/benchmark-live-performance.mjs:364-365`，全文仅此一处；无 `globalThis.fetch` 改写、无 `http.request`）。`fetchRange` / `saveRaw` / `acceptRange` / `commitAcceptedSignalBatch` / `registryCacheFor` / `OperationFilterIndex` / `metadataQueueFor` / `createMetadataWorker` / `LiveProjectionStore` / `resolveLogTimes` / `AlertOutbox` / `createSnapshotCoordinator` / `createDashboardServer` 全部是真件。
+- 契约测试**真的起子进程**跑脚本：`execFileSync(process.execPath, ['--import','tsx', script, ...args, '--out', out], {cwd: root, stdio:'pipe', timeout})`（`tests/integration/live-performance-contract.test.ts:33`，拒绝覆盖那条在 `:218`/`:225`），不是纯函数壳、也不只调内部函数。
+- `localProcessingMs` 定义为「mock 的 RPC 应答齐备」→「accepted 事务落盘」，即任务书第 6 条的字面窗口；`rpcAcquisition` 与 `notify` 明确列在窗口**之外**。窗口内各阶段只测一次且互斥地划分该窗口，故其和 ≤ `localProcessingMs`；`networkWaitMsAfterFetch` 与后台 metadata 的 ready-apply 在窗口**之内**（前者是 transport 里的等待，后者是本进程的 CPU，其网络不计入任何阶段）——这三点都写进 `stageAccounting.note`，由契约测试断言（`exclusive ∩ insideLocalProcessing = ∅`，嵌套阶段和 ≤ 窗口）。
+- 修复轮的样本字段由 `newRegistrations` 拆成 `registrationsCarried`（本批日志真正引用的注册数）与 `newlyDiscovered`（发现证据落在本批范围内的池数），避免把「携带」读成「新发现」。
+
+#### 未通过项 / 已记录的边界
+
+1. **未执行 E3.2**：80k / 160k 对比与正式的三条大样本测量未跑（按任务与主控指示）。本记录中所有数字都来自 ≤2k 规模，**不能**外推。
+2. **未提交**：`Commit：待办`（见下）。`scripts/benchmark-live-performance.mjs` 与契约测试均为工作树改动。
+3. **给主控的前置发现（会影响 E3.2 的大样本结论，未修，属于 `src/**`）**：`evaluatedPools` 与 `evaluatedWorksetPools` 在**每一轮都等于整个目录**（2k 规模下 5 轮全为 2000）。诊断（临时加 `BENCHMARK_KEEP_DB=1` 保留临时库后直接查库，该开关已回退）：`live_signal_workset` 对 300 条注册留下 301 行，且每个已存快照里都带 `"lastFiveEndSec":<值>`（初始为 `null`），于是 `snapshotHasMemory()` 恒为真、`LiveWorksetStore.retain()` 永远无法淘汰任何池——本轮热点 workset 在**第一轮之后**就退化成全目录。表现上 `windows` 阶段 p95 已是 8138ms（占窗口 63%），2k 就如此，80k 会被它主导。这是 R06 未收口的部分，需主控决定是否先修再跑 E3.2。
+   **主控补注（2026-09-16，只补口径不改结论）**：本条最后一句把「5 轮全为 2000」当作退化的证据，严格说它**不能单独成立**——该冒烟跑的配置是 `--pools 2000 --active 2000`，每个池本来就是活跃池，`evaluated=2000` 在那里是正确值。真正成立的是本条的**诊断**部分（`live_signal_workset` 对 300 条注册留 301 行、每个已存快照都带非空 `lastFiveEndSec`），以及判别它所需的「大目录 + 少活跃」配置；主控随后用 `--pools 8000 --active 80` 独立复现（`evaluated=8000` 每轮，修后 `=80`，见 E3-修正 一节），结论与本条一致，故本条按**未通过项**保留、不撤回。
+4. **mock 边界的必然代价**（写进 `report.boundary`，也在此重述）：进程内 mock 的 JSON-RPC（`network`/`provider`）；mock reader **无限速无预算**，`config/` 的 pacing 未被行使；临时 SQLite 落在系统 temp 并在退出时删除；测量是墙钟，故仪表盘 worker 线程与 RSS 都在计数内。
+5. **契约测试的规模上限**：单条最重的测试用 `--pools 2000 --active 2000 --iterations 5`（约 6.2s，整文件 353.54s，含 13 次子进程 spawn 的 tsx 启动开销）。它不覆盖 80k/160k。
+6. RED 的 10 条断言里通过 1 条（输出目录拒绝覆盖，旧脚本已有该守卫），已在上面如实标注。
+
+- Commit：待办——E3.1 属子计划 05 的在飞工作，与子计划 05 其余部分一并落在同一个提交里，提交信息按计划 05 的 E3.4 指定用 `test: verify live performance and v4 capture experiment`（**本行原写作 `perf:`，已按计划更正**：01–04 的 `fix:`/`perf:` 信息不受影响）。哈希在其后的小提交里补写。
+
+### E3-修正（R06 / C1 收口：workset 成员判定）
+
+- 状态：**完成**。这是 E3.3「性能门槛未达时：保存失败样本；用 `stageMs` 定位最慢阶段，在对应原任务内修正」触发的一轮修正，归属 C1（`src/storage/live-workset.ts`）与 R06。**不是**新任务、未扩大范围、未改任何公式。
+- 修改文件：
+  - `src/storage/live-workset.ts` —— `snapshotHasMemory()` 由「与 `initialSignalSnapshot()` 逐字段比对、任一字段不同即为有记忆」改为计划 03 `:103` 要求的**白名单** `MEMORY_FIELDS`；新增的常量带注释说明为什么 `configVersion` 与 `lastFiveEndSec` 不在名单里。
+  - `tests/integration/live-workset.test.ts` —— 谓词测试重写为「exactly when the state machine has something to read back」；**两处既有断言固化的是缺陷行为**（旧「任何未知名段都算记忆」、旧「`lastFiveEndSec` 算记忆」），按计划 `:103`/`:105` 修正。
+  - `tests/integration/signal-workset-equivalence.test.ts` —— 新增轮级回归（见下）。
+
+#### 定位（先有失败样本，再改代码）
+
+E3-a 在交付时已按「未通过项 3」把这个现象标出（`live_signal_workset` 对 300 条注册留 301 行、每个已存快照都带非空 `lastFiveEndSec`），并明确「需主控决定是否先修再跑 E3.2」。**主控用真实脚本独立复现**：
+
+```
+$ pnpm exec tsx scripts/benchmark-live-performance.mjs --pools 8000 --active 80 --iterations 8 --out %TEMP%\e3-workset-probe
+benchmark round 1/8 fresh total=2646ms local=2450ms logs=81 evaluated=8000 rss=828MB
+...（8 轮全部 evaluated=8000）
+benchmark repair history-revision total=7185ms retracted=48 logs=48
+```
+
+80 个活跃池，每轮评 8000 个——workset 在第一轮之后就退化成整份目录。这与计划 03 `:50`「**不能遍历全部历史注册池**」、`:49`「新表只保存有持续信号记忆的池」直接冲突。
+
+**机制**（逐行读源码确认，非推断）：
+1. `src/signals/project.ts:723-728` 对每个窗口写 `decision.nextSnapshot`（`snapshotChanged || !row` 即写）。
+2. `src/signals/engine.ts:50-55` 的 `next` 无条件带 `configVersion: version`；`:196` 的 `noAlert()` 返回的也是同一个 `next`。故**任何被评过一次的池**，其落库快照至少带一个非空 `configVersion`。
+3. `src/signals/engine.ts:223` 在 `fresh && rolling` 时无条件 `next.lastFiveEndSec = latest!.endSec`；基准每轮推进 5 块（60s），水位落在分钟边界，故 `fresh` 成立，静默池也被推上 5m 水位。
+4. 旧谓词把这两个字段都算成记忆 → **恒真** → `LiveWorksetStore.retain()`（`src/signals/project.ts:794-800`）只增不减 → 注册轮把整份目录塞进成员表，之后每次水位推进（`select()` 在 `!standing` 时并入全部 `members()`，`src/storage/live-workset.ts:87-90`）全目录重评。
+
+**分步实验证伪了「只改一半就够」**：只把 `configVersion` 排除后重跑，`evaluated` 只从 8000 降到 **7995**——证明 `lastFiveEndSec` 是另一半，两者必须一起按计划的白名单处理。
+
+#### RED
+
+```
+$ pnpm exec vitest run tests/integration/live-workset.test.ts
+ ❯ tests/integration/live-workset.test.ts (9 tests | 1 failed)
+   × a snapshot counts as memory exactly when the state machine has something to read back
+AssertionError: expected true to be false
+ ❯ tests/integration/live-workset.test.ts:357
+    356|   expect(snapshotHasMemory({ ...initialSignalSnapshot(), configVersion…
+    357|   expect(snapshotHasMemory({ ...initialSignalSnapshot(), lastFiveEndSe…
+```
+
+（第一次 RED 只加 `configVersion` 一条时同样是 `expected true to be false`，位置 `:361`。）
+
+轮级 RED（非空性证明）见下。
+
+#### GREEN
+
+```
+$ pnpm exec vitest run tests/integration/live-workset.test.ts
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Duration  1.26s
+```
+
+**真实脚本复测**（同一个 8000/80 配置）：
+
+```
+$ pnpm exec tsx scripts/benchmark-live-performance.mjs --pools 8000 --active 80 --iterations 8 --out %TEMP%\e3-workset-probe3
+benchmark round 1/8 fresh total=821ms local=569ms logs=81 evaluated=80 rss=724MB
+...（8 轮全部 evaluated=80）
+benchmark repair new-registration-first-swap total=717ms discovered=1
+benchmark repair metadata-backfill total=690ms resolved=12
+benchmark repair history-revision total=797ms retracted=48 logs=48
+```
+
+`evaluated` 8000 → 80（= 活跃池数），单轮 local 2450ms → 569ms，历史修订修复轮 7185ms → 797ms。三个修复轮的**可观测结果逐值不变**（`discovered=1`、`resolved=12`、`retracted=48`）。
+
+**回归**（计划 03 `:110` 的 C3 清单 + C1 清单）：
+
+```
+$ pnpm exec vitest run tests/integration/live-event-index.test.ts tests/integration/live-workset.test.ts tests/integration/live-projection.test.ts tests/integration/live-faults.test.ts tests/integration/signal-workset-equivalence.test.ts tests/integration/alert-recorder.test.ts tests/integration/alert-recorder-review.test.ts tests/integration/alert-reorg.test.ts tests/integration/alert-new-pool.test.ts tests/integration/alert-outbox.test.ts tests/integration/rolling-replay.test.ts
+ Test Files  11 passed (11)
+      Tests  96 passed (96)
+```
+
+C2 清单：
+
+```
+$ pnpm exec vitest run tests/integration/live-metric-workset.test.ts tests/unit/valuation-index.test.ts tests/integration/live-metrics.test.ts tests/integration/live-metric-cache.test.ts tests/integration/metrics-repair.test.ts tests/integration/metrics-chain.test.ts
+ Test Files  6 passed (6)
+      Tests  41 passed (41)
+```
+
+其中 `signal-workset-equivalence.test.ts` 里那条「twelve-pool workset sample reproduces its recorded alerts and snapshots」（`:417`，逐批 alerts / outbox 顺序 / revision / logicalTime / reasons / 快照状态序列全部冻结）**在列且通过**——这是「数值与状态不在允许变化内」的直接证据。
+
+#### 轮级回归（新增，主控独立复验，非转述）
+
+`tests/integration/signal-workset-equivalence.test.ts:964-1051` 新增一条
+`a round that evaluates a quiet catalogue does not carry it into the next round`。它走**真实调用路径**：
+`commitAcceptedSignalBatch(db, metricInput, initialSignalConfig, batch)`，**不手工调用 `retain()`**，也不在批次之外做 `LiveProjectionStore.sync`——四百条冷注册是本轮 `changedPoolIds` 的一部分，所以本轮真的评了它们；被断言的是**轮与轮之间**留下什么，读的是 `live_signal_workset` 表本身，不是计数器。
+
+主控自己跑的命令与真实输出：
+
+```
+$ pnpm exec vitest run tests/integration/signal-workset-equivalence.test.ts
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Duration  6.28s (tests 86%, import 9%, transform 5%)
+VITEST_EXIT=0
+```
+
+**非空性证明（主控自己做的）**：把 `MEMORY_FIELDS` 临时加回 `'configVersion'` 与
+`'lastFiveEndSec'`（即等价于旧谓词），只跑这一条：
+
+```
+$ pnpm exec vitest run tests/integration/signal-workset-equivalence.test.ts \
+    -t "a round that evaluates a quiet catalogue does not carry it into the next round"
+ ⎯⎯⎯ Failed Tests 1 ⎯⎯⎯
+ AssertionError: expected [ '4663:v3:0x…0569', …, 'alpha', 'bravo', 'charlie', 'delta', …, 'lima' ] to deeply equal [ 'alpha', 'bravo', 'charlie' ]
+ ❯ tests/integration/signal-workset-equivalence.test.ts:1011:52
+ Test Files  1 failed (1)
+      Tests  1 failed | 3 skipped (4)
+MUTANT_VITEST_EXIT=1
+```
+
+差异两边都是真的：突变的 `MEMORY_FIELDS` 让**整份目录（400 条冷注册）加样本自己的 12 个池**全部留在
+`live_signal_workset`（`+ 4663:v3:0x…0569…0577`、`+ delta…lima`），新谓词留下 `['alpha','bravo','charlie']`。
+`src/storage/live-workset.ts` 已逐字节还原：突变前/后 sha256 均为
+`944851097C9517AD7AAF73BA22AB9169C55428EB0F59788D69D6666228D887F9`（`RESTORE_EXACT=True`）。
+
+这条测试比 `live-workset.test.ts` 的谓词单测多证明一件事：谓词不再恒真之后，**轮与轮之间的表**确实按轮收缩，而不是靠单测里手工摆好的输入。
+
+#### 行为差异
+
+- 只有一处：一个**业务状态等价于 `initialSignalSnapshot()`** 的池，在该轮结束后会被移出 `live_signal_workset`，于是下一轮水位推进时不再被重评。这正是计划 03 `:51`「只有确认不再有窗口输入、持久信号记忆或本轮修订时，下一轮才移出」与 `:105`「可以保守影响全部热池/有提醒池，**但不是全部历史静默池**」要求的。
+- **不删任何事实**：退席只动 `live_signal_workset`，`signal_snapshots` 行原样保留（计划 03 `:102`「已存在的历史 snapshot 仍是事实，不为省空间删除」），故再次被选中时 `previous` 仍带原来的 `lastFiveEndSec`，不会重放已评估过的 5m 桶。
+- 提醒身份、去重、范围、coverage 语义均未触碰（在 E3.3 的**不允许变化**列内）。
+- E3.3 的允许变化列本来就含「没有业务历史的冷池不预写 watch 行」，本次修正与该条同向。
+
+#### 未通过项 / 已记录的边界
+
+1. **`lastFiveEndSec` 退席的残余暴露（交审查者裁决）**：reorg 时 `src/signals/project.ts:610-629` 只让**被选中**的池从 `initialSignalSnapshot()` 重评（`:679-682`），一个只带 5m 水位的历史静默池不再被选中，它的旧分支水位会继续抑制已重写桶的重放。业务上「有提醒/有冷却」的池不受影响：`lastAlert*`/`episodeId`/`lastHeatSec`/`entryThreshold`/`lowBuckets`/`candidate*` 全在白名单内，reorg 时照旧被重评；`retractSignals` 在 `affected='*'` 时本就覆盖全部池（`:651-658`）。计划 `:105` 明确要求历史静默池不纳入保守范围，故按计划判定并在此单列，不自行加回。
+2. **init 仍是目录规模**：注册轮 `changedPoolIds` 就是全部新注册，故 `init.windowMs` ≈ 12.7s / 8000 池。E3.2 的正式大样本实测（`init` 单独计时，见验收报告 §2.1）：80k `catalogueMs` 23,710 / `coverageMs` 64,587 / 合计 88,469 ms，160k 48,257 / 145,669 / 合计 194,239 ms——比 8000 池外推的 ~127s **更慢**，且随目录近似线性。它单独计时、不属于「普通样本 p95」门槛。**未**扩大范围去改 `changedPoolIds` 的语义。
+3. 计划 03 `:103` 的字面是「白名单」，本条修正按字面执行；若审查者更希望保留「未知名段也算记忆」的前向兼容，可把谓词换回排除表（只排除两个字段）——但那样会重新打开本次缺陷的成因。
+4. **C3「未通过项 3」被本条取代（交叉引用，供审查者比对）**：C3 当时写「成员集是单调的…只增不减，除非该池的快照逐字段回到初始值」，并引用了 `snapshotHasMemory` 里「发明一个比状态机实际保留的更短的记忆会丢掉冷却中的池」这段注释——那是**旧谓词**下的描述与旧注释。本轮修正后：① 退席条件从「逐字段回到初始值」变为「**白名单字段**全部回到初始值」（`configVersion`/`lastFiveEndSec` 不再构成记忆）；② 那段注释已随白名单改写。**C3 的其余 9 条边界不受影响**（尤其 1、6、7、8 与选择逻辑无关）。E3.2 的实测计数（`evaluatedPools` 与 `evaluatedWorksetPools` 在 26×2 个样本里均为 400，仅三个修复轮为 401）是本条生效后的第一手证据。
+
+- Commit：待办
+

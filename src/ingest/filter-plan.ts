@@ -11,6 +11,19 @@ export type FetchMode = 'operations' | 'discovery-only';
 export type LogFilter = Parameters<ChainReader['getLogs']>[0];
 export type OperationFamily = 'operation-v3' | 'operation-v4';
 export type FilterFamily = 'discovery-v3' | 'discovery-v4' | OperationFamily;
+/**
+ * How one operation plan asks the V4 manager for its events.
+ *
+ * `pool-ids` is the live recorder's strategy and the default everywhere: the manager is asked for
+ * exactly the pool ids the catalogue holds. `manager` asks it for every operation event it emits
+ * over the range, which reaches pools the registry does not know — an offline experiment, never a
+ * watch capture, because its evidence is wider than the watch universe.
+ */
+export type V4OperationMode = 'pool-ids' | 'manager';
+export interface OperationPlanOptions {
+  /** Defaults to `pool-ids`; only an explicit experiment passes `manager`. */
+  readonly v4OperationMode?: V4OperationMode;
+}
 export interface PlannedFilter {
   readonly id: FilterFamily;
   readonly family: FilterFamily;
@@ -48,7 +61,12 @@ const v4InitializeTopic = eventTopic(v4ManagerAbi, 'Initialize');
 const v3OperationTopics = ['Initialize', 'Mint', 'Burn', 'Collect', 'Swap'].map((name) =>
   eventTopic(v3PoolAbi, name),
 );
-const v4OperationTopics = [
+/**
+ * The manager event families every V4 operation request asks for, in plan order. A manager request
+ * that drops one is not a smaller request: it is missing evidence, so the list is part of the
+ * contract rather than a private detail of the builder.
+ */
+export const v4OperationTopics: readonly Hex[] = [
   'Initialize',
   'ModifyLiquidity',
   'Swap',
@@ -77,6 +95,13 @@ function ensureFilterValueLimit(maxFilterValues: number): void {
   if (!Number.isSafeInteger(maxFilterValues) || maxFilterValues <= 0) {
     throw new RangeError('maxFilterValues must be a positive safe integer');
   }
+}
+
+/** An unreadable mode is refused rather than silently planned as the default one. */
+function ensureV4OperationMode(mode: string): V4OperationMode {
+  if (mode !== 'pool-ids' && mode !== 'manager')
+    throw new RangeError('v4OperationMode must be pool-ids or manager');
+  return mode;
 }
 
 /**
@@ -248,8 +273,10 @@ export function buildOperationShardFilters(
   values: OperationFilterValues,
   contracts: Pick<ProtocolDeployments, 'v4Manager'>,
   maxFilterValues = 1_000,
+  options: OperationPlanOptions = {},
 ): readonly OperationShard[] {
   ensureFilterValueLimit(maxFilterValues);
+  const v4OperationMode = ensureV4OperationMode(options.v4OperationMode ?? 'pool-ids');
   const shards: OperationShard[] = [];
   if (values.v3Addresses.length > 0) {
     shards.push({
@@ -258,7 +285,18 @@ export function buildOperationShardFilters(
       filter: { address: values.v3Addresses, topics: [v3OperationTopics] },
     });
   }
-  if (values.v4PoolIds.length > 0) {
+  if (v4OperationMode === 'manager') {
+    // One request for the manager's whole operation universe: the pool ids are what narrow it, so
+    // leaving them out is the point, and the event topics are the ones every other request uses.
+    shards.push({
+      id: 'operation-v4',
+      family: 'operation-v4',
+      filter: {
+        address: [contracts.v4Manager.toLowerCase() as Address],
+        topics: [v4OperationTopics],
+      },
+    });
+  } else if (values.v4PoolIds.length > 0) {
     shards.push({
       id: 'operation-v4',
       family: 'operation-v4',
@@ -283,11 +321,13 @@ export function buildOperationFilterPlan(
   fromBlock: bigint,
   toBlock: bigint,
   maxFilterValues = 1_000,
+  options: OperationPlanOptions = {},
 ): readonly PlannedFilter[] {
   return buildOperationShardFilters(
     operationFilterValues(registrations),
     contracts,
     maxFilterValues,
+    options,
   ).map((shard) => ({
     id: shard.family,
     family: shard.family,
