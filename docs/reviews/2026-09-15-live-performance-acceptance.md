@@ -357,7 +357,7 @@ DELETE FROM live_projection_cursors WHERE scope_id = '<scope_id>';
 - **E1 的 M5 变异漏网**：`v4-capture-experiment.ts` 里「请求必须覆盖全部五个事件家族」这一条在完整批次里不可达，保留保护逻辑并按边界记录，不为抓变异去构造真实链路产生不出来的批次。
 - **E2 的三条边界**：`scripts/compare-v4-capture.mjs` 无自动化测试（比较非空洞已用已知不等的输入实跑证明）；`artifacts/performance/v4-capture-fixture.json` 由已删除的一次性脚本产出、没有可重复生成入口；`deadline` 用例模拟的是「进入采集后 deadline 已耗尽」，**不等于**真实时钟中途到期。
 - **E1/E2 当时未跑全量 `pnpm test` / `pnpm build`**（避免与并行的 dashboard 任务互相干扰）——本轮交付前已由主控在静默机器上补跑，真实输出见 §9。
-- **提交数口径**：计划 E3.4 写「5个commit」，分支上按「一个子计划一个功能提交」正是 5 个，但实际还有 4 个 `docs:` 哈希补写小提交（01–04 起的既定做法），如实列出（§8）。
+- **提交数口径**：计划 E3.4 写「5个commit」，分支上按「一个子计划一个功能提交」正是 5 个，但每个子计划后面还各跟一个 `docs:` 哈希补写小提交（01 起的既定做法），本子计划同样，**实际共 10 个**，如实列出（§8）。
 
 ---
 
@@ -366,8 +366,8 @@ DELETE FROM live_projection_cursors WHERE scope_id = '<scope_id>';
 - **worktree**：`E:\lp-monitor\.worktrees\live-runtime-performance`
 - **分支**：`codex/live-runtime-performance` —— **未 merge、未 push、未删分支**，停在功能分支等 Review。
 - **base**：`6ed70d7d6f7bd5fecbe22f2324b3e4ffad71acfa`
-- **head**：本子计划的 `test:` 提交（其哈希由紧跟的 `docs:` 补写提交写入本行与实现记录的各行 `- Commit：`）。
-- **提交数**：计划 E3.4 的字面是「5个commit」。按「一个子计划一个功能提交」的口径正是 **5 个**（`eb206cb` / `129d5b6` / `a9e28a8` / `c40c0e8` / 本子计划的 `test:` 提交）。分支上的**实际提交数更多**：子计划 01–04 各另有一个 `docs:` 小提交，把该轮 commit 哈希补写回实现记录，本子计划同样如此。这是 01 起确立的既定做法，如实列出以免审查者对不上数。
+- **head**：`ea3bf7f7e021219698d48486f6af22d39a97a25c`（本子计划的 `test:` 提交）。本行与实现记录各行 `- Commit：` 的哈希由紧跟其后的 `docs:` 补写提交写入，**那一个小提交才是分支的最终 HEAD**——与子计划 01–04 同一做法。
+- **提交数**：计划 E3.4 的字面是「5个commit」。按「一个子计划一个功能提交」的口径正是 **5 个**（`eb206cb` / `129d5b6` / `a9e28a8` / `c40c0e8` / `ea3bf7f`）。分支上的**实际提交数是 10 个**：子计划 01–04 各另有一个 `docs:` 小提交把该轮 commit 哈希补写回实现记录，本子计划同样如此，5 + 5 = 10。这是 01 起确立的既定做法，如实列出以免审查者对不上数。
 - **验收报告**：`docs/reviews/2026-09-15-live-performance-acceptance.md`（本文件，E3.3/E3.4）。
   逐任务 RED/GREEN 记录：`docs/reviews/2026-09-15-live-performance-implementation.md`。
   V4 实验报告：`docs/reviews/2026-09-15-v4-capture-experiment.md`。

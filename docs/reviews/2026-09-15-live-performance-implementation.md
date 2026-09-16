@@ -2394,7 +2394,7 @@ switch window { requests: [ '…/history?generation=gen-live',
   - 新增的 `manager + registry` 拒绝分支有用例覆盖（断言 `rejects.toThrow('registry templates')` 且 reader 零调用）。
   - 快照脚本放在 `node_modules/.e1-snapshot/snapshot.mts`（git 忽略、不进 diff，pnpm install 可能清理），测试里的 `FROZEN` 注释写明了它的来源与基线 commit。
 
-- Commit：待办
+- Commit：`ea3bf7f7e021219698d48486f6af22d39a97a25c`（子计划 05 的单一提交，E1–E3 全部在内，22 文件 / +19831 −225；E1 的 `src/ingest/v4-capture-experiment.ts`、`src/ingest/filter-plan.ts`、`src/ingest/record-range.ts` 与 `tests/integration/v4-capture-equivalence.test.ts`、`tests/unit/v4-capture-plan.test.ts` 都在其中）。本行哈希的补写位于其后的一个小提交（与子计划 01–04 同一做法）。
 
 #### E1 核实补记（主控独立复验，非实现者自证）
 
@@ -2596,7 +2596,7 @@ E1 的实现者按分工把记录写在仓库外的临时文件里（避免与�
      `logKeyDiff.onlyInManager = 15`、`onlyInPoolIds = 0`；两侧 reasons 均为 `incomplete-capture` / `failure:discovery-decode` / `unknown-pool-logs`。
      结论：**比较非空洞**——两侧不同则报不同，并逐项列出日志键差异与各自的 quality reasons。诚实限定：该输入是**退化夹具**（未知池日志本身会让 discovery decode 失败），所以它证明的是「不等则报不等」，**不是**「干净的 topic 过滤差异」；后者由 `tests/integration/v4-capture-equivalence.test.ts` 的 M-A2/M-A3 证伪覆盖。本项仍记为**边界**（脚本本身无自动化测试），只是不再带有「比较可能空洞」的未知。
 
-- Commit：待办
+- Commit：`ea3bf7f7e021219698d48486f6af22d39a97a25c`（与 E1 同一个子计划 05 提交；E2 的 `scripts/compare-v4-capture.mjs` 与 `docs/reviews/2026-09-15-v4-capture-experiment.md` 在其中，`artifacts/performance/v4-capture-fixture.json` 与 `artifacts/performance/v4-capture-comparison/` 按该报告第 20–21 行的定性是未跟踪产物，**未**提交）。本行哈希的补写位于其后的一个小提交。
 
 
 ### E3-a
@@ -2762,14 +2762,14 @@ EXIT=0
 #### 未通过项 / 已记录的边界
 
 1. **未执行 E3.2**：80k / 160k 对比与正式的三条大样本测量未跑（按任务与主控指示）。本记录中所有数字都来自 ≤2k 规模，**不能**外推。
-2. **未提交**：`Commit：待办`（见下）。`scripts/benchmark-live-performance.mjs` 与契约测试均为工作树改动。
+2. **本节成文时未提交**：当时写的是 `Commit：待办`，`scripts/benchmark-live-performance.mjs` 与契约测试都还是工作树改动；**现已随子计划 05 的单一提交落地**，哈希见本节末尾的 `- Commit：` 行。
 3. **给主控的前置发现（会影响 E3.2 的大样本结论，未修，属于 `src/**`）**：`evaluatedPools` 与 `evaluatedWorksetPools` 在**每一轮都等于整个目录**（2k 规模下 5 轮全为 2000）。诊断（临时加 `BENCHMARK_KEEP_DB=1` 保留临时库后直接查库，该开关已回退）：`live_signal_workset` 对 300 条注册留下 301 行，且每个已存快照里都带 `"lastFiveEndSec":<值>`（初始为 `null`），于是 `snapshotHasMemory()` 恒为真、`LiveWorksetStore.retain()` 永远无法淘汰任何池——本轮热点 workset 在**第一轮之后**就退化成全目录。表现上 `windows` 阶段 p95 已是 8138ms（占窗口 63%），2k 就如此，80k 会被它主导。这是 R06 未收口的部分，需主控决定是否先修再跑 E3.2。
    **主控补注（2026-09-16，只补口径不改结论）**：本条最后一句把「5 轮全为 2000」当作退化的证据，严格说它**不能单独成立**——该冒烟跑的配置是 `--pools 2000 --active 2000`，每个池本来就是活跃池，`evaluated=2000` 在那里是正确值。真正成立的是本条的**诊断**部分（`live_signal_workset` 对 300 条注册留 301 行、每个已存快照都带非空 `lastFiveEndSec`），以及判别它所需的「大目录 + 少活跃」配置；主控随后用 `--pools 8000 --active 80` 独立复现（`evaluated=8000` 每轮，修后 `=80`，见 E3-修正 一节），结论与本条一致，故本条按**未通过项**保留、不撤回。
 4. **mock 边界的必然代价**（写进 `report.boundary`，也在此重述）：进程内 mock 的 JSON-RPC（`network`/`provider`）；mock reader **无限速无预算**，`config/` 的 pacing 未被行使；临时 SQLite 落在系统 temp 并在退出时删除；测量是墙钟，故仪表盘 worker 线程与 RSS 都在计数内。
 5. **契约测试的规模上限**：单条最重的测试用 `--pools 2000 --active 2000 --iterations 5`（约 6.2s，整文件 353.54s，含 13 次子进程 spawn 的 tsx 启动开销）。它不覆盖 80k/160k。
 6. RED 的 10 条断言里通过 1 条（输出目录拒绝覆盖，旧脚本已有该守卫），已在上面如实标注。
 
-- Commit：待办——E3.1 属子计划 05 的在飞工作，与子计划 05 其余部分一并落在同一个提交里，提交信息按计划 05 的 E3.4 指定用 `test: verify live performance and v4 capture experiment`（**本行原写作 `perf:`，已按计划更正**：01–04 的 `fix:`/`perf:` 信息不受影响）。哈希在其后的小提交里补写。
+- Commit：`ea3bf7f7e021219698d48486f6af22d39a97a25c`——E3.1 属子计划 05 的在飞工作，与子计划 05 其余部分一并落在同一个提交里（子计划 05 单一提交，22 文件 / +19831 −225，含重写后的基准脚本、契约测试与 `artifacts/performance/e3a-smoke/`），提交信息按计划 05 的 E3.4 指定用 `test: verify live performance and v4 capture experiment`（**本行原写作 `perf:`，已按计划更正**：01–04 的 `fix:`/`perf:` 信息不受影响）。本行哈希的补写位于其后的一个小提交。
 
 ### E3-修正（R06 / C1 收口：workset 成员判定）
 
@@ -2907,5 +2907,5 @@ MUTANT_VITEST_EXIT=1
 3. 计划 03 `:103` 的字面是「白名单」，本条修正按字面执行；若审查者更希望保留「未知名段也算记忆」的前向兼容，可把谓词换回排除表（只排除两个字段）——但那样会重新打开本次缺陷的成因。
 4. **C3「未通过项 3」被本条取代（交叉引用，供审查者比对）**：C3 当时写「成员集是单调的…只增不减，除非该池的快照逐字段回到初始值」，并引用了 `snapshotHasMemory` 里「发明一个比状态机实际保留的更短的记忆会丢掉冷却中的池」这段注释——那是**旧谓词**下的描述与旧注释。本轮修正后：① 退席条件从「逐字段回到初始值」变为「**白名单字段**全部回到初始值」（`configVersion`/`lastFiveEndSec` 不再构成记忆）；② 那段注释已随白名单改写。**C3 的其余 9 条边界不受影响**（尤其 1、6、7、8 与选择逻辑无关）。E3.2 的实测计数（`evaluatedPools` 与 `evaluatedWorksetPools` 在 26×2 个样本里均为 400，仅三个修复轮为 401）是本条生效后的第一手证据。
 
-- Commit：待办
+- Commit：`ea3bf7f7e021219698d48486f6af22d39a97a25c`（与 E3-a 同一个子计划 05 提交；本修正的 `src/storage/live-workset.ts`、`tests/integration/live-workset.test.ts`、`tests/integration/signal-workset-equivalence.test.ts` 以及 E3.3/E3.4 的验收报告都在其中）。本行哈希的补写位于其后的一个小提交。
 
