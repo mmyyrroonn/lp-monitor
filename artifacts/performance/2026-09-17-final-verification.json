@@ -1,0 +1,21 @@
+{
+  "fullTests": {
+    "files": 138,
+    "passed": 1211,
+    "durationSeconds": 217.86,
+    "exitCode": 0,
+    "log": "2026-09-17-final-tests.log"
+  },
+  "typecheck": {
+    "exitCode": 0
+  },
+  "lint": {
+    "exitCode": 0
+  },
+  "build": {
+    "exitCode": 0
+  },
+  "sourceProvenance": "2026-09-17-final-source-provenance.json",
+  "gitDiffCheckBase": "6ed70d7",
+  "uncommitted": true
+}

@@ -1,0 +1,142 @@
+[
+  {
+    "directory": "2026-09-17-before-80k",
+    "local": {
+      "count": 5,
+      "p50Ms": 2492,
+      "p95Ms": 2658,
+      "maxMs": 2658
+    },
+    "stages": {
+      "rpcAcquisition": {
+        "p50": 1050.955,
+        "max": 3564.35
+      },
+      "rawPersist": {
+        "p50": 100.327,
+        "max": 133.282
+      },
+      "coverage": {
+        "p50": 225.801,
+        "max": 275.17
+      },
+      "artifactPersist": {
+        "p50": 35.373,
+        "max": 44.099
+      },
+      "projection": {
+        "p50": 622.966,
+        "max": 709.268
+      },
+      "valuation": {
+        "p50": 37.157,
+        "max": 47.596
+      },
+      "windows": {
+        "p50": 1191.031,
+        "max": 1191.128
+      },
+      "signals": {
+        "p50": 49.385,
+        "max": 54.371
+      },
+      "notify": {
+        "p50": 0.038,
+        "max": 0.127
+      }
+    },
+    "init": {
+      "fixtureMs": 159.837,
+      "catalogueMs": 19008.548,
+      "coverageMs": 53590.751,
+      "totalMs": 72759.137,
+      "registrations": 80000,
+      "activePools": 400,
+      "coverageMinutes": 181,
+      "window": {
+        "fromBlock": "63999100",
+        "toBlock": "64000000"
+      },
+      "catalogueLogs": 80000,
+      "catalogueShards": 2,
+      "operationsScope": "scope-v1-281d71e6797cd8bf73f008c09698d5bfb0bf5026ef35e77ad3ec0ef1cd6c8314",
+      "registryScopeId": "scope-v1-e62d003438737671596fe98e293098c98137086a7c006c0df6a4da1a4d684dd0",
+      "boundaryRows": 191,
+      "windowRoundLogs": 0,
+      "windowRoundShards": 84,
+      "getLogsRequests": 84,
+      "anchorRequests": 594
+    },
+    "normalPeakRssMiB": 2613.4
+  },
+  {
+    "directory": "2026-09-17-after-80k-profile",
+    "local": {
+      "count": 5,
+      "p50Ms": 1231,
+      "p95Ms": 1401,
+      "maxMs": 1401
+    },
+    "stages": {
+      "rpcAcquisition": {
+        "p50": 1073.707,
+        "max": 3564.817
+      },
+      "rawPersist": {
+        "p50": 98.387,
+        "max": 132.996
+      },
+      "coverage": {
+        "p50": 76.502,
+        "max": 101.933
+      },
+      "artifactPersist": {
+        "p50": 34.678,
+        "max": 44.518
+      },
+      "projection": {
+        "p50": 630.706,
+        "max": 711.643
+      },
+      "valuation": {
+        "p50": 38.276,
+        "max": 50.105
+      },
+      "windows": {
+        "p50": 161.382,
+        "max": 181.623
+      },
+      "signals": {
+        "p50": 47.699,
+        "max": 55.818
+      },
+      "notify": {
+        "p50": 0.038,
+        "max": 0.126
+      }
+    },
+    "init": {
+      "fixtureMs": 150.557,
+      "catalogueMs": 18894.302,
+      "coverageMs": 53994.958,
+      "totalMs": 73039.817,
+      "registrations": 80000,
+      "activePools": 400,
+      "coverageMinutes": 181,
+      "window": {
+        "fromBlock": "63999100",
+        "toBlock": "64000000"
+      },
+      "catalogueLogs": 80000,
+      "catalogueShards": 2,
+      "operationsScope": "scope-v1-281d71e6797cd8bf73f008c09698d5bfb0bf5026ef35e77ad3ec0ef1cd6c8314",
+      "registryScopeId": "scope-v1-e62d003438737671596fe98e293098c98137086a7c006c0df6a4da1a4d684dd0",
+      "boundaryRows": 191,
+      "windowRoundLogs": 0,
+      "windowRoundShards": 84,
+      "getLogsRequests": 84,
+      "anchorRequests": 594
+    },
+    "normalPeakRssMiB": 2342.2
+  }
+]

@@ -1,0 +1,33 @@
+{
+  "verifiedAt": "2026-09-17T08:43:06.742593+00:00",
+  "head": "9fd0fb6518915e4e6645c231ee8379f414b58e21",
+  "commands": [
+    {
+      "command": "pnpm typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm lint",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm build",
+      "exitCode": 0
+    },
+    {
+      "command": "git diff --check 6ed70d7",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm test",
+      "exitCode": 0
+    }
+  ],
+  "fullTestFiles": 141,
+  "fullTests": 1232,
+  "fullTestDurationSec": 209.57,
+  "sourceFilesHashed": 319,
+  "changedSinceBenchmark": [],
+  "deployed": false,
+  "committed": false
+}

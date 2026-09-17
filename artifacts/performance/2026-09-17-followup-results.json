@@ -1,0 +1,237 @@
+{
+  "createdAt": "2026-09-17T08:39:17.848905+00:00",
+  "runs": {
+    "80k": {
+      "beforeLocal": {
+        "count": 20,
+        "p50Ms": 1603,
+        "p95Ms": 1778,
+        "maxMs": 1828
+      },
+      "local": {
+        "count": 20,
+        "p50Ms": 1071,
+        "p95Ms": 1310,
+        "maxMs": 1483
+      },
+      "initBeforeMs": 76659.166,
+      "initMs": 55323.542,
+      "warmupLocalMaxMs": 18528,
+      "http": {
+        "count": 26,
+        "p50Ms": 30,
+        "p95Ms": 66,
+        "maxMs": 70
+      },
+      "responseBytes": {
+        "count": 26,
+        "p50Ms": 282339,
+        "p95Ms": 292473,
+        "maxMs": 292474
+      },
+      "maxNormalRssMiB": 2562.4,
+      "stageP95Ms": {
+        "rawPersist": 102.944,
+        "artifactPersist": 38.458,
+        "coverage": 155.839,
+        "projection": 302.123,
+        "valuation": 94.59,
+        "windows": 275.303,
+        "signals": 24.929,
+        "rpcAcquisition": 1307.389,
+        "notify": 0.056
+      },
+      "counterMax": {
+        "registryRowsRead": 0,
+        "registryRowsSerialized": 0,
+        "rawBatchDecodes": 1,
+        "valuationComputes": 599,
+        "evaluatedPools": 400,
+        "metadataCandidates": 0,
+        "coverageIndexBuilds": 777,
+        "coverageLogVisits": 13770,
+        "partitionSelectorsExpanded": 0,
+        "signalConfigComputes": 1,
+        "signalAuditPayloadWrites": 2,
+        "registryChangesRead": 0,
+        "operationFilterRebuilds": 0,
+        "operationFilterValuesScanned": 0,
+        "liveEventRowsRead": 0,
+        "evaluatedWorksetPools": 400,
+        "readModelIndexBuilds": 0,
+        "readModelRegistryScans": 0,
+        "readModelPoolsBuilt": 0,
+        "readModelPageCacheHits": 0
+      },
+      "repairs": [
+        {
+          "kind": "new-registration-first-swap",
+          "localProcessingMs": 1177
+        },
+        {
+          "kind": "metadata-backfill",
+          "localProcessingMs": 1485
+        },
+        {
+          "kind": "history-revision",
+          "localProcessingMs": 1727
+        }
+      ]
+    },
+    "160k": {
+      "beforeLocal": {
+        "count": 20,
+        "p50Ms": 2333,
+        "p95Ms": 2581,
+        "maxMs": 2621
+      },
+      "local": {
+        "count": 20,
+        "p50Ms": 1485,
+        "p95Ms": 1776,
+        "maxMs": 1835
+      },
+      "initBeforeMs": 167093.453,
+      "initMs": 105864.628,
+      "warmupLocalMaxMs": 37676,
+      "http": {
+        "count": 26,
+        "p50Ms": 33,
+        "p95Ms": 42,
+        "maxMs": 577
+      },
+      "responseBytes": {
+        "count": 26,
+        "p50Ms": 282340,
+        "p95Ms": 292474,
+        "maxMs": 292475
+      },
+      "maxNormalRssMiB": 3709.9,
+      "stageP95Ms": {
+        "rawPersist": 193.114,
+        "artifactPersist": 62.937,
+        "coverage": 229.141,
+        "projection": 457.42,
+        "valuation": 102.242,
+        "windows": 328.461,
+        "signals": 25.234,
+        "rpcAcquisition": 2413.932,
+        "notify": 0.07
+      },
+      "counterMax": {
+        "registryRowsRead": 0,
+        "registryRowsSerialized": 0,
+        "rawBatchDecodes": 1,
+        "valuationComputes": 599,
+        "evaluatedPools": 400,
+        "metadataCandidates": 0,
+        "coverageIndexBuilds": 777,
+        "coverageLogVisits": 13770,
+        "partitionSelectorsExpanded": 0,
+        "signalConfigComputes": 1,
+        "signalAuditPayloadWrites": 2,
+        "registryChangesRead": 0,
+        "operationFilterRebuilds": 0,
+        "operationFilterValuesScanned": 0,
+        "liveEventRowsRead": 0,
+        "evaluatedWorksetPools": 400,
+        "readModelIndexBuilds": 0,
+        "readModelRegistryScans": 0,
+        "readModelPoolsBuilt": 0,
+        "readModelPageCacheHits": 0
+      },
+      "repairs": [
+        {
+          "kind": "new-registration-first-swap",
+          "localProcessingMs": 1645
+        },
+        {
+          "kind": "metadata-backfill",
+          "localProcessingMs": 1931
+        },
+        {
+          "kind": "history-revision",
+          "localProcessingMs": 2129
+        }
+      ]
+    },
+    "all-active": {
+      "beforeLocal": {
+        "count": 20,
+        "p50Ms": 6806,
+        "p95Ms": 7949,
+        "maxMs": 8376
+      },
+      "local": {
+        "count": 20,
+        "p50Ms": 5082,
+        "p95Ms": 6660,
+        "maxMs": 6923
+      },
+      "initBeforeMs": 9446.352,
+      "initMs": 8212.642,
+      "warmupLocalMaxMs": 4579,
+      "http": {
+        "count": 26,
+        "p50Ms": 110,
+        "p95Ms": 164,
+        "maxMs": 194
+      },
+      "responseBytes": {
+        "count": 26,
+        "p50Ms": 282673,
+        "p95Ms": 293037,
+        "maxMs": 293037
+      },
+      "maxNormalRssMiB": 3680.4,
+      "stageP95Ms": {
+        "rawPersist": 126.796,
+        "artifactPersist": 38.83,
+        "coverage": 539.01,
+        "projection": 1620.055,
+        "valuation": 649.83,
+        "windows": 1635.185,
+        "signals": 109.2,
+        "rpcAcquisition": 313.394,
+        "notify": 0.134
+      },
+      "counterMax": {
+        "registryRowsRead": 0,
+        "registryRowsSerialized": 0,
+        "rawBatchDecodes": 1,
+        "valuationComputes": 3003,
+        "evaluatedPools": 2000,
+        "metadataCandidates": 0,
+        "coverageIndexBuilds": 777,
+        "coverageLogVisits": 68714,
+        "partitionSelectorsExpanded": 0,
+        "signalConfigComputes": 1,
+        "signalAuditPayloadWrites": 4,
+        "registryChangesRead": 0,
+        "operationFilterRebuilds": 0,
+        "operationFilterValuesScanned": 0,
+        "liveEventRowsRead": 0,
+        "evaluatedWorksetPools": 2000,
+        "readModelIndexBuilds": 0,
+        "readModelRegistryScans": 0,
+        "readModelPoolsBuilt": 0,
+        "readModelPageCacheHits": 0
+      },
+      "repairs": [
+        {
+          "kind": "new-registration-first-swap",
+          "localProcessingMs": 5366
+        },
+        {
+          "kind": "metadata-backfill",
+          "localProcessingMs": 6964
+        },
+        {
+          "kind": "history-revision",
+          "localProcessingMs": 7528
+        }
+      ]
+    }
+  },
+  "fixedActiveP95Ratio": 1.3557251908396946
+}

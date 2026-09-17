@@ -1,0 +1,37 @@
+{
+  "verifiedAt": "2026-09-17T09:29:43.130164+00:00",
+  "head": "9fd0fb6518915e4e6645c231ee8379f414b58e21",
+  "branch": "codex/live-runtime-performance",
+  "sourceFilesVerified": 322,
+  "sourceChangesSinceBenchmarkStart": [],
+  "checks": [
+    {
+      "command": "pnpm typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm lint",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm build",
+      "exitCode": 0
+    },
+    {
+      "command": "git diff --check 6ed70d7",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm test",
+      "exitCode": 0
+    }
+  ],
+  "tests": {
+    "filesPassed": 143,
+    "testsPassed": 1254,
+    "durationSeconds": 195.26
+  },
+  "benchmarkGatesPassed": true,
+  "evidencePrefix": "artifacts/performance/2026-09-17-active-",
+  "integration": "uncommitted changes remain in codex/live-runtime-performance worktree; no merge or deployment"
+}

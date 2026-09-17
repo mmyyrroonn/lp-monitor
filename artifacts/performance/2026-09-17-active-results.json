@@ -1,0 +1,220 @@
+{
+  "cases": {
+    "80k": {
+      "options": {
+        "pools": 80000,
+        "active": 400,
+        "iterations": 20,
+        "assetCount": 194,
+        "historyMinutes": 180,
+        "out": "E:\\lp-monitor\\.worktrees\\live-runtime-performance\\artifacts\\performance\\2026-09-17-active-80k"
+      },
+      "previousLocalMs": {
+        "count": 20,
+        "p50Ms": 1071,
+        "p95Ms": 1310,
+        "maxMs": 1483
+      },
+      "localMs": {
+        "count": 20,
+        "p50Ms": 866,
+        "p95Ms": 1100,
+        "maxMs": 1112
+      },
+      "p95ReductionPercent": 16.03,
+      "previousInitMs": 55323.542,
+      "initMs": 54440.802,
+      "warmupMaxLocalMs": 19046,
+      "normalHttpP95Ms": 33,
+      "normalHttpMaxBytes": 292474,
+      "allHttp": {
+        "latencyMs": {
+          "count": 26,
+          "p50Ms": 30,
+          "p95Ms": 49,
+          "maxMs": 236
+        },
+        "responseBytes": {
+          "count": 26,
+          "p50Ms": 282339,
+          "p95Ms": 292473,
+          "maxMs": 292474
+        }
+      },
+      "normalRssMaxBytes": 2339536896,
+      "repeatValuationComputes": [
+        0,
+        0,
+        0
+      ],
+      "normalCoverageIndexBuilds": [
+        2
+      ],
+      "normalRegistryRowsReadMax": 0,
+      "normalRegistryRowsSerializedMax": 0,
+      "normalRollingWindowsBuiltMax": 10391,
+      "repairs": [
+        {
+          "kind": "new-registration-first-swap",
+          "localProcessingMs": 950,
+          "totalMs": 1412
+        },
+        {
+          "kind": "metadata-backfill",
+          "localProcessingMs": 1247,
+          "totalMs": 2314
+        },
+        {
+          "kind": "history-revision",
+          "localProcessingMs": 1326,
+          "totalMs": 2676
+        }
+      ]
+    },
+    "160k": {
+      "options": {
+        "pools": 160000,
+        "active": 400,
+        "iterations": 20,
+        "assetCount": 194,
+        "historyMinutes": 180,
+        "out": "E:\\lp-monitor\\.worktrees\\live-runtime-performance\\artifacts\\performance\\2026-09-17-active-160k"
+      },
+      "previousLocalMs": {
+        "count": 20,
+        "p50Ms": 1485,
+        "p95Ms": 1776,
+        "maxMs": 1835
+      },
+      "localMs": {
+        "count": 20,
+        "p50Ms": 1196,
+        "p95Ms": 1420,
+        "maxMs": 1484
+      },
+      "p95ReductionPercent": 20.05,
+      "previousInitMs": 105864.628,
+      "initMs": 105582.61,
+      "warmupMaxLocalMs": 36746,
+      "normalHttpP95Ms": 42,
+      "normalHttpMaxBytes": 292475,
+      "allHttp": {
+        "latencyMs": {
+          "count": 26,
+          "p50Ms": 36,
+          "p95Ms": 42,
+          "maxMs": 509
+        },
+        "responseBytes": {
+          "count": 26,
+          "p50Ms": 282340,
+          "p95Ms": 292474,
+          "maxMs": 292475
+        }
+      },
+      "normalRssMaxBytes": 3894534144,
+      "repeatValuationComputes": [
+        0,
+        0,
+        0
+      ],
+      "normalCoverageIndexBuilds": [
+        2
+      ],
+      "normalRegistryRowsReadMax": 0,
+      "normalRegistryRowsSerializedMax": 0,
+      "normalRollingWindowsBuiltMax": 10391,
+      "repairs": [
+        {
+          "kind": "new-registration-first-swap",
+          "localProcessingMs": 1311,
+          "totalMs": 1870
+        },
+        {
+          "kind": "metadata-backfill",
+          "localProcessingMs": 1563,
+          "totalMs": 3691
+        },
+        {
+          "kind": "history-revision",
+          "localProcessingMs": 1712,
+          "totalMs": 4451
+        }
+      ]
+    },
+    "all-active": {
+      "options": {
+        "pools": 2000,
+        "active": 2000,
+        "iterations": 20,
+        "assetCount": 194,
+        "historyMinutes": 180,
+        "out": "E:\\lp-monitor\\.worktrees\\live-runtime-performance\\artifacts\\performance\\2026-09-17-active-all-active"
+      },
+      "previousLocalMs": {
+        "count": 20,
+        "p50Ms": 5082,
+        "p95Ms": 6660,
+        "maxMs": 6923
+      },
+      "localMs": {
+        "count": 20,
+        "p50Ms": 3813,
+        "p95Ms": 5040,
+        "maxMs": 5417
+      },
+      "p95ReductionPercent": 24.32,
+      "previousInitMs": 8212.642,
+      "initMs": 8473.526,
+      "warmupMaxLocalMs": 4243,
+      "normalHttpP95Ms": 173,
+      "normalHttpMaxBytes": 293037,
+      "allHttp": {
+        "latencyMs": {
+          "count": 26,
+          "p50Ms": 111,
+          "p95Ms": 182,
+          "maxMs": 191
+        },
+        "responseBytes": {
+          "count": 26,
+          "p50Ms": 282673,
+          "p95Ms": 293037,
+          "maxMs": 293037
+        }
+      },
+      "normalRssMaxBytes": 3762868224,
+      "repeatValuationComputes": [
+        0,
+        0,
+        0
+      ],
+      "normalCoverageIndexBuilds": [
+        2
+      ],
+      "normalRegistryRowsReadMax": 0,
+      "normalRegistryRowsSerializedMax": 0,
+      "normalRollingWindowsBuiltMax": 51366,
+      "repairs": [
+        {
+          "kind": "new-registration-first-swap",
+          "localProcessingMs": 3851,
+          "totalMs": 3878
+        },
+        {
+          "kind": "metadata-backfill",
+          "localProcessingMs": 5280,
+          "totalMs": 5491
+        },
+        {
+          "kind": "history-revision",
+          "localProcessingMs": 5611,
+          "totalMs": 5770
+        }
+      ]
+    }
+  },
+  "fixedActiveScaleRatio": 1.290909090909091,
+  "gatesPassed": true,
+  "boundary": "Offline mock RPC and temporary SQLite. Sequential unprofiled runs; no concurrent tests or builds. Initialization is synthetic fresh database setup, not restart recovery."
+}

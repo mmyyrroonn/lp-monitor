@@ -1,0 +1,285 @@
+[
+  {
+    "name": "80k",
+    "local": {
+      "count": 20,
+      "p50Ms": 1603,
+      "p95Ms": 1778,
+      "maxMs": 1828
+    },
+    "http": {
+      "count": 26,
+      "p50Ms": 31,
+      "p95Ms": 51,
+      "maxMs": 318
+    },
+    "httpBytes": {
+      "count": 26,
+      "p50Ms": 282339,
+      "p95Ms": 292473,
+      "maxMs": 292474
+    },
+    "stages": {
+      "rawPersist": {
+        "count": 20,
+        "p50Ms": 96.558,
+        "p95Ms": 107.348,
+        "maxMs": 113.67
+      },
+      "artifactPersist": {
+        "count": 20,
+        "p50Ms": 31.398,
+        "p95Ms": 33.777,
+        "maxMs": 34.69
+      },
+      "coverage": {
+        "count": 20,
+        "p50Ms": 185.223,
+        "p95Ms": 257.632,
+        "maxMs": 261.535
+      },
+      "projection": {
+        "count": 20,
+        "p50Ms": 627.661,
+        "p95Ms": 714.735,
+        "maxMs": 722.825
+      },
+      "valuation": {
+        "count": 20,
+        "p50Ms": 74.231,
+        "p95Ms": 94.047,
+        "maxMs": 157.027
+      },
+      "windows": {
+        "count": 20,
+        "p50Ms": 237.483,
+        "p95Ms": 275.839,
+        "maxMs": 287.586
+      },
+      "signals": {
+        "count": 20,
+        "p50Ms": 48.177,
+        "p95Ms": 58.093,
+        "maxMs": 64.958
+      },
+      "rpcAcquisition": {
+        "count": 20,
+        "p50Ms": 1196.759,
+        "p95Ms": 1308.556,
+        "maxMs": 1349.128
+      },
+      "notify": {
+        "count": 20,
+        "p50Ms": 0.028,
+        "p95Ms": 0.048,
+        "maxMs": 0.053
+      }
+    },
+    "initMs": 76659.166,
+    "rssMiB": 3247.2,
+    "repairs": [
+      {
+        "kind": "new-registration-first-swap",
+        "localProcessingMs": 1758
+      },
+      {
+        "kind": "metadata-backfill",
+        "localProcessingMs": 2062
+      },
+      {
+        "kind": "history-revision",
+        "localProcessingMs": 2201
+      }
+    ],
+    "sourceProvenance": "2026-09-17-source-provenance.json"
+  },
+  {
+    "name": "160k",
+    "local": {
+      "count": 20,
+      "p50Ms": 2333,
+      "p95Ms": 2581,
+      "maxMs": 2621
+    },
+    "http": {
+      "count": 26,
+      "p50Ms": 33,
+      "p95Ms": 44,
+      "maxMs": 59
+    },
+    "httpBytes": {
+      "count": 26,
+      "p50Ms": 282340,
+      "p95Ms": 292474,
+      "maxMs": 292475
+    },
+    "stages": {
+      "rawPersist": {
+        "count": 20,
+        "p50Ms": 160.685,
+        "p95Ms": 170.644,
+        "maxMs": 175.116
+      },
+      "artifactPersist": {
+        "count": 20,
+        "p50Ms": 51.342,
+        "p95Ms": 55.097,
+        "maxMs": 57.615
+      },
+      "coverage": {
+        "count": 20,
+        "p50Ms": 214.209,
+        "p95Ms": 329.506,
+        "maxMs": 338.263
+      },
+      "projection": {
+        "count": 20,
+        "p50Ms": 1145.24,
+        "p95Ms": 1325.425,
+        "maxMs": 1361.455
+      },
+      "valuation": {
+        "count": 20,
+        "p50Ms": 72.164,
+        "p95Ms": 93.595,
+        "maxMs": 113.418
+      },
+      "windows": {
+        "count": 20,
+        "p50Ms": 225.896,
+        "p95Ms": 269.51,
+        "maxMs": 278.668
+      },
+      "signals": {
+        "count": 20,
+        "p50Ms": 51.136,
+        "p95Ms": 60.495,
+        "maxMs": 62.322
+      },
+      "rpcAcquisition": {
+        "count": 20,
+        "p50Ms": 2107.652,
+        "p95Ms": 2355.955,
+        "maxMs": 2424.217
+      },
+      "notify": {
+        "count": 20,
+        "p50Ms": 0.032,
+        "p95Ms": 0.069,
+        "maxMs": 0.072
+      }
+    },
+    "initMs": 167093.453,
+    "rssMiB": 3323.0,
+    "repairs": [
+      {
+        "kind": "new-registration-first-swap",
+        "localProcessingMs": 2667
+      },
+      {
+        "kind": "metadata-backfill",
+        "localProcessingMs": 2906
+      },
+      {
+        "kind": "history-revision",
+        "localProcessingMs": 2827
+      }
+    ],
+    "sourceProvenance": "2026-09-17-source-provenance.json"
+  },
+  {
+    "name": "all-active",
+    "local": {
+      "count": 20,
+      "p50Ms": 6806,
+      "p95Ms": 7949,
+      "maxMs": 8376
+    },
+    "http": {
+      "count": 26,
+      "p50Ms": 124,
+      "p95Ms": 195,
+      "maxMs": 199
+    },
+    "httpBytes": {
+      "count": 26,
+      "p50Ms": 282673,
+      "p95Ms": 293037,
+      "maxMs": 293037
+    },
+    "stages": {
+      "rawPersist": {
+        "count": 20,
+        "p50Ms": 118.957,
+        "p95Ms": 133.129,
+        "maxMs": 134.564
+      },
+      "artifactPersist": {
+        "count": 20,
+        "p50Ms": 35.995,
+        "p95Ms": 41.433,
+        "maxMs": 42.252
+      },
+      "coverage": {
+        "count": 20,
+        "p50Ms": 1107.292,
+        "p95Ms": 1884.755,
+        "maxMs": 1963.567
+      },
+      "projection": {
+        "count": 20,
+        "p50Ms": 1528.745,
+        "p95Ms": 1729.793,
+        "maxMs": 1835.264
+      },
+      "valuation": {
+        "count": 20,
+        "p50Ms": 406.908,
+        "p95Ms": 704.685,
+        "maxMs": 750.628
+      },
+      "windows": {
+        "count": 20,
+        "p50Ms": 1209.558,
+        "p95Ms": 1695.984,
+        "maxMs": 1700.32
+      },
+      "signals": {
+        "count": 20,
+        "p50Ms": 231.39,
+        "p95Ms": 252.153,
+        "maxMs": 295.528
+      },
+      "rpcAcquisition": {
+        "count": 20,
+        "p50Ms": 273.931,
+        "p95Ms": 350.926,
+        "maxMs": 371.859
+      },
+      "notify": {
+        "count": 20,
+        "p50Ms": 0.049,
+        "p95Ms": 0.151,
+        "maxMs": 0.186
+      }
+    },
+    "initMs": 9446.352,
+    "rssMiB": 3533.8,
+    "repairs": [
+      {
+        "kind": "new-registration-first-swap",
+        "localProcessingMs": 7238
+      },
+      {
+        "kind": "metadata-backfill",
+        "localProcessingMs": 8522
+      },
+      {
+        "kind": "history-revision",
+        "localProcessingMs": 9453
+      }
+    ],
+    "sourceProvenance": "2026-09-17-source-provenance.json",
+    "loadNote": "Two short targeted correctness test commands ran during this stress sample. Treat as a stress observation; it is not the fixed-active acceptance pair."
+  }
+]

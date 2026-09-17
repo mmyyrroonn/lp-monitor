@@ -2908,4 +2908,3 @@ MUTANT_VITEST_EXIT=1
 4. **C3「未通过项 3」被本条取代（交叉引用，供审查者比对）**：C3 当时写「成员集是单调的…只增不减，除非该池的快照逐字段回到初始值」，并引用了 `snapshotHasMemory` 里「发明一个比状态机实际保留的更短的记忆会丢掉冷却中的池」这段注释——那是**旧谓词**下的描述与旧注释。本轮修正后：① 退席条件从「逐字段回到初始值」变为「**白名单字段**全部回到初始值」（`configVersion`/`lastFiveEndSec` 不再构成记忆）；② 那段注释已随白名单改写。**C3 的其余 9 条边界不受影响**（尤其 1、6、7、8 与选择逻辑无关）。E3.2 的实测计数（`evaluatedPools` 与 `evaluatedWorksetPools` 在 26×2 个样本里均为 400，仅三个修复轮为 401）是本条生效后的第一手证据。
 
 - Commit：`ea3bf7f7e021219698d48486f6af22d39a97a25c`（与 E3-a 同一个子计划 05 提交；本修正的 `src/storage/live-workset.ts`、`tests/integration/live-workset.test.ts`、`tests/integration/signal-workset-equivalence.test.ts` 以及 E3.3/E3.4 的验收报告都在其中）。本行哈希的补写位于其后的一个小提交。
-
