@@ -258,9 +258,10 @@ function withoutArray(batch: RecordedRangeBatch): RecordedRangeBatch {
  * covers the split itself.
  */
 function reencodeChunked(db: Database.Database, id: string): void {
-  const stored = db.prepare('select payload_json from ingest_batches where id=?').pluck().get(id) as
-    | string
-    | undefined;
+  const stored = db
+    .prepare('select payload_json from ingest_batches where id=?')
+    .pluck()
+    .get(id) as string | undefined;
   if (stored === undefined) throw new Error('Batch is missing before re-encoding');
   const { payload } = JSON.parse(stored) as { payload: PayloadRef };
   const bytes = Buffer.from(getPayload(db, payload));
@@ -276,9 +277,10 @@ function reencodeChunked(db: Database.Database, id: string): void {
 }
 
 function payloadFormat(db: Database.Database, id: string): string {
-  const stored = db.prepare('select payload_json from ingest_batches where id=?').pluck().get(id) as
-    | string
-    | undefined;
+  const stored = db
+    .prepare('select payload_json from ingest_batches where id=?')
+    .pluck()
+    .get(id) as string | undefined;
   if (stored === undefined) throw new Error('Batch is missing');
   if (!stored.trimStart().startsWith('{"format"')) return 'inline';
   return (JSON.parse(stored) as { format: string }).format;
@@ -407,7 +409,8 @@ function segmentsOf(entry: Bundle): RecordedRangeBatch[] {
   );
 }
 
-const id = (registration: { pool: PersistedPoolRegistration['pool'] }) => poolRegistrationId(registration);
+const id = (registration: { pool: PersistedPoolRegistration['pool'] }) =>
+  poolRegistrationId(registration);
 const ids = (registrations: readonly { pool: PersistedPoolRegistration['pool'] }[]) =>
   registrations.map(id).sort();
 
@@ -638,7 +641,10 @@ describe('a dataset whose batches name only their own dependencies', () => {
       store.saveRaw(withoutEvidence(unmarkedBatch), { compact: true });
       const unmarkedRead = readBatch(db, unmarkedBatch.id);
       expect(unmarkedRead.registryMode).toBeUndefined();
-      expect(ids(unmarkedRead.poolRegistrations ?? [])).toEqual([id(catalogue[0]!), id(catalogue[1]!)]);
+      expect(ids(unmarkedRead.poolRegistrations ?? [])).toEqual([
+        id(catalogue[0]!),
+        id(catalogue[1]!),
+      ]);
       expect(ids(marked.poolRegistrations ?? [])).toEqual([id(catalogue[0]!), id(catalogue[1]!)]);
 
       // An inline row stores the logs and the mode, but never the array: a reader is told how to

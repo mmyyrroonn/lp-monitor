@@ -1,5 +1,10 @@
+import { openWorkCounts } from '../../src/ops/work-counters.js';
 import { describe, expect, it } from 'vitest';
-import { evaluateSignal, initialSignalSnapshot } from '../../src/signals/engine.js';
+import {
+  createSignalEvaluator,
+  evaluateSignal,
+  initialSignalSnapshot,
+} from '../../src/signals/engine.js';
 import { initialSignalConfig, parseSignalConfig } from '../../src/signals/config.js';
 import type { SignalInput } from '../../src/signals/types.js';
 import type { AggregateMetric, MinuteMetric } from '../../src/metrics/windows.js';
@@ -517,4 +522,35 @@ it('a current gap preserves independently complete closed confirmation but reche
     initialSignalConfig,
   );
   expect(rechecking.nextSnapshot).toEqual(hot.nextSnapshot);
+});
+
+it('prepares one configuration for the complete historical evaluation', () => {
+  const work = openWorkCounts();
+  try {
+    const result = evaluateSignal(
+      initialSignalSnapshot(),
+      input(3601, history),
+      initialSignalConfig,
+    );
+    expect(result.evaluations).toHaveLength(12);
+    expect(work.counts.signalConfigComputes).toBe(1);
+  } finally {
+    work.close();
+  }
+});
+
+it('a prepared evaluator isolates its config and fresh callers observe in-place edits', () => {
+  const config = parseSignalConfig(initialSignalConfig);
+  const prepared = createSignalEvaluator(config);
+  const x = input(3601, [], 25000);
+  const before = prepared.evaluate(initialSignalSnapshot(), x);
+  expect(before.alertDraft?.kind).toBe('candidate');
+  config.candidate.enabled = false;
+  expect(prepared.evaluate(initialSignalSnapshot(), x)).toEqual(before);
+  const fresh = createSignalEvaluator(config);
+  expect(fresh.version).not.toBe(prepared.version);
+  expect(fresh.evaluate(initialSignalSnapshot(), x).alertDraft).toBeNull();
+  expect(evaluateSignal(initialSignalSnapshot(), x, config)).toEqual(
+    fresh.evaluate(initialSignalSnapshot(), x),
+  );
 });

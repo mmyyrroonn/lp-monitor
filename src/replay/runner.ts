@@ -195,7 +195,8 @@ export async function replay(
       // store before the row can exist. Evidence arrives as batches are accepted, so a pool that
       // is not placeable yet waits for the next adoption rather than being written or dropped.
       let end = adopted;
-      while (end < catalogue.length && catalogue[end]!.discoveredAt.blockNumber <= blockNumber) end++;
+      while (end < catalogue.length && catalogue[end]!.discoveredAt.blockNumber <= blockNumber)
+        end++;
       const ready = [...deferred, ...catalogue.slice(adopted, end)];
       adopted = end;
       deferred = store.persistCatalogue(input.registryScopeId, ready).unplaced;

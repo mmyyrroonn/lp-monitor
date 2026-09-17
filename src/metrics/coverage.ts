@@ -9,9 +9,9 @@ import {
   verifySuccessfulShardCoverage,
   type StoredShardRow,
 } from '../ingest/completeness.js';
-import { rawLogKey } from '../storage/manifest.js';
 import { BatchCoverageStore, type BatchCoverageProof } from '../storage/batch-coverage.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
+import { countWork } from '../ops/work-counters.js';
 import { readBatch } from '../storage/payload-store.js';
 
 export interface MetricCoverage {
@@ -169,9 +169,7 @@ export function acceptedMetricRanges(
     // One cache entry per batch behind the window, whether its verdict came from a proof or from
     // decoding it: the signature is whatever that verdict was derived from.
     const signature =
-      proof === null
-        ? strictSignature(db, batchId, scopeId, stored ?? [])
-        : proofSignature(proof);
+      proof === null ? strictSignature(db, batchId, scopeId, stored ?? []) : proofSignature(proof);
     const key = scopeId + '\0' + batchId;
     let value = cache.get(key)?.signature === signature ? cache.get(key)!.value : undefined;
     if (value === undefined) {
@@ -278,23 +276,49 @@ export function readMetricCoverage(
           };
   }
   const ranges = bounded && bounds === undefined ? [] : acceptedMetricRanges(db, scopeId, bounds);
-  const timeBounds = { sinceSec: first };
-  const times = bounded
-    ? new Map([
-        ...(bounds === undefined ? [] : raw.logTimes(scopeId, bounds)),
-        ...raw.logTimes(scopeId, timeBounds),
-      ])
-    : raw.logTimes(scopeId);
-  const logs = bounded
-    ? [
-        ...new Map(
-          [
-            ...(bounds === undefined ? [] : raw.activeLogs(scopeId, bounds)),
-            ...raw.activeLogs(scopeId, timeBounds),
-          ].map((log) => [rawLogKey(log), log]),
-        ).values(),
-      ]
-    : raw.activeLogs(scopeId);
+  // Read narrow time evidence once. A minute checks only its actual block interval; the claimed
+  // minute's extrema independently detect assignments arriving from outside that interval.
+  const claimedBlocks = new Map<number, Interval>();
+  const timedLogs = raw
+    .activeTimeRows(scopeId, bounded ? { ...bounds, sinceSec: first } : {})
+    .map((log) => {
+      countWork('coverageLogVisits');
+      const { time } = log;
+      const claimed = time?.minuteStartSec;
+      if (claimed !== undefined && claimed !== null) {
+        const prior = claimedBlocks.get(claimed);
+        claimedBlocks.set(claimed, {
+          fromBlock: prior && prior.fromBlock < log.blockNumber ? prior.fromBlock : log.blockNumber,
+          toBlock: prior && prior.toBlock > log.blockNumber ? prior.toBlock : log.blockNumber,
+        });
+      }
+      return { blockNumber: log.blockNumber, time };
+    })
+    .sort((a, b) => (a.blockNumber < b.blockNumber ? -1 : a.blockNumber > b.blockNumber ? 1 : 0));
+  const hasTimeMismatch = (minute: number, fromBlock: bigint, toBlock: bigint): boolean => {
+    const claimed = claimedBlocks.get(minute);
+    if (claimed && (claimed.fromBlock < fromBlock || claimed.toBlock > toBlock)) return true;
+    let low = 0,
+      high = timedLogs.length;
+    while (low < high) {
+      const mid = (low + high) >>> 1;
+      if (timedLogs[mid]!.blockNumber < fromBlock) low = mid + 1;
+      else high = mid;
+    }
+    for (let i = low; i < timedLogs.length && timedLogs[i]!.blockNumber <= toBlock; i++) {
+      countWork('coverageLogVisits');
+      const { time } = timedLogs[i]!;
+      if (
+        !time ||
+        time.source === 'unresolved' ||
+        time.minuteStartSec !== minute ||
+        (time.exactTimestampSec !== null &&
+          (time.exactTimestampSec < minute || time.exactTimestampSec >= minute + 60))
+      )
+        return true;
+    }
+    return false;
+  };
   const result: MetricCoverage[] = [];
   for (let minute = first; minute <= current; minute += 60) {
     const left = map.get(minute),
@@ -320,20 +344,7 @@ export function readMetricCoverage(
         reasons.push('projection-quality-error');
       // Both directions matter: a resolved event assigned to the wrong minute
       // invalidates both its claimed bucket and its actual block interval.
-      if (
-        logs.some((log) => {
-          const time = times.get(rawLogKey(log));
-          const inside = log.blockNumber >= fromBlock && log.blockNumber <= toBlock;
-          return inside
-            ? !time ||
-                time.source === 'unresolved' ||
-                time.minuteStartSec !== minute ||
-                (time.exactTimestampSec !== null &&
-                  (time.exactTimestampSec < minute || time.exactTimestampSec >= minute + 60))
-            : time?.minuteStartSec === minute;
-        })
-      )
-        reasons.push('event-time-mismatch');
+      if (hasTimeMismatch(minute, fromBlock, toBlock)) reasons.push('event-time-mismatch');
     }
     result.push({
       scopeId,

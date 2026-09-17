@@ -18,7 +18,11 @@ afterEach(() => {
 const SCOPE = 's';
 const hash = (n: number) => toHex(n, { size: 32 });
 const addr = (n: number) => toHex(n, { size: 20 });
-const anchor = (n: number, timestampSec: number) => ({ number: BigInt(n), hash: hash(n), timestampSec });
+const anchor = (n: number, timestampSec: number) => ({
+  number: BigInt(n),
+  hash: hash(n),
+  timestampSec,
+});
 const boundary = (timestampSec: number, firstBlock: number): MinuteBoundary => ({
   timestampSec,
   firstBlock: BigInt(firstBlock),
@@ -101,7 +105,14 @@ function insertEvent(db: Database.Database): number {
   );
   const id = db.prepare('select id from raw_logs where raw_key=?').pluck().get(key) as number;
   db.prepare('insert into active_logs values (?,?,?)').run(SCOPE, 'operation-v3', id);
-  db.prepare('insert into log_times values (?,?,?,?,?,?)').run(SCOPE, id, 120, 125, 'log-verified', 180);
+  db.prepare('insert into log_times values (?,?,?,?,?,?)').run(
+    SCOPE,
+    id,
+    120,
+    125,
+    'log-verified',
+    180,
+  );
   return id;
 }
 
@@ -339,11 +350,10 @@ test('a rolled back accept leaves no proof and a rolled back change leaves the p
   dbs.push(db);
   const raw = new SqliteRangeStore(db);
   expect(() =>
-    db
-      .transaction(() => {
-        raw.acceptRange(batch());
-        throw new Error('abort');
-      })(),
+    db.transaction(() => {
+      raw.acceptRange(batch());
+      throw new Error('abort');
+    })(),
   ).toThrow('abort');
   expect(db.prepare('select count(*) from ingest_batches').pluck().get()).toBe(0);
   expect(proofRows(db)).toBe(0);
@@ -351,11 +361,10 @@ test('a rolled back accept leaves no proof and a rolled back change leaves the p
 
   const f = fixture();
   expect(() =>
-    f.db
-      .transaction(() => {
-        f.db.prepare("update fetch_shards set status='failed' where shard_id='two'").run();
-        throw new Error('abort');
-      })(),
+    f.db.transaction(() => {
+      f.db.prepare("update fetch_shards set status='failed' where shard_id='two'").run();
+      throw new Error('abort');
+    })(),
   ).toThrow('abort');
   expect(f.proofs.read('a')).not.toBeNull();
   const ranges = measured(() => acceptedMetricRanges(f.db, SCOPE));
@@ -385,9 +394,11 @@ test('the stored row comparisons refuse a proof whose batch row moved without th
   rewritten.toBlock = 1_000_000n;
   f.db
     .prepare("update ingest_batches set payload_json=? where id='a'")
-    .run(JSON.stringify(rewritten, (_key, value: unknown) =>
-      typeof value === 'bigint' ? value.toString(10) : value,
-    ));
+    .run(
+      JSON.stringify(rewritten, (_key, value: unknown) =>
+        typeof value === 'bigint' ? value.toString(10) : value,
+      ),
+    );
 
   expect(proofRows(f.db)).toBe(1);
   expect(f.proofs.read('a')).toBeNull();
@@ -468,9 +479,7 @@ test('a readonly snapshot taken before 012 keeps the strict read path', async ()
     const readonly = openDatabase(path, { readonly: true });
     try {
       expect(
-        readonly
-          .prepare("select 1 from sqlite_master where name='batch_coverage_proofs'")
-          .get(),
+        readonly.prepare("select 1 from sqlite_master where name='batch_coverage_proofs'").get(),
       ).toBeUndefined();
       expect(readMetricCoverage(readonly, SCOPE, [], f.end)).toEqual(expected);
     } finally {

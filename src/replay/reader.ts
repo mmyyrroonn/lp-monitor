@@ -167,7 +167,8 @@ export function readCatalogue(
   if (asOf > expected.cutoffBlock)
     issues.push({
       code: 'catalogue-cutoff-beyond-export',
-      detail: 'The catalogue claims completeness past the exported range and is read to the export cutoff',
+      detail:
+        'The catalogue claims completeness past the exported range and is read to the export cutoff',
     });
   if (catalogue.source?.availability === 'retrospective' && snapshot.cohortMode === 'as-of')
     issues.push({
@@ -197,7 +198,8 @@ export function readCatalogue(
   const bound = asOf < expected.cutoffBlock ? asOf : expected.cutoffBlock;
   return { pools: pools.filter((pool) => pool.discoveredAt.blockNumber <= bound), issues };
 }
-export function readReplayManifest(path: string) {  const directory = realpathSync(dirname(resolve(path)));
+export function readReplayManifest(path: string) {
+  const directory = realpathSync(dirname(resolve(path)));
   const manifestText = readFileSync(path, 'utf8');
   const manifest = JSON.parse(manifestText) as ReplayManifest;
   if (

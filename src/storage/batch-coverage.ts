@@ -47,7 +47,8 @@ type BatchRow = {
 const digest = (value: string) => createHash('sha256').update(value).digest('hex');
 const payloadReference = (bytes: number) => digest(encodeJson({ version: 1, bytes }));
 const shardReference = (rows: readonly StoredShardRow[]) => digest(JSON.stringify(rows));
-const decimal = (value: unknown): value is string => typeof value === 'string' && /^\d+$/.test(value);
+const decimal = (value: unknown): value is string =>
+  typeof value === 'string' && /^\d+$/.test(value);
 
 /** A proof row is only usable if it is well formed on its own terms; the digest above it proves
  * nobody edited it by hand, not that the writer knew the contract. */

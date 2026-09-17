@@ -97,7 +97,11 @@ it('does not replay accumulated history; old contributions expire and a new swap
     const decode = vi.spyOn(await import('../../src/protocols/uniswap-v3/decode.js'), 'decodeV3');
     const value = vi.spyOn(notional, 'valueSwap');
     db.exec(
-      'create table cache_writes(k text); create trigger cache_write after update on live_metric_cache begin insert into cache_writes values(new.cache_key); end;',
+      // A new event minute is now inserted directly; no cached empty minute exists to update.
+      // Count both kinds of write so the assertion still proves only one contribution changed.
+      'create table cache_writes(k text); ' +
+        'create trigger cache_write after update on live_metric_cache begin insert into cache_writes values(new.cache_key); end; ' +
+        'create trigger cache_insert after insert on live_metric_cache begin insert into cache_writes values(new.cache_key); end;',
     );
     const log = swap(24010, 3000);
     const next = batch('append', [log]);

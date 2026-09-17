@@ -5,8 +5,9 @@ import { openDatabase } from '../../src/storage/database.js';
 import { SqliteRangeStore } from '../../src/storage/raw-store.js';
 import { acceptedMetricRanges, readMetricCoverage } from '../../src/metrics/coverage.js';
 import type { RecordedRangeBatch } from '../../src/storage/manifest.js';
-import type { MinuteBoundary, RawLog } from '../../src/domain/types.js';
+import type { MinuteBoundary, RawLog, LogTime } from '../../src/domain/types.js';
 import { rawLogKey } from '../../src/storage/manifest.js';
+import { openWorkCounts } from '../../src/ops/work-counters.js';
 
 const dbs: Database.Database[] = [];
 afterEach(() => {
@@ -415,19 +416,21 @@ test('bounded live coverage catches claimed-time and block-time mismatches witho
     .prepare('insert into log_times values (?,?,?,?,?,?)')
     .run('scope', rawId, 120, null, 'minute-boundary', 180);
 
-  const active = vi.spyOn(SqliteRangeStore.prototype, 'activeLogs');
-  const times = vi.spyOn(SqliteRangeStore.prototype, 'logTimes');
+  const times = vi.spyOn(SqliteRangeStore.prototype, 'activeTimeRows');
   const boundaries = vi.spyOn(SqliteRangeStore.prototype, 'boundaries');
   try {
     const minute = readMetricCoverage(f.db, 'scope', [], f.end, 180, true).find(
       (item) => item.minuteStartSec === 120,
     );
     expect(minute?.reasons).toContain('event-time-mismatch');
-    expect(active.mock.calls.every((call) => call.length > 1)).toBe(true);
-    expect(times.mock.calls.every((call) => call.length > 1)).toBe(true);
+    expect(times).toHaveBeenCalledOnce();
+    expect(times.mock.calls[0]?.[1]).toEqual({
+      fromBlock: 100n,
+      toBlock: f.end.number,
+      sinceSec: 120,
+    });
     expect(boundaries.mock.calls.every((call) => call.length > 1)).toBe(true);
   } finally {
-    active.mockRestore();
     times.mockRestore();
     boundaries.mockRestore();
   }
@@ -475,5 +478,90 @@ test('legacy readonly snapshots remain readable without the new overlap index', 
     }
   } finally {
     rmSync(directory, { recursive: true, force: true });
+  }
+});
+
+test('minute time checks visit only relevant logs and preserve both directions of mismatch', () => {
+  const f = fixture();
+  const bounds = Array.from({ length: 181 }, (_, i) => boundary(120 + i * 60, 100 + i * 10));
+  const end = bounds.at(-1)!.at;
+  const logs: RawLog[] = bounds.slice(0, -1).map((b, i) => ({
+    blockNumber: b.firstBlock + 5n,
+    blockHash: hash(i + 1000),
+    transactionHash: hash(i + 2000),
+    transactionIndex: 0,
+    logIndex: 0,
+    address: toHex(1, { size: 20 }),
+    topics: [],
+    data: '0x',
+    rawBlockTimestamp: null,
+  }));
+  const times = new Map<string, LogTime>(
+    logs.map((log, i) => [
+      rawLogKey(log),
+      {
+        minuteStartSec: bounds[i]!.timestampSec,
+        exactTimestampSec: bounds[i]!.timestampSec + 1,
+        source: 'log-verified',
+      },
+    ]),
+  );
+  const spies = [
+    vi.spyOn(SqliteRangeStore.prototype, 'boundaries').mockReturnValue(bounds),
+    vi
+      .spyOn(SqliteRangeStore.prototype, 'activeTimeRows')
+      .mockImplementation(() =>
+        logs.map((log) => ({ blockNumber: log.blockNumber, time: times.get(rawLogKey(log)) })),
+      ),
+  ];
+  try {
+    const work = openWorkCounts();
+    let clean;
+    try {
+      clean = readMetricCoverage(f.db, 'scope', [], end, 180, true);
+    } finally {
+      work.close();
+    }
+    expect(clean.every((m) => !m.reasons.includes('event-time-mismatch'))).toBe(true);
+    expect(work.counts.coverageLogVisits).toBeGreaterThan(0);
+    expect(work.counts.coverageLogVisits).toBeLessThanOrEqual(logs.length * 2);
+    // Wrong claimed minute, unresolved source, invalid exact second, and missing assignment.
+    times.set(rawLogKey(logs[0]!), {
+      minuteStartSec: 240,
+      exactTimestampSec: null,
+      source: 'minute-boundary',
+    });
+    times.set(rawLogKey(logs[1]!), {
+      minuteStartSec: 180,
+      exactTimestampSec: null,
+      source: 'unresolved',
+    });
+    times.set(rawLogKey(logs[3]!), {
+      minuteStartSec: 300,
+      exactTimestampSec: 360,
+      source: 'log-verified',
+    });
+    times.delete(rawLogKey(logs[4]!));
+    const result = readMetricCoverage(f.db, 'scope', [], end, 180, true);
+    // Independent full scan is deliberately retained only as a test oracle.
+    for (const minute of result) {
+      const expected = logs.some((log) => {
+        const time = times.get(rawLogKey(log));
+        const inside = log.blockNumber >= minute.fromBlock! && log.blockNumber <= minute.toBlock!;
+        return inside
+          ? !time ||
+              time.source === 'unresolved' ||
+              time.minuteStartSec !== minute.minuteStartSec ||
+              (time.exactTimestampSec !== null &&
+                (time.exactTimestampSec < minute.minuteStartSec ||
+                  time.exactTimestampSec >= minute.minuteStartSec + 60))
+          : time?.minuteStartSec === minute.minuteStartSec;
+      });
+      expect(minute.reasons.includes('event-time-mismatch'), String(minute.minuteStartSec)).toBe(
+        expected,
+      );
+    }
+  } finally {
+    for (const spy of spies) spy.mockRestore();
   }
 });

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { poolRegistrationId } from '../registry/pools.js';
 import type { AggregateMetric, MinuteMetric } from '../metrics/windows.js';
 import { meetsMultiple, signalBaseline, type BaselineSample } from './baseline.js';
-import { signalConfigVersion, type SignalConfig } from './config.js';
+import { parseSignalConfig, signalConfigVersion, type SignalConfig } from './config.js';
 import type { AlertKind, RuleMatch, SignalDecision, SignalInput, SignalSnapshot } from './types.js';
 export function initialSignalSnapshot(): SignalSnapshot {
   return {
@@ -45,8 +45,8 @@ function evaluateOne(
   previous: SignalSnapshot,
   input: SignalInput,
   config: SignalConfig,
+  version: string,
 ): SignalDecision {
-  const version = signalConfigVersion(config);
   const next = {
     ...(previous.configVersion !== null && previous.configVersion !== version
       ? initialSignalSnapshot()
@@ -367,9 +367,32 @@ export function evaluateSignal(
   input: SignalInput,
   config: SignalConfig,
 ): SignalDecision {
+  return createSignalEvaluator(config).evaluate(previous, input);
+}
+
+/** One validated configuration snapshot per synchronous batch, including all historical windows.
+ * No object-identity cache: a later batch must observe in-place edits to its supplied config. */
+export function createSignalEvaluator(config: SignalConfig): {
+  version: string;
+  evaluate: (previous: SignalSnapshot, input: SignalInput) => SignalDecision;
+} {
+  const prepared = parseSignalConfig(config);
+  const version = signalConfigVersion(prepared);
+  return {
+    version,
+    evaluate: (previous, input) => evaluatePrepared(previous, input, prepared, version),
+  };
+}
+
+function evaluatePrepared(
+  previous: SignalSnapshot,
+  input: SignalInput,
+  config: SignalConfig,
+  version: string,
+): SignalDecision {
   if (input.metrics.rolling) {
     let state =
-      previous.configVersion !== null && previous.configVersion !== signalConfigVersion(config)
+      previous.configVersion !== null && previous.configVersion !== version
         ? initialSignalSnapshot()
         : previous;
     const drafts: NonNullable<SignalDecision['alertDraft']>[] = [];
@@ -407,6 +430,7 @@ export function evaluateSignal(
           state,
           { ...input, metrics, watermarkSec: m.endSec, coverage: 'complete' },
           config,
+          version,
         );
         state = d.nextSnapshot;
         evaluations.push({ endSec: m.endSec, matches: d.matches });
@@ -418,12 +442,11 @@ export function evaluateSignal(
             historical: true,
           });
       }
-    const result = evaluateOne(state, input, config);
+    const result = evaluateOne(state, input, config, version);
     if (result.alertDraft)
       drafts.push({ ...result.alertDraft, logicalTimeSec: input.watermarkSec, historical: false });
     return { ...result, alertDraft: drafts.at(-1) ?? null, alertDrafts: drafts, evaluations };
   }
-  const version = signalConfigVersion(config);
   let state =
     previous.configVersion !== null && previous.configVersion !== version
       ? initialSignalSnapshot()
@@ -457,6 +480,7 @@ export function evaluateSignal(
         state,
         { ...input, coverage: 'complete', watermarkSec: b.endSec, metrics },
         config,
+        version,
       );
       state = decision.nextSnapshot;
       evaluations.push({ endSec: b.endSec, matches: decision.matches });
@@ -469,7 +493,7 @@ export function evaluateSignal(
         });
     }
   }
-  const current = evaluateOne(state, input, config);
+  const current = evaluateOne(state, input, config, version);
   state = current.nextSnapshot;
   if (current.alertDraft)
     drafts.push({ ...current.alertDraft, logicalTimeSec: input.watermarkSec, historical: false });

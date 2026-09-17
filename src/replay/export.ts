@@ -218,7 +218,9 @@ function catalogueSnapshot(
     // batches for however long it has. Nothing here proves the register was closed at the study
     // point, so it is retrospective and must not be read as evidence of what was known then.
     source: { reader: 'local-pools', availability: 'retrospective' },
-    pools: store.pools(registryScopeId).filter((pool) => pool.discoveredAt.blockNumber <= cutoffBlock),
+    pools: store
+      .pools(registryScopeId)
+      .filter((pool) => pool.discoveredAt.blockNumber <= cutoffBlock),
   };
 }
 
@@ -259,7 +261,12 @@ export async function exportReplayDataset(
         ? options.inputSnapshot
         : {
             ...options.inputSnapshot,
-            catalogue: catalogueSnapshot(store, discoveryScope, options.inputSnapshot, options.toBlock),
+            catalogue: catalogueSnapshot(
+              store,
+              discoveryScope,
+              options.inputSnapshot,
+              options.toBlock,
+            ),
           };
     operationRows.push(...rows.filter((row) => row.scope_id === options.scopeId));
     const coverage = coverageFromRows(operationRows, options.fromBlock, options.toBlock);

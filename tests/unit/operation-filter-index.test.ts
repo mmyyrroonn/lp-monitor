@@ -13,8 +13,7 @@ const FACTORY = '0x8000000000000000000000000000000000000008' as Address;
 const deployments = { v3Factory: FACTORY, v4Manager: MANAGER };
 
 const hex = (value: number): Hex => `0x${value.toString(16).padStart(64, '0')}` as Hex;
-const address = (value: number): Address =>
-  `0x${value.toString(16).padStart(40, '0')}` as Address;
+const address = (value: number): Address => `0x${value.toString(16).padStart(40, '0')}` as Address;
 
 function registration(seed: number, protocol: 'v3' | 'v4' = seed % 3 === 0 ? 'v4' : 'v3') {
   return {
@@ -53,7 +52,9 @@ function poolId(record: PoolRegistration): string {
 function topicValues(filter: PlannedFilter['filter'], index: number): readonly string[] {
   const value = filter.topics[index];
   if (value === undefined || value === null) return [];
-  return typeof value === 'string' ? [value.toLowerCase()] : value.map((topic) => topic.toLowerCase());
+  return typeof value === 'string'
+    ? [value.toLowerCase()]
+    : value.map((topic) => topic.toLowerCase());
 }
 
 function shardsOf(plan: readonly PlannedFilter[], family: PlannedFilter['family']) {
@@ -155,11 +156,15 @@ describe('operation filter index', () => {
     expect(ids.size).toBe(v4Pools);
     expect(v4.length).toBe(Math.ceil(events.size / 2) * Math.ceil(ids.size / 2));
     const v3 = shardsOf(planned, 'operation-v3');
-    expect(new Set(v3.flatMap((entry) => entry.filter.address)).size).toBe(records.length - v4Pools);
+    expect(new Set(v3.flatMap((entry) => entry.filter.address)).size).toBe(
+      records.length - v4Pools,
+    );
     for (const entry of planned)
       for (const values of [
         entry.filter.address,
-        ...entry.filter.topics.map((topic) => (typeof topic === 'string' ? [topic] : (topic ?? []))),
+        ...entry.filter.topics.map((topic) =>
+          typeof topic === 'string' ? [topic] : (topic ?? []),
+        ),
       ])
         expect(values.length).toBeLessThanOrEqual(2);
   });
@@ -190,7 +195,10 @@ describe('operation filter index', () => {
     const added = registration(40, 'v4');
     const v4Pools = [...records, added].filter((record) => record.pool.protocol === 'v4').length;
     const index = new OperationFilterIndex(deployments, 100);
-    const before = shardsOf(index.prepare(catalogue(records).prepared(), []).plan(1_000n, 1_100n), 'operation-v3');
+    const before = shardsOf(
+      index.prepare(catalogue(records).prepared(), []).plan(1_000n, 1_100n),
+      'operation-v3',
+    );
     const moved = catalogue([...records, added], {
       revisionKey: 'scope-registry#3:scope-operations#3',
     });
@@ -223,7 +231,10 @@ describe('operation filter index', () => {
       .prepare(moved.prepared([poolRegistrationId(added)], moved.view.revisionKey), [])
       .plan(2_000n, 2_100n);
     expect(delivered).toEqual(snapshot);
-    const rebuilt = shardsOf(index.prepare(moved.prepared(), []).plan(3_000n, 3_100n), 'operation-v3');
+    const rebuilt = shardsOf(
+      index.prepare(moved.prepared(), []).plan(3_000n, 3_100n),
+      'operation-v3',
+    );
     expect(rebuilt[0]!.filter.address).toContain(poolId(added));
     expect(rebuilt[0]!.filter.address).not.toBe(delivered[0]!.filter.address);
   });
@@ -245,7 +256,10 @@ describe('operation filter index', () => {
     // Two rounds of one lease planned the staged pool from one rebuild, and no catalogue was read.
     expect(counts.operationFilterRebuilds).toBe(1);
     expect(fixture.calls.all).toBe(1);
-    const after = shardsOf(index.prepare(fixture.prepared(), []).plan(1_300n, 1_399n), 'operation-v4');
+    const after = shardsOf(
+      index.prepare(fixture.prepared(), []).plan(1_300n, 1_399n),
+      'operation-v4',
+    );
     expect(topicValues(after[0]!.filter, 1)).not.toContain(poolId(staged).toLowerCase());
   });
 
@@ -258,7 +272,10 @@ describe('operation filter index', () => {
     index.prepare(fixture.prepared(), []).plan(1_000n, 1_100n);
     index.prepare(fixture.prepared(), [staged]).publish();
     const counts = measured(() => {
-      const after = shardsOf(index.prepare(fixture.prepared(), []).plan(2_000n, 2_100n), 'operation-v4');
+      const after = shardsOf(
+        index.prepare(fixture.prepared(), []).plan(2_000n, 2_100n),
+        'operation-v4',
+      );
       expect(topicValues(after[0]!.filter, 1)).toContain(poolId(staged).toLowerCase());
     });
     // Publishing settled the batch's own discovery: the next round rebuilds the protocol it moved
@@ -268,7 +285,9 @@ describe('operation filter index', () => {
     // The folded identity is a member now, so a later removal still withdraws its value.
     const gone = catalogue(records, { revisionKey: 'scope-registry#5:scope-operations#3' });
     const withdrawn = shardsOf(
-      index.prepare(gone.prepared([poolRegistrationId(staged)], gone.view.revisionKey), []).plan(3_000n, 3_100n),
+      index
+        .prepare(gone.prepared([poolRegistrationId(staged)], gone.view.revisionKey), [])
+        .plan(3_000n, 3_100n),
       'operation-v4',
     );
     expect(topicValues(withdrawn[0]!.filter, 1)).not.toContain(poolId(staged).toLowerCase());

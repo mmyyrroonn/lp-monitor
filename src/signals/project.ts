@@ -1,3 +1,4 @@
+import { countWork } from '../ops/work-counters.js';
 import { inRollingWindow } from '../metrics/rolling.js';
 import { createHash } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
@@ -33,8 +34,8 @@ import { formatObservedLiquidity } from '../notify/format.js';
 import type { BatchTimings } from '../ops/batch-timings.js';
 import { measureStage } from '../ops/batch-timings.js';
 import { encodeSignalState, decodeSignalState } from './codec.js';
-import { signalConfigVersion, type SignalConfig } from './config.js';
-import { evaluateSignal, initialSignalSnapshot } from './engine.js';
+import { type SignalConfig } from './config.js';
+import { createSignalEvaluator, initialSignalSnapshot } from './engine.js';
 import type { AlertRecord, SignalDecision, SignalInput, SignalSnapshot } from './types.js';
 
 export interface SignalBatchContext {
@@ -104,9 +105,20 @@ function statement(db: Database.Database, sql: string): Database.Statement {
 }
 const digest = (v: unknown) => createHash('sha256').update(encodeJson(v)).digest('hex');
 
-function compactSignalJson(db: Database.Database, value: unknown): string {
-  const ref = putPayload(db, Buffer.from(encodeSignalState(value), 'utf8'));
-  return encodeBatchReference(ref);
+function compactSignalJson(
+  db: Database.Database,
+  value: unknown,
+  memo: Map<string, string>,
+): string {
+  const encoded = encodeSignalState(value);
+  const cached = memo.get(encoded);
+  if (cached !== undefined) return cached;
+  countWork('signalAuditPayloadWrites');
+  const ref = encodeBatchReference(putPayload(db, Buffer.from(encoded, 'utf8')));
+  // Bound both cardinality and key size. Only identical bytes share a payload; every pool
+  // still receives its own audit row. A new transaction must revalidate stored objects.
+  if (memo.size < 64 && encoded.length <= 65536) memo.set(encoded, ref);
+  return ref;
 }
 
 /** Called within the same outer transaction as range acceptance and P2 rebuild.
@@ -239,22 +251,7 @@ function readEvidence(
         { first_block: number } | undefined)
     : undefined;
   const blockBounds = boundary ? { fromBlock: BigInt(boundary.first_block) } : undefined;
-  const times = bounds
-    ? new Map([
-        ...raw.logTimes(input.scopeId, bounds),
-        ...(blockBounds ? raw.logTimes(input.scopeId, blockBounds) : []),
-      ])
-    : raw.logTimes(input.scopeId);
-  const evidenceLogs = bounds
-    ? [
-        ...new Map(
-          [
-            ...raw.activeLogs(input.scopeId, bounds),
-            ...(blockBounds ? raw.activeLogs(input.scopeId, blockBounds) : []),
-          ].map((log) => [rawLogKey(log), log]),
-        ).values(),
-      ]
-    : raw.activeLogs(input.scopeId);
+  const evidenceLogs = raw.activeLogEvidence(input.scopeId, { ...bounds, ...blockBounds });
   const valuations = new Map(report.valuations.map((v) => [v.eventId, v]));
   const dependencies = new Map<string, Set<string>>();
   for (const v of report.valuations) {
@@ -268,17 +265,15 @@ function readEvidence(
     }
   }
   const events: Evidence['events'] = {};
-  for (const log of evidenceLogs)
-    events[rawLogKey(log)] = {
+  for (const { log, time } of evidenceLogs) {
+    const key = rawLogKey(log);
+    events[key] = {
       block: log.blockNumber,
-      minuteStartSec: times.get(rawLogKey(log))?.minuteStartSec ?? null,
-      poolIds: [...(dependencies.get(rawLogKey(log)) ?? [])],
-      digest: digest({
-        log,
-        time: times.get(rawLogKey(log)) ?? null,
-        valuation: valuations.get(rawLogKey(log)) ?? null,
-      }),
+      minuteStartSec: time?.minuteStartSec ?? null,
+      poolIds: [...(dependencies.get(key) ?? [])],
+      digest: digest({ log, time: time ?? null, valuation: valuations.get(key) ?? null }),
     };
+  }
   const closedCoverage: Evidence['closedCoverage'] = {};
   const currentMinuteSec = Math.floor(report.at.timestampSec / 60) * 60;
   for (const c of report.coverage)
@@ -509,6 +504,7 @@ export function projectSignals(
           input.configVersion,
         );
       }
+      const evaluator = createSignalEvaluator(config);
       // Retain the existing coverage horizon limit. Larger sample requirements
       // remain insufficient evidence instead of crashing an accepted configuration.
       const historyMinutes = Math.min(
@@ -580,7 +576,7 @@ export function projectSignals(
           : { timings },
       );
       const configHash = digest({
-        signal: signalConfigVersion(config),
+        signal: evaluator.version,
         chain: input.configVersion,
         metadata: input.metadata,
         usdg: input.usdg,
@@ -669,6 +665,7 @@ export function projectSignals(
       // report's own stages (registry/coverage/valuation/windows) are measured
       // separately inside buildMetricsReport, so no interval is counted twice.
       const evaluatedPoolIds: string[] = [];
+      const auditPayloads = new Map<string, string>();
       const evaluateWindows = () => {
         for (const w of report.windows) {
           evaluatedPoolIds.push(w.poolId);
@@ -704,21 +701,17 @@ export function projectSignals(
           const evaluationPrevious = correctedEntry
             ? { ...previous, lastFiveEndSec: previous.lastFiveEndSec! - 300 }
             : previous;
-          const decision = evaluateSignal(
-            evaluationPrevious,
-            {
-              pool: w.pool,
-              batchId: context.batchId,
-              observedAtMs: context.observedAtMs,
-              endAnchor: report.at,
-              watermarkSec: report.at.timestampSec,
-              metrics: w,
-              coverage,
-              epoch,
-              presentation: present(w.poolId, report.at.timestampSec).presentation,
-            },
-            config,
-          );
+          const decision = evaluator.evaluate(evaluationPrevious, {
+            pool: w.pool,
+            batchId: context.batchId,
+            observedAtMs: context.observedAtMs,
+            endAnchor: report.at,
+            watermarkSec: report.at.timestampSec,
+            metrics: w,
+            coverage,
+            epoch,
+            presentation: present(w.poolId, report.at.timestampSec).presentation,
+          });
           const snapshotChanged = !isDeepStrictEqual(previous, decision.nextSnapshot);
           if (snapshotChanged || !row)
             statement(
@@ -747,13 +740,17 @@ export function projectSignals(
               context.batchId,
               report.sourceHash,
               w.poolId,
-              compactSignalJson(db, {
-                matches: decision.matches,
-                evaluations: decision.evaluations,
-                at: report.at,
-                observedAtMs: context.observedAtMs,
-                coverage,
-              }),
+              compactSignalJson(
+                db,
+                {
+                  matches: decision.matches,
+                  evaluations: decision.evaluations,
+                  at: report.at,
+                  observedAtMs: context.observedAtMs,
+                  coverage,
+                },
+                auditPayloads,
+              ),
             );
           for (const draft of drafts) {
             const evidenceAt = present(

@@ -1,3 +1,4 @@
+import { countWork } from '../ops/work-counters.js';
 import { z } from 'zod';
 import { createHash } from 'node:crypto';
 const version = z.string().regex(/^[a-zA-Z0-9_.-]{1,64}$/);
@@ -58,6 +59,7 @@ export const initialSignalConfig: SignalConfig = parseSignalConfig({
   cooling: { enabled: true, threshold: 25, buckets: 3, version: '1' },
 });
 export function signalConfigVersion(config: SignalConfig): string {
+  countWork('signalConfigComputes');
   return `${config.version}:${createHash('sha256')
     .update(JSON.stringify({ windowSemantics: 'rolling-v1', config: parseSignalConfig(config) }))
     .digest('hex')}`;

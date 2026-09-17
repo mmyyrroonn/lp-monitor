@@ -42,7 +42,28 @@ type RawRow = {
   data: string;
   raw_block_timestamp: string | null;
 };
-type TimeRow = RawRow & {
+const RAW_LOG_COLUMNS =
+  'r.block_hash,r.block_number,r.transaction_hash,r.transaction_index,r.log_index,r.address,r.topics_json,r.data,r.raw_block_timestamp';
+type AssignedTimeRow = {
+  time_id: number | null;
+  minute_start_sec: number | null;
+  exact_timestamp_sec: number | null;
+  source: LogTime['source'];
+};
+function assignedTime(row: AssignedTimeRow): LogTime | undefined {
+  return row.time_id === null
+    ? undefined
+    : {
+        minuteStartSec: row.minute_start_sec,
+        exactTimestampSec: row.exact_timestamp_sec,
+        source: row.source,
+      };
+}
+type RefRow = Pick<
+  RawRow,
+  'block_hash' | 'block_number' | 'transaction_hash' | 'transaction_index' | 'log_index'
+>;
+type TimeRow = RefRow & {
   minute_start_sec: number | null;
   exact_timestamp_sec: number | null;
   source: LogTime['source'];
@@ -289,7 +310,7 @@ export class SqliteRangeStore {
       return (
         this.database
           .prepare(
-            `select r.* from raw_logs r indexed by raw_logs_height
+            `select ${RAW_LOG_COLUMNS} from raw_logs r indexed by raw_logs_height
              where ${blockClauses.join(' and ')}
                and exists (
                  select 1 from active_logs a indexed by active_logs_scope
@@ -303,7 +324,7 @@ export class SqliteRangeStore {
     return (
       this.database
         .prepare(
-          `select distinct r.* from active_logs a
+          `select distinct ${RAW_LOG_COLUMNS} from active_logs a
            join raw_logs r on r.id = a.raw_log_id
            ${timeJoin}
            where ${clauses.join(' and ')}
@@ -425,7 +446,8 @@ export class SqliteRangeStore {
     const rows = blockBounded
       ? (this.database
           .prepare(
-            `select r.*, t.minute_start_sec, t.exact_timestamp_sec, t.source
+            `select r.block_hash,r.block_number,r.transaction_hash,r.transaction_index,r.log_index,
+                    t.minute_start_sec, t.exact_timestamp_sec, t.source
              from raw_logs r indexed by raw_logs_height
              join log_times t on t.raw_log_id = r.id and t.scope_id = ?
              where ${[
@@ -443,7 +465,8 @@ export class SqliteRangeStore {
           ) as TimeRow[])
       : (this.database
           .prepare(
-            `select r.*, t.minute_start_sec, t.exact_timestamp_sec, t.source
+            `select r.block_hash,r.block_number,r.transaction_hash,r.transaction_index,r.log_index,
+                    t.minute_start_sec, t.exact_timestamp_sec, t.source
              from log_times t join raw_logs r on r.id = t.raw_log_id
              where ${clauses.join(' and ')}
              order by r.block_number, r.transaction_index, r.log_index`,
@@ -451,7 +474,7 @@ export class SqliteRangeStore {
           .all(...parameters) as TimeRow[]);
     return new Map(
       rows.map((row) => [
-        rawLogKey(rawLogFromRow(row)),
+        rawLogKey(refFromRow(row)),
         {
           minuteStartSec: row.minute_start_sec,
           exactTimestampSec: row.exact_timestamp_sec,
@@ -459,6 +482,76 @@ export class SqliteRangeStore {
         },
       ]),
     );
+  }
+
+  /** Narrow time evidence for coverage. Block bounds and claimed-time bounds form a union:
+   * a recent assignment on an old block must still be checked in both affected minutes. */
+  activeTimeRows(
+    scopeId: WatchScopeId,
+    bounds: RawReadBounds = {},
+  ): readonly { blockNumber: bigint; time: LogTime | undefined }[] {
+    const rows = this.activeEvidenceRows(scopeId, bounds, 'r.block_number') as (AssignedTimeRow & {
+      block_number: number;
+    })[];
+    return rows.map((row) => ({
+      blockNumber: decodedHeight(row.block_number),
+      time: assignedTime(row),
+    }));
+  }
+
+  /** Same active/time union as coverage, with the raw fields needed to hash signal evidence.
+   * Select ids before joining payload columns so overlap never copies/decodes a log twice. */
+  activeLogEvidence(
+    scopeId: WatchScopeId,
+    bounds: RawReadBounds = {},
+  ): readonly { log: RawLog; time: LogTime | undefined }[] {
+    const rows = this.activeEvidenceRows(scopeId, bounds, RAW_LOG_COLUMNS) as (RawRow &
+      AssignedTimeRow)[];
+    return rows.map((row) => ({ log: rawLogFromRow(row), time: assignedTime(row) }));
+  }
+
+  private activeEvidenceRows(
+    scopeId: WatchScopeId,
+    bounds: RawReadBounds,
+    columns: string,
+  ): unknown[] {
+    const ids: string[] = [];
+    const parameters: unknown[] = [];
+    const blocks: string[] = [];
+    if (bounds.fromBlock !== undefined) {
+      blocks.push('block_number>=?');
+      parameters.push(checkedHeight(bounds.fromBlock));
+    }
+    if (bounds.toBlock !== undefined) {
+      blocks.push('block_number<=?');
+      parameters.push(checkedHeight(bounds.toBlock));
+    }
+    if (blocks.length > 0)
+      ids.push(`select id from raw_logs indexed by raw_logs_height where ${blocks.join(' and ')}`);
+    if (bounds.sinceSec !== undefined) {
+      const since = checkedTimestamp(bounds.sinceSec);
+      // Separate ranges let SQLite seek each partial index instead of filtering a whole scope.
+      ids.push('select raw_log_id as id from log_times where scope_id=? and minute_start_sec>=?');
+      ids.push(
+        'select raw_log_id as id from log_times where scope_id=? and exact_timestamp_sec>=?',
+      );
+      parameters.push(scopeId, since, scopeId, since);
+    }
+    if (ids.length === 0) {
+      ids.push('select distinct raw_log_id as id from active_logs where scope_id=?');
+      parameters.push(scopeId);
+    }
+    return this.database
+      .prepare(
+        `select ${columns},t.raw_log_id as time_id,
+      t.minute_start_sec,t.exact_timestamp_sec,t.source
+      from (${ids.join(' union ')}) wanted
+      join raw_logs r on r.id=wanted.id
+      left join log_times t on t.scope_id=? and t.raw_log_id=r.id
+      where exists(select 1 from active_logs a where a.scope_id=? and a.raw_log_id=r.id)
+      order by r.block_number,r.transaction_index,r.log_index`,
+      )
+      .all(...parameters, scopeId, scopeId);
   }
 
   liveTimeContext(
@@ -1048,7 +1141,7 @@ export class SqliteRangeStore {
       const keysJson = losslessJson([...new Set(explicitRefs.map(rawLogKey))]);
       const rows = this.database
         .prepare(
-          `select distinct r.* from active_logs a join raw_logs r on r.id = a.raw_log_id
+          `select distinct ${RAW_LOG_COLUMNS} from active_logs a join raw_logs r on r.id = a.raw_log_id
            where a.scope_id = ? and r.raw_key in (select value from json_each(?))`,
         )
         .all(scopeId, keysJson) as RawRow[];
@@ -1186,13 +1279,18 @@ function losslessJson(value: unknown): string {
   );
 }
 
-function rawLogFromRow(row: RawRow): RawLog {
+function refFromRow(row: RefRow): LogRef {
   return {
     blockHash: row.block_hash as Hex,
     blockNumber: decodedHeight(row.block_number),
     transactionHash: row.transaction_hash as Hex,
     transactionIndex: row.transaction_index,
     logIndex: row.log_index,
+  };
+}
+function rawLogFromRow(row: RawRow): RawLog {
+  return {
+    ...refFromRow(row),
     address: row.address as Address,
     topics: JSON.parse(row.topics_json) as Hex[],
     data: row.data as Hex,

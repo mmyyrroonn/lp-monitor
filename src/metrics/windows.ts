@@ -214,13 +214,29 @@ export function buildMinuteMetrics(
               group.rawToken,
               group.discoveredAtBlock,
             );
-          // Cache unbaselined contributions. Baseline application creates new objects.
-          return options.memo && group.events.length > 0
+          // Empty minutes are cheaper to derive than to hash and round-trip through SQLite.
+          // Compute them from current coverage so repairs and pool birth remain authoritative.
+          // Cache only event contributions; baseline application creates new objects.
+          return options.memo && events.length > 0
             ? options.memo(
                 'minute:' + poolId + ':' + start,
                 start,
                 {
-                  events,
+                  // A minute consumes valuations and event counts, not transport payloads or
+                  // pool-state fields. Repairs still invalidate every value used by minuteMetric.
+                  events: events.map((item) =>
+                    item.event.kind === 'swap'
+                      ? [
+                          'swap',
+                          item.event.ref.transactionHash,
+                          item.usdMicros,
+                          item.usdgNotionalRaw,
+                          item.rawNotional ?? null,
+                        ]
+                      : item.event.kind === 'liquidity'
+                        ? ['liquidity', item.event.delta]
+                        : [item.event.kind],
+                  ),
                   covered,
                   current: start === currentMinute,
                   rawToken: group.rawToken,

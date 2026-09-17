@@ -1,7 +1,8 @@
-import type { BlockAnchor, LogTime } from '../domain/types.js';
-import { poolRegistrationId } from '../registry/pools.js';
-import { countWork } from '../ops/work-counters.js';
-import { volumeBaseline } from './baseline.js';
+// Frozen rolling reference from the verified 2026-09-17 follow-up. Keep independent of optimized rolling code.
+import type { BlockAnchor, LogTime } from '../../src/domain/types.js';
+import { poolRegistrationId } from '../../src/registry/pools.js';
+import { countWork } from '../../src/ops/work-counters.js';
+import { volumeBaseline } from '../../src/metrics/baseline.js';
 import {
   buildMinuteMetrics,
   type AggregateMetric,
@@ -9,7 +10,7 @@ import {
   type MetricEvent,
   type MinuteCoverage,
   type PoolMetricWindows,
-} from './windows.js';
+} from '../../src/metrics/windows.js';
 export const ROLLING_DURATIONS = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600 } as const;
 export type RollingWindowName = keyof typeof ROLLING_DURATIONS;
 type Counts =
@@ -48,7 +49,6 @@ function coverageReasons(
   const reasons = new Set<string>();
   if (start < 0) reasons.add('warming');
   for (let m = Math.max(0, Math.floor(start / 60) * 60); m <= Math.floor(end / 60) * 60; m += 60) {
-    countWork('rollingCoverageVisits');
     const c = byMinute.get(m);
     if (!c || c.fromBlock === null || c.toBlock === null) reasons.add('coverage-missing');
     else {
@@ -65,23 +65,9 @@ function coverageReasons(
 export function prepareRollingCoverage(coverage: readonly MinuteCoverage[]): RollingCoverageIndex {
   countWork('coverageIndexBuilds');
   const byMinute = new Map(coverage.map((c) => [c.minuteStartSec, c]));
-  const earliest = coverage.reduce<bigint | null>(
-    (min, c) => (c.fromBlock !== null && (min === null || c.fromBlock < min) ? c.fromBlock : min),
-    null,
-  );
-  const memo = new Map<string, readonly string[]>();
   return {
-    reasons: (start, end, watermark, birth) => {
-      const effectiveBirth =
-        birth !== null && earliest !== null && birth <= earliest ? null : birth;
-      const key = `${start}:${end}:${watermark}:${effectiveBirth ?? ''}`;
-      const cached = memo.get(key);
-      if (cached) return [...cached];
-      const reasons = coverageReasons(byMinute, start, end, watermark, effectiveBirth);
-      // A coverage index belongs to one build. Keep pathological horizons/birth cohorts bounded.
-      if (memo.size < 4096) memo.set(key, [...reasons]);
-      return reasons;
-    },
+    reasons: (start, end, watermark, birth) =>
+      coverageReasons(byMinute, start, end, watermark, birth),
   };
 }
 export function rollingCoverage(
@@ -104,7 +90,6 @@ function window(
   rawToken: string | null,
   birth: bigint | null,
 ): RollingMetric {
-  countWork('rollingWindowsBuilt');
   const reasons = index.reasons(start, end, watermark.timestampSec, birth);
   const selected: MetricEvent[] = [];
   for (const e of events) {
@@ -201,7 +186,7 @@ function baseline(
     volumeMultiplier: b.multiplier,
   };
 }
-export function buildRollingMetrics(
+export function buildReferenceRollingMetrics(
   events: readonly MetricEvent[],
   coverage: readonly MinuteCoverage[],
   watermark: BlockAnchor,
@@ -218,8 +203,6 @@ export function buildRollingMetrics(
   // batches, where a watermark move would invalidate every entry.
   const indexes = new Map<readonly MinuteCoverage[], RollingCoverageIndex>();
   const scoped = new Map<string, MinuteCoverage[]>();
-  const emptyWindows = new Map<RollingCoverageIndex, Map<string, RollingMetric>>();
-  let emptyWindowCount = 0;
   const indexFor = (cs: readonly MinuteCoverage[]) => {
     const existing = indexes.get(cs);
     if (existing) return existing;
@@ -299,16 +282,15 @@ export function buildRollingMetrics(
       ),
     );
 
-    const compute = (duration: number, end = watermark.timestampSec) => {
-      const from = lower(Math.floor((end - duration) / 60) * 60);
-      const to = lower(Math.floor(end / 60) * 60 + 60);
-      const empty = from === to && unknown.length === 0;
-      const key = empty ? `${dormantKey}:${duration}:${end}` : '';
-      const byWindow = emptyWindows.get(index);
-      const prior = empty ? byWindow?.get(key) : undefined;
-      if (prior) return prior;
-      const result = window(
-        empty ? [] : [...sorted.slice(from, to), ...unknown],
+    const compute = (duration: number, end = watermark.timestampSec) =>
+      window(
+        [
+          ...sorted.slice(
+            lower(Math.floor((end - duration) / 60) * 60),
+            lower(Math.floor(end / 60) * 60 + 60),
+          ),
+          ...unknown,
+        ],
         index,
         end - duration,
         end,
@@ -316,16 +298,6 @@ export function buildRollingMetrics(
         registration?.rawToken ?? null,
         registration?.discoveredAtBlock ?? null,
       );
-      // Only event-free windows can share across pools. Coverage, lifetime and raw-unit
-      // identity are part of the key, and this memo ends with the current build.
-      if (empty && emptyWindowCount < 4096) {
-        const memo = byWindow ?? new Map<string, RollingMetric>();
-        memo.set(key, result);
-        emptyWindows.set(index, memo);
-        emptyWindowCount++;
-      }
-      return result;
-    };
     const histories = (duration: number, count: number) =>
       Array.from({ length: count + 1 }, (_, i) =>
         compute(duration, watermark.timestampSec - (count - i) * duration),

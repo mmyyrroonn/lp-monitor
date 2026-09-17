@@ -2,7 +2,7 @@ import {
   buildRollingMetrics,
   ROLLING_DURATIONS,
   inRollingWindow,
-  rollingCoverage,
+  prepareRollingCoverage,
   type RollingWindowName,
 } from '../metrics/rolling.js';
 import { readCachedMetricMetadata } from './token-metadata.js';
@@ -426,6 +426,7 @@ export function buildMetricsReport(
       ),
     );
     const current = Math.floor(projection.end.timestampSec / 60) * 60;
+    const assetCoverage = prepareRollingCoverage(coverage);
     const rwa = input.assets.assets.map((asset) => {
       const swaps = valuedByRwa.get(asset.address) ?? [];
       return {
@@ -443,7 +444,7 @@ export function buildMetricsReport(
           Object.entries(ROLLING_DURATIONS).map(([name, duration]) => {
             const endSec = projection.end.timestampSec,
               startSec = endSec - duration;
-            const reasons = rollingCoverage(coverage, startSec, endSec, endSec);
+            const reasons = assetCoverage.reasons(startSec, endSec, endSec, null);
             const selected = swaps.filter((s) => {
               const inside = inRollingWindow(s.time, startSec, endSec, true);
               if (inside === null) reasons.push('boundary-time-unknown');

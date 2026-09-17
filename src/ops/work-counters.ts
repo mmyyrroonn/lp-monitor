@@ -21,6 +21,20 @@ export type WorkCounts = {
   metadataCandidates: number;
   /** Minute indexes built over a coverage set (one per coverage set per build). */
   coverageIndexBuilds: number;
+  /** Log records inspected while checking minute time coverage, including index construction. */
+  coverageLogVisits: number;
+  /** Concrete address/topic combinations materialized to prove shard coverage. */
+  partitionSelectorsExpanded: number;
+  /** Signal configurations validated and hashed. */
+  signalConfigComputes: number;
+  /** Audit payloads encoded into the content-addressed store. */
+  signalAuditPayloadWrites: number;
+  /** Values visited by the tagged JSON decoder. */
+  signalDecodeVisits: number;
+  /** Rolling aggregate objects constructed. */
+  rollingWindowsBuilt: number;
+  /** Minute evidence visited by rolling coverage queries. */
+  rollingCoverageVisits: number;
   /** Registry journal rows read to advance a live registry instead of reloading the catalogue. */
   registryChangesRead: number;
   /** Operation request templates rebuilt from a protocol's pool values. */
@@ -51,6 +65,13 @@ export const WORK_COUNTER_KEYS: readonly WorkCounterKey[] = [
   'evaluatedPools',
   'metadataCandidates',
   'coverageIndexBuilds',
+  'coverageLogVisits',
+  'partitionSelectorsExpanded',
+  'signalConfigComputes',
+  'signalAuditPayloadWrites',
+  'signalDecodeVisits',
+  'rollingWindowsBuilt',
+  'rollingCoverageVisits',
   'registryChangesRead',
   'operationFilterRebuilds',
   'operationFilterValuesScanned',
@@ -71,6 +92,13 @@ export function emptyWorkCounts(): WorkCounts {
     evaluatedPools: 0,
     metadataCandidates: 0,
     coverageIndexBuilds: 0,
+    coverageLogVisits: 0,
+    partitionSelectorsExpanded: 0,
+    signalConfigComputes: 0,
+    signalAuditPayloadWrites: 0,
+    signalDecodeVisits: 0,
+    rollingWindowsBuilt: 0,
+    rollingCoverageVisits: 0,
     registryChangesRead: 0,
     operationFilterRebuilds: 0,
     operationFilterValuesScanned: 0,

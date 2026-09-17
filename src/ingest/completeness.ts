@@ -1,3 +1,4 @@
+import { countWork } from '../ops/work-counters.js';
 import { encodeCheckedInteger } from '../domain/codec.js';
 import type { FetchShardManifest, RecordedRangeBatch } from '../storage/manifest.js';
 import { rawLogKey } from '../storage/manifest.js';
@@ -159,6 +160,36 @@ export function successfulShardRowsMatch(
 // P1 transport retains decimal strings. Revive the narrow batch contract used by
 // the same successful-shard validator that guards acceptRange.
 export function completePartitions(batch: RecordedRangeBatch): boolean {
+  // If every concrete selector already covers the entire batch, their union cannot have a gap.
+  // Validate shape before taking this path: persisted legacy payloads may be malformed despite
+  // the static type. The strict path below retains its validation behavior for those inputs.
+  const fullRanges = batch.manifest.shards.every(
+    ({ request }) =>
+      request.fromBlock <= batch.fromBlock &&
+      request.toBlock >= batch.toBlock &&
+      Array.isArray(request.address) &&
+      request.address.every((a) => typeof a === 'string') &&
+      Array.isArray(request.topics) &&
+      request.topics.every(
+        (topic) =>
+          topic === null ||
+          typeof topic === 'string' ||
+          (Array.isArray(topic) && topic.every((value) => typeof value === 'string')),
+      ),
+  );
+  if (fullRanges) {
+    let nonempty = false;
+    for (const { request } of batch.manifest.shards) {
+      let count = request.address.length;
+      for (const topic of request.topics) {
+        count *= topic === null || typeof topic === 'string' ? 1 : topic.length;
+        // Check every intermediate product, even if a later topic has no alternatives.
+        if (count > 100000) return false;
+      }
+      nonempty ||= count > 0;
+    }
+    return nonempty;
+  }
   const partitions = new Map<string, BlockInterval[]>();
   // Expand each concrete address/topic alternative. A shorter successful scan
   // of address B must not borrow address A's block coverage under the same family.
@@ -175,6 +206,7 @@ export function completePartitions(batch: RecordedRangeBatch): boolean {
       selectors = selectors.flatMap((prefix) => alternatives.map((t) => [...prefix, t]));
     }
     for (const selector of selectors) {
+      countWork('partitionSelectorsExpanded');
       const key = JSON.stringify([shard.filterId, ...selector]);
       const intervals = partitions.get(key) ?? [];
       intervals.push({ fromBlock: shard.request.fromBlock, toBlock: shard.request.toBlock });
