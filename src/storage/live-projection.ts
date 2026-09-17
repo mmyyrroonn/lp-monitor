@@ -283,16 +283,7 @@ export class LiveProjectionStore {
     try {
       return this.db
         .transaction(() =>
-          this.syncOnce(
-            scopeId,
-            registryScopeId,
-            configVersion,
-            prepared,
-            cache,
-            false,
-            caller,
-            events,
-          ),
+          this.syncOnce(scopeId, registryScopeId, configVersion, prepared, cache, caller, events),
         )
         .immediate();
     } catch (error) {
@@ -310,7 +301,6 @@ export class LiveProjectionStore {
     configVersion: string,
     prepared: PreparedRegistry | undefined,
     cache: ReturnType<typeof registryCacheFor>,
-    forceRebuild = false,
     caller: { used: boolean } = { used: false },
     events: LiveEventIndexStore = eventIndexFor(this.db, scopeId),
   ): LiveProjectionChanges {
@@ -346,28 +336,15 @@ export class LiveProjectionStore {
     }
     const journaled = registryJournalAvailable(this.db);
     const reference = old && journaled ? parseRegistryCursor(old.registry_json) : null;
+    // A reference to a different scope is another rebuild reason. Re-entering syncOnce would
+    // re-read the same old cursor forever, before any rebuild could replace it.
     const rebuild =
-      forceRebuild ||
       !old ||
       old.version !== VERSION ||
       old.registry_scope_id !== registryScopeId ||
-      old.config_version !== configVersion;
-    // A reference that names other scopes describes a registry this cursor no longer follows, so
-    // it is as stale as a version change and the row has to be rebuilt from the catalogue.
-    if (
-      reference &&
-      (reference.registryScopeId !== registryScopeId || reference.operationScopeId !== scopeId)
-    )
-      return this.syncOnce(
-        scopeId,
-        registryScopeId,
-        configVersion,
-        prepared,
-        cache,
-        true,
-        caller,
-        events,
-      );
+      old.config_version !== configVersion ||
+      (reference !== null &&
+        (reference.registryScopeId !== registryScopeId || reference.operationScopeId !== scopeId));
     const position = this.positions(registryScopeId, scopeId);
     const stored = rebuild ? null : reference;
     // A caller's prepared view is used only when it provably stands for the registry just read:
@@ -393,7 +370,23 @@ export class LiveProjectionStore {
       .prepare('select min_block from live_dirty_coverage where scope_id=?')
       .get(scopeId) as { min_block: number } | undefined;
     if (coverageRepair) repair(coverageRepair.min_block);
+    const previousEventKeys = new Map<number, string>();
     if (rebuild) {
+      // Bulk replacement must also retire contributions held by the in-memory event index.
+      // Capture keys from the old projection itself: its raw log may already have disappeared.
+      const previousEvents = this.db
+        .prepare(
+          "select raw_log_id,pool_id,json_extract(payload_json,'$.ref') as ref_json from live_events where scope_id=?",
+        )
+        .all(scopeId) as { raw_log_id: number; pool_id: string | null; ref_json: string }[];
+      countWork('liveEventRowsRead', previousEvents.length);
+      for (const row of previousEvents) {
+        previousEventKeys.set(
+          row.raw_log_id,
+          rawLogKey(JSON.parse(row.ref_json) as PoolEvent['ref']),
+        );
+        if (row.pool_id !== null) affected.add(row.pool_id);
+      }
       for (const row of this.db
         .prepare('select distinct raw_log_id from active_logs where scope_id=?')
         .all(scopeId) as { raw_log_id: number }[])
@@ -534,7 +527,9 @@ export class LiveProjectionStore {
     // afterwards by reading them back.
     const eventDelta: { upserts: PoolEvent[]; deletedKeys: string[] } = {
       upserts: [],
-      deletedKeys: [],
+      deletedKeys: [...previousEventKeys]
+        .filter(([id]) => !newEvents.has(id))
+        .map(([, key]) => key),
     };
     for (const id of dirty) {
       const before = this.db
@@ -668,9 +663,8 @@ export class LiveProjectionStore {
     // transaction as the events, so a transaction that rolls back leaves it at its previous token
     // and the next round knows to derive the window again rather than trust it.
     events.mark(token);
-    // A rebuild re-derives every active log, so its delta already names every event the scope has:
-    // the window is advanced by the same call as an ordinary round, and a key this round no longer
-    // produces leaves through the removal branch rather than being re-read to be noticed.
+    // Rebuilds carry explicit removals as well as every re-derived event. Ordinary rounds keep
+    // their bounded delta; neither path leaves a deleted event behind in the in-memory window.
     events.apply(eventDelta);
     this.db.prepare('delete from live_dirty_logs where scope_id=?').run(scopeId);
     this.db.prepare('delete from live_dirty_coverage where scope_id=?').run(scopeId);

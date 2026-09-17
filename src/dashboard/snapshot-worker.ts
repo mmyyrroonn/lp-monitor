@@ -25,7 +25,11 @@ import {
   type MetricsReport,
 } from '../storage/metric-store.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
-import { registryCacheFor, type RegistryCache } from '../storage/registry-cache.js';
+import {
+  registryCacheFor,
+  type RegistryCache,
+  type RegistryView,
+} from '../storage/registry-cache.js';
 import {
   registryChangesAfter,
   registryJournalAvailable,
@@ -256,15 +260,19 @@ export class SnapshotWorker {
         usdg: init.usdg as Address,
         metadata: init.metadata,
       };
-      const raw = new SqliteRangeStore(db),
-        // The one catalogue read this process pays for. Every later move arrives as a delta.
-        catalogue = new PoolRegistry([
+      const raw = new SqliteRangeStore(db);
+      // Rows and the consumed journal position must describe one SQLite snapshot. A writer
+      // committing during startup is either in both, or remains for the first refresh to consume.
+      const { catalogue, journal, position } = db.transaction(() => {
+        const catalogue = new PoolRegistry([
           ...raw.pools(input.registryScopeId),
           ...raw.pools(input.scopeId),
-        ]).snapshot(),
-        model = new DashboardReadModel();
+        ]).snapshot();
+        const journal = registryJournalAvailable(db);
+        return { catalogue, journal, position: journal ? this.#journalPosition(db, input) : 0 };
+      })();
+      const model = new DashboardReadModel();
       model.loadRegistry(catalogue);
-      const journal = registryJournalAvailable(db);
       this.#db = db;
       this.#dbPath = init.dbPath;
       this.#input = input;
@@ -277,7 +285,7 @@ export class SnapshotWorker {
       this.#sourceRevisions = hasTable(db, 'live_source_revisions');
       this.#metadataJournal = metadataJournalPresent(db);
       this.#catalogue = new Map(catalogue.map((row) => [poolRegistrationId(row), row]));
-      this.#registryPosition = journal ? this.#journalPosition() : 0;
+      this.#registryPosition = position;
       this.port.postMessage({ type: 'ready', scopeId: input.scopeId });
     } catch {
       db.close();
@@ -328,7 +336,8 @@ export class SnapshotWorker {
       // Every read below happens inside this one transaction, so the token, the catalogue move and
       // the bounded events all describe the same rows: a generation is never spliced together from
       // two different snapshots of the database.
-      const registry = this.#registryRows();
+      const registryView = this.#cache!.prepare().view;
+      const registry = this.#registryRows(registryView);
       const sinceSec = Math.floor(tip.timestampSec / 60) * 60 - SNAPSHOT_HISTORY_MINUTES * 60;
       const selected = this.#windowPools(sinceSec);
       const delta = this.#eventDelta();
@@ -336,7 +345,7 @@ export class SnapshotWorker {
         live: {
           historyMinutes: SNAPSHOT_HISTORY_MINUTES,
           poolIds: selected,
-          registry: this.#cache!.prepare().view,
+          registry: registryView,
           eventIndex: this.#index!,
           // The shape a sync hands back, filled in for the one field the build reads. Nothing was
           // synced here, so there is no repair, no touched pool list and no registry evidence.
@@ -368,6 +377,11 @@ export class SnapshotWorker {
     model.applyRegistryDelta(outcome.rows);
     this.#registryPosition = outcome.position;
     if (outcome.catalogue !== null) this.#catalogue = outcome.catalogue;
+    else
+      for (const row of outcome.rows) {
+        if (row.before !== null) this.#catalogue.delete(poolRegistrationId(row.before));
+        if (row.after !== null) this.#catalogue.set(poolRegistrationId(row.after), row.after);
+      }
     const summary = outcome.summary ?? this.#publish(outcome.report!, input, outcome.at);
     this.#tokens.set(key, outcome.token);
     if (outcome.revisions !== undefined) this.#eventRevisions = outcome.revisions;
@@ -473,7 +487,7 @@ export class SnapshotWorker {
    * The journal's sequence is one global counter, so the position is also the correct lower bound
    * for both scopes at once, and every row at or below it has been consumed for both of them.
    */
-  #registryRows(): {
+  #registryRows(view: RegistryView): {
     rows: RegistryDeltaRow[];
     position: number;
     catalogue: Map<string, PoolRegistration> | null;
@@ -508,23 +522,31 @@ export class SnapshotWorker {
     const changes: RegistryChange[] = [];
     for (const scopeId of new Set([input.registryScopeId, input.scopeId]))
       changes.push(...registryChangesAfter(db, scopeId, this.#registryPosition));
-    changes.sort((left, right) => left.seq - right.seq);
-    return {
-      rows: changes.map((change) => ({
-        poolKey: change.poolKey,
-        before: change.before,
-        after: change.after,
-      })),
-      position,
-      catalogue: null,
-    };
+    // A journal row is one registration, not the merged identity. Only publish the final
+    // before/after pool after RegistryCache has folded every surviving row in both scopes.
+    const touched = new Map<string, string>();
+    for (const change of changes)
+      for (const record of [change.before, change.after])
+        if (record !== null) touched.set(poolRegistrationId(record), change.poolKey);
+    const rows: RegistryDeltaRow[] = [];
+    for (const [poolId, poolKey] of touched) {
+      const before = this.#catalogue.get(poolId) ?? null;
+      const after = view.get(poolId) ?? null;
+      if (
+        before === after ||
+        (before !== null && after !== null && registrationsEqual(before, after))
+      )
+        continue;
+      rows.push({ poolKey, before, after });
+    }
+    return { rows, position, catalogue: null };
   }
 
   /** The append-only position of both catalogues this reader follows, in one indexed read. */
-  #journalPosition(): number {
-    const row = this.#db!.prepare(
-      'select max(seq) as seq from registry_changes where scope_id in (?,?)',
-    ).get(this.#input!.scopeId, this.#input!.registryScopeId) as { seq: number | null };
+  #journalPosition(db = this.#db!, input = this.#input!): number {
+    const row = db
+      .prepare('select max(seq) as seq from registry_changes where scope_id in (?,?)')
+      .get(input.scopeId, input.registryScopeId) as { seq: number | null };
     return row.seq ?? 0;
   }
 

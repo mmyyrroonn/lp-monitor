@@ -1,9 +1,10 @@
-import { afterEach, expect, test } from 'vitest';
+import { afterEach, expect, test, vi } from 'vitest';
 import { createHash } from 'node:crypto';
 import { dirname, join } from 'node:path';
 import {
   blockAnchor,
   openDashboardFixture,
+  poolAddress,
   type DashboardFixture,
 } from '../helpers/dashboard-fixture.js';
 import {
@@ -23,6 +24,8 @@ import { encodeJson } from '../../src/domain/json.js';
 import { emptyWorkCounts, openWorkCounts, type WorkCounts } from '../../src/ops/work-counters.js';
 import { buildMetricsReport } from '../../src/storage/metric-store.js';
 import { openDatabase } from '../../src/storage/database.js';
+import { SqliteRangeStore } from '../../src/storage/raw-store.js';
+import { LiveProjectionStore } from '../../src/storage/live-projection.js';
 import { metadataQueueFor } from '../../src/storage/metadata-queue.js';
 import { applyMetadataLookup, enqueueTokenMetadata } from '../../src/storage/token-metadata.js';
 import type { MetricMetadata } from '../../src/metrics/metadata.js';
@@ -646,4 +649,119 @@ test('a real worker thread runs the shipped module and answers a refresh', async
   );
   await harness.terminate();
   expect(harness.exits.length).toBeGreaterThan(0);
+});
+
+test('removing one scope registration retains the pool until its last registration is removed', () => {
+  const source = fixture();
+  source.input.registryScopeId = 'registry';
+  source.db.exec(`insert into pools
+    select 'registry',pool_key,protocol,discovered_raw_log_id,discovered_block_number,
+           discovered_block_hash,payload_json from pools where scope_id='s'`);
+  // Establish the fixture's initial projection for this scope pair before starting the reader.
+  source.db.prepare('delete from live_projection_cursors where scope_id=?').run('s');
+  new LiveProjectionStore(source.db).sync('s', 'registry', 'c');
+  const run = running(source);
+  run.send({ type: 'refresh', key: 'live' });
+  const before = run.summary();
+  expect(before.tokens[0]!.poolCount).toBe(5);
+  const key = source.db
+    .prepare(
+      `select pool_key from pools where scope_id='s'
+    and json_extract(payload_json,'$.pool.address')=?`,
+    )
+    .pluck()
+    .get(poolAddress(1));
+  source.db.prepare('delete from pools where scope_id=? and pool_key=?').run('registry', key);
+  new LiveProjectionStore(source.db).sync('s', 'registry', 'c');
+  run.send({ type: 'refresh', key: 'live' });
+  expect(run.port.count('failed')).toBe(0);
+  expect(run.summary().tokens[0]!.poolCount).toBe(5);
+  expectSameAsLegacy(run.summary(), buildDashboardSnapshot(source.readonly, source.input));
+  const retained = run.summary();
+  source.db.prepare('delete from pools where scope_id=? and pool_key=?').run('s', key);
+  new LiveProjectionStore(source.db).sync('s', 'registry', 'c');
+  run.send({ type: 'refresh', key: 'live' });
+  expect(run.summary().tokens[0]!.poolCount).toBe(4);
+  // The retained generation before the final deletion still owns the pool.
+  run.send({
+    type: 'poolPage',
+    id: 71,
+    generation: retained.generation!,
+    address: before.tokens[0]!.address,
+    window: '5m',
+    offset: 0,
+    limit: 100,
+  });
+  expect(run.port.last('page').page.total).toBe(5);
+});
+
+test('removing an older discovery row retains a rediscovered pool in the same scope', () => {
+  const source = fixture(),
+    run = running(source);
+  run.send({ type: 'refresh', key: 'live' });
+  const original = source.db
+    .prepare(
+      `select pool_key,discovered_raw_log_id from pools
+    where scope_id='s' and json_extract(payload_json,'$.pool.address')=?`,
+    )
+    .get(poolAddress(1)) as { pool_key: string; discovered_raw_log_id: number };
+  appendBatch(source, {
+    events: [{ pool: 1, block: 4860, tx: 921, usdgUnits: 1000 }],
+    discovered: [
+      { index: 1, token0: source.input.assets.assets[0]!.address, token1: source.input.usdg },
+    ],
+    toBlock: 4900,
+    boundaryFromSec: 4920,
+    boundaryToSec: 4920,
+  });
+  run.send({ type: 'refresh', key: 'live' });
+  expect(
+    source.db
+      .prepare('select count(*) from pools where scope_id=? and pool_key=?')
+      .pluck()
+      .get('s', original.pool_key),
+  ).toBe(2);
+  source.db
+    .prepare('delete from pools where scope_id=? and pool_key=? and discovered_raw_log_id=?')
+    .run('s', original.pool_key, original.discovered_raw_log_id);
+  new LiveProjectionStore(source.db).sync('s', 's', 'c');
+  run.send({ type: 'refresh', key: 'live' });
+  expect(run.port.count('failed')).toBe(0);
+  expect(run.summary().tokens[0]!.poolCount).toBe(5);
+  expectSameAsLegacy(run.summary(), buildDashboardSnapshot(source.readonly, source.input));
+});
+
+test('a writer between startup catalogue reads and journal capture is consumed on refresh', () => {
+  const source = fixture();
+  const original = SqliteRangeStore.prototype.pools;
+  let calls = 0;
+  // A different WAL connection commits after the reader obtained its catalogue rows. With a
+  // consistent startup read snapshot its journal cursor must still precede this deletion.
+  const spy = vi.spyOn(SqliteRangeStore.prototype, 'pools').mockImplementation(function (
+    this: SqliteRangeStore,
+    scopeId,
+  ) {
+    const rows = original.call(this, scopeId);
+    if (++calls === 2)
+      source.db
+        .prepare(
+          `delete from pools where scope_id='s'
+      and json_extract(payload_json,'$.pool.address')=?`,
+        )
+        .run(poolAddress(1));
+    return rows;
+  });
+  let run: Running;
+  try {
+    run = running(source);
+  } finally {
+    spy.mockRestore();
+  }
+  new LiveProjectionStore(source.db).sync('s', 's', 'c');
+  run.send({ type: 'refresh', key: 'live' });
+  expect(run.port.count('failed')).toBe(0);
+  expect(run.summary().tokens[0]!.poolCount).toBe(4);
+  expectSameAsLegacy(run.summary(), buildDashboardSnapshot(source.readonly, source.input));
+  run.send({ type: 'refresh', key: 'live' });
+  expect(run.port.last('unchanged').key).toBe('live');
 });

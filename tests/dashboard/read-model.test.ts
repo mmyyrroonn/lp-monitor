@@ -298,9 +298,7 @@ test('a round republished under the same version rebuilds the pages it replaces'
   const stock = input.stocks.find((entry) => entry.asset.address === stocks.a)!,
     target = registrations
       .filter((registration) => registration.token0 === stocks.a)
-      .sort((left, right) =>
-        poolRegistrationId(left).localeCompare(poolRegistrationId(right)),
-      )
+      .sort((left, right) => poolRegistrationId(left).localeCompare(poolRegistrationId(right)))
       .at(-1)!,
     targetId = poolRegistrationId(target);
   expect(before.items.map((pool) => pool.poolId)).not.toContain(targetId);
@@ -310,7 +308,10 @@ test('a round republished under the same version rebuilds the pages it replaces'
   // round it was built from, and serving it again would describe a round that no longer exists.
   const stocksAfter = input.stocks.map((entry) =>
       entry === stock
-        ? { asset: entry.asset, valuations: entry.valuations.map((v) => ({ ...v, pool: target.pool })) }
+        ? {
+            asset: entry.asset,
+            valuations: entry.valuations.map((v) => ({ ...v, pool: target.pool })),
+          }
         : entry,
     ),
     second = model.publish({ ...input, stocks: stocksAfter }),

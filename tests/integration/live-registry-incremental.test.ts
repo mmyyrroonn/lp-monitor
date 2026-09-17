@@ -14,6 +14,7 @@ import { initialSignalConfig } from '../../src/signals/config.js';
 import { commitAcceptedSignalBatch, projectSignals } from '../../src/signals/project.js';
 import type { AlertRecord } from '../../src/signals/types.js';
 import { openDatabase } from '../../src/storage/database.js';
+import { eventIndexFor } from '../../src/storage/live-event-index.js';
 import { LiveProjectionStore } from '../../src/storage/live-projection.js';
 import { rawLogKey, type PersistedPoolRegistration } from '../../src/storage/manifest.js';
 import { RegistryCache, registryCacheFor } from '../../src/storage/registry-cache.js';
@@ -568,3 +569,58 @@ test('an identity a registry delta omits is never withdrawn on the strength of t
 });
 
 const SCALE_POOLS = 4_000;
+
+test('changing the registry scope rebuilds once and leaves a usable incremental cursor', () => {
+  const db = open();
+  new SqliteRangeStore(db).acceptRange(batch('first', hotLogs()));
+  const projection = new LiveProjectionStore(db);
+  projection.sync('s', 's', 'c');
+  const before = db
+    .prepare('select payload_json from live_events where scope_id=? order by raw_log_id')
+    .all('s');
+  const changed = projection.sync('s', 'new-registry', 'c');
+  expect(changed.repairFrom).toBe(0n);
+  const cursor = db
+    .prepare('select registry_scope_id,registry_json from live_projection_cursors where scope_id=?')
+    .get('s') as { registry_scope_id: string; registry_json: string };
+  expect(cursor.registry_scope_id).toBe('new-registry');
+  expect(JSON.parse(cursor.registry_json).registryScopeId).toBe('new-registry');
+  expect(
+    db
+      .prepare('select payload_json from live_events where scope_id=? order by raw_log_id')
+      .all('s'),
+  ).toEqual(before);
+  expect(projection.sync('s', 'new-registry', 'c').eventDelta).toEqual({
+    upserts: [],
+    deletedKeys: [],
+  });
+});
+
+test('switching to a registry without the old pool retires its cached events', () => {
+  const db = open();
+  const first = batch('first', hotLogs());
+  new SqliteRangeStore(db).acceptRange({ ...first, poolRegistrations: [] });
+  seedRegistrations(db, 'old-registry', [hotRegistration]);
+  const projection = new LiveProjectionStore(db);
+  projection.sync('s', 'old-registry', 'c');
+  const index = eventIndexFor(db, 's');
+  const poolId = poolRegistrationId(hotRegistration);
+  const selected = new Set([poolId]);
+  const previous = index.eventsFor(selected);
+  expect(previous.length).toBeGreaterThan(0);
+  expect(() =>
+    db.transaction(() => {
+      projection.sync('s', 'new-registry', 'c');
+      expect(index.eventsFor(selected)).toHaveLength(0);
+      throw new Error('abort scope change');
+    })(),
+  ).toThrow('abort scope change');
+  expect(index.eventsFor(selected)).toEqual(previous);
+  const changes = projection.sync('s', 'new-registry', 'c');
+  expect(db.prepare('select count(*) from live_events where scope_id=?').pluck().get('s')).toBe(0);
+  expect(index.eventsFor(selected)).toHaveLength(0);
+  expect([...(changes.eventDelta?.deletedKeys ?? [])].sort()).toEqual(
+    previous.map((e) => rawLogKey(e.ref)).sort(),
+  );
+  expect(changes.affectedPoolIds).toContain(poolId);
+});
