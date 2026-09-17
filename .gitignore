@@ -56,3 +56,13 @@ artifacts/**/requests.jsonl.*
 # are reconstructible from the recorder database, so importing them wholesale would only
 # put gigabytes into the index. Publish the pool list from the database instead.
 /artifacts/catalogue/
+
+# Live performance runs keep their raw payloads, console streams, patches, CPU profiles and
+# the provenance manifests of uncommitted work trees local. The compact benchmark.json and
+# summary.json of a run directory are the parts worth keeping -- a payload directory alone
+# reaches gigabytes, which is what this rule exists to keep out of the index.
+/artifacts/performance/**/artifacts/
+/artifacts/performance/*.log
+/artifacts/performance/*.patch
+/artifacts/performance/**/*.cpuprofile
+/artifacts/performance/*-source-provenance.json
