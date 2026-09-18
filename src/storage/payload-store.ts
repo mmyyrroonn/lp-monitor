@@ -394,8 +394,8 @@ export function writeCompactBatch(db: Database.Database, batch: RecordedRangeBat
       );
       const insertShard = db.prepare(
         `insert into fetch_shards(
-           batch_id,shard_id,filter_id,from_block,to_block,request_json,status,response_hash,log_count,error
-         ) values(?,?,?,?,?,?,?,?,?,?)`,
+           batch_id,shard_id,filter_id,from_block,to_block,status,response_hash,log_count,error
+         ) values(?,?,?,?,?,?,?,?,?)`,
       );
       for (const shard of batch.manifest.shards)
         insertShard.run(
@@ -404,9 +404,6 @@ export function writeCompactBatch(db: Database.Database, batch: RecordedRangeBat
           shard.filterId,
           checkedHeight(shard.request.fromBlock),
           checkedHeight(shard.request.toBlock),
-          JSON.stringify(normalizeRequest(shard), (_key, value: unknown) =>
-            typeof value === 'bigint' ? value.toString(10) : value,
-          ),
           shard.status,
           shard.responseHash,
           shard.logCount,

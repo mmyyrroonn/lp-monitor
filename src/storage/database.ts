@@ -34,6 +34,11 @@ const migration = [
   .map(loadMigration)
   .join('\n');
 
+/** 015 removes a column, and ALTER TABLE ... DROP COLUMN has no IF EXISTS form, so it cannot join
+ * the list above: every other migration there is written to be safe to re-run on every open.
+ * It is applied below, once, while the column it removes is still present. */
+const dropShardRequest = loadMigration('015-drop-shard-request.sql');
+
 /** Inspect validates the schema but never migrates or changes journal mode.
  * SQLite may still need WAL/SHM sidecars when reading a live WAL database. */
 export function openDatabase(
@@ -84,6 +89,9 @@ export function openDatabase(
     }
     if (path !== ':memory:') database.pragma('journal_mode = WAL');
     database.exec(migration);
+    const shardColumns = database.pragma('table_info(fetch_shards)') as { name: string }[];
+    if (shardColumns.some((column) => column.name === 'request_json'))
+      database.exec(dropShardRequest);
     const poolColumns = database.pragma('table_info(pools)') as { name: string }[];
     if (!poolColumns.some((column) => column.name === 'protocol'))
       database.exec('alter table pools add column protocol TEXT');
