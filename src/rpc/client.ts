@@ -14,6 +14,12 @@ const methods = [
   'eth_getCode',
   'eth_call',
 ] as const;
+/**
+ * `cancel` is the hook that reports a body reader going away, but Node's TransformStream resolves
+ * to the DOM lib's `Transformer`, which predates the member. @types/node already declares it on the
+ * same interface, so naming it here keeps the callback typed instead of cast.
+ */
+type BodyTransformer = Transformer<Uint8Array, Uint8Array> & { cancel?: () => void };
 export interface ReaderOptions extends EvidenceOptions {
   maxCalls?: number | null;
   deadlineMs?: number;
@@ -59,20 +65,75 @@ export function createChainReader(
     if (options.deadlineMs !== undefined && Date.now() >= options.deadlineMs)
       throw new RpcFailure('deadline');
   };
+  // One budget for both halves of a request: viem spends it waiting for response headers, and the
+  // watchdog below spends the same number idling between body chunks. A second knob would ask the
+  // operator for two answers to one question -- "how long may this provider make no progress".
+  const timeoutMs = options.timeoutMs ?? 10000;
   const client = createPublicClient({
     transport: http(env.httpRpcUrl, {
       retryCount: 0,
-      timeout: options.timeoutMs ?? 10000,
+      timeout: timeoutMs,
       batch: false,
       fetchFn: async (input, init) => {
-        const response = await (options.fetchFn ?? fetch)(input, init);
+        const abort = new AbortController();
+        // viem disarms its own timeout the instant the headers land: withTimeout clears its timer
+        // in a finally around the fetch that awaits them. Nothing below is bounded by it, so a body
+        // that stops producing data holds its socket until undici's 300s default -- long enough to
+        // stall a strictly serial follow loop for minutes. Carry our own signal into the real fetch
+        // so the watchdog can abandon the connection rather than merely stop reading it.
+        const signal = init?.signal ? AbortSignal.any([init.signal, abort.signal]) : abort.signal;
+        const response = await (options.fetchFn ?? fetch)(input, { ...init, signal });
+        let errorBody: ((failure: RpcFailure) => void) | undefined;
+        let watchdog: NodeJS.Timeout | undefined;
+        const disarm = () => {
+          if (watchdog !== undefined) clearTimeout(watchdog);
+          watchdog = undefined;
+        };
+        // An idle budget, not a total one: the timer restarts on every chunk, so a legitimately
+        // slow multi-megabyte getLogs response is never killed for taking long, only for going
+        // quiet. A non-positive timeout means "no timeout" exactly as it does in viem.
+        const arm = () => {
+          if (timeoutMs <= 0) return;
+          disarm();
+          watchdog = setTimeout(() => {
+            watchdog = undefined;
+            const failure = new RpcFailure('timeout-or-network', 'unknown', true);
+            try {
+              // Error our readable first, so the caller classifies the failure we chose rather than
+              // whatever the abort surfaces. Then abort regardless: erroring alone would leave the
+              // underlying body read running and its connection ESTABLISHED, which is the symptom.
+              errorBody?.(failure);
+            } finally {
+              abort.abort(failure);
+            }
+          }, timeoutMs);
+          // A watchdog must never be the reason the process stays up. The socket it is watching
+          // already holds the loop open while the read is genuinely outstanding, so unref costs it
+          // nothing but lets a recorder shut down without waiting out a timer nothing will observe.
+          (watchdog as { unref?: () => void }).unref?.();
+        };
+        const watched: BodyTransformer = {
+          start(controller) {
+            errorBody = (failure) => controller.error(failure);
+            arm();
+          },
+          transform(chunk, controller) {
+            meter.addBytes(chunk.byteLength);
+            controller.enqueue(chunk);
+            arm();
+          },
+          flush() {
+            disarm();
+          },
+          cancel() {
+            // The reader went away or the upstream errored: no further chunk can arrive, so the
+            // watchdog has nothing left to time and the connection nothing left to serve.
+            disarm();
+            abort.abort();
+          },
+        };
         const body = response.body?.pipeThrough(
-          new TransformStream<Uint8Array, Uint8Array>({
-            transform(chunk, controller) {
-              meter.addBytes(chunk.byteLength);
-              controller.enqueue(chunk);
-            },
-          }),
+          new TransformStream<Uint8Array, Uint8Array>(watched),
         );
         return new Response(body ?? null, {
           status: response.status,
