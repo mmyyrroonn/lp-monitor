@@ -78,6 +78,14 @@ export async function runDashboardCli(
           metadata: input.metadata,
           ...options,
         });
+  // Said before the server binds, because the moment it binds this reader can stop answering: the
+  // first read runs the whole source verification synchronously on this thread, and every request —
+  // the page included — waits behind it.
+  if (legacy)
+    console.warn(
+      'WARNING: --legacy-snapshot verifies the whole source on this thread at first read; ' +
+        'the page and every other request stop answering until it finishes.',
+    );
   const server =
     coordinator === null
       ? createDashboardServer({ readSnapshot: (at) => reader!.read(at) })

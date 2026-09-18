@@ -88,7 +88,11 @@ export type SnapshotWorkerRequest =
  * configuration value may not travel to the page, so the code is the whole report.
  */
 export type SnapshotWorkerFailure =
-  'SNAPSHOT_NO_DATABASE' | 'SNAPSHOT_UNAVAILABLE' | 'SNAPSHOT_BAD_REQUEST' | 'SNAPSHOT_ERROR';
+  | 'SNAPSHOT_NO_DATABASE'
+  | 'SNAPSHOT_UNAVAILABLE'
+  | 'SNAPSHOT_BAD_REQUEST'
+  | 'SNAPSHOT_INCOMPATIBLE_DATABASE'
+  | 'SNAPSHOT_ERROR';
 
 export type SnapshotWorkerResponse =
   | { type: 'ready'; scopeId: string }
@@ -155,6 +159,34 @@ function hasTable(db: Database.Database, name: string): boolean {
   return (
     db.prepare("select 1 from sqlite_master where type='table' and name=?").get(name) !== undefined
   );
+}
+
+/**
+ * The two statements every round compiles before it can decide anything.
+ *
+ * They are named once so that the probe below cannot come to describe a different dependency than
+ * the one `#sourceToken` has. Unlike `live_source_revisions`, which a round can do without and which
+ * is therefore behind a capability flag, these have no flag because no round is answerable without
+ * them — a check that guessed at the schema instead would be free to reject a file the reader could
+ * actually have read.
+ */
+const SOURCE_TOKEN_SQL = {
+  cursor: 'select source_hash from live_projection_cursors where scope_id=?',
+  high: 'select max(raw_log_id) as id from live_events where scope_id=?',
+} as const;
+
+/**
+ * Compile — never run — what a round's change detection starts with, so a file that cannot answer
+ * says so before it is asked.
+ *
+ * Preparing a statement is where its table names are resolved, so a database missing either table
+ * throws here with exactly the error `#sourceToken` would have thrown from inside the round. That is
+ * the whole licence for this check: it reads nothing, and a file that compiles both statements is a
+ * file whose rounds go on to work. It can only move a failure that was already certain to happen.
+ */
+function probeSourceToken(db: Database.Database): void {
+  db.prepare(SOURCE_TOKEN_SQL.cursor);
+  db.prepare(SOURCE_TOKEN_SQL.high);
 }
 
 /**
@@ -249,6 +281,16 @@ export class SnapshotWorker {
       db = openDatabase(init.dbPath, { readonly: true });
     } catch {
       this.#fail(undefined, 'SNAPSHOT_UNAVAILABLE');
+      return;
+    }
+    // The file is open and its shape is the one thing that can be settled before any work is done:
+    // a database predating the live projection answers no round, and would otherwise spend every
+    // round failing on its first read while the page reported it as still generating a first one.
+    try {
+      probeSourceToken(db);
+    } catch {
+      db.close();
+      this.#fail(undefined, 'SNAPSHOT_INCOMPATIBLE_DATABASE');
       return;
     }
     try {
@@ -562,13 +604,9 @@ export class SnapshotWorker {
     const db = this.#db!,
       input = this.#input!,
       tip = this.#raw!.acceptedTip(input.scopeId),
-      cursor = db
-        .prepare('select source_hash from live_projection_cursors where scope_id=?')
-        .pluck()
-        .get(input.scopeId),
-      high = db
-        .prepare('select max(raw_log_id) as id from live_events where scope_id=?')
-        .get(input.scopeId) as { id: number | null } | undefined;
+      cursor = db.prepare(SOURCE_TOKEN_SQL.cursor).pluck().get(input.scopeId),
+      high = db.prepare(SOURCE_TOKEN_SQL.high).get(input.scopeId) as
+        { id: number | null } | undefined;
     return encodeJson([
       tip?.number.toString() ?? null,
       tip?.hash ?? null,

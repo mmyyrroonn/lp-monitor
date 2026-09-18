@@ -1,6 +1,7 @@
 import { afterEach, expect, test, vi } from 'vitest';
 import {
   createSnapshotCoordinator,
+  SNAPSHOT_FAULT_VISIBILITY_MS,
   SnapshotBusyError,
   type SnapshotCoordinator,
   type SnapshotCoordinatorOptions,
@@ -85,7 +86,7 @@ class FakeWorker implements SnapshotWorkerLike {
   readonly sent: { type: string; [key: string]: unknown }[] = [];
   readonly #listeners = new Map<string, Set<(value: unknown) => void>>();
   /** What this worker answers an init with; set before the coordinator is built. */
-  initReply: 'ready' | 'no-database' | 'unavailable' = 'ready';
+  initReply: 'ready' | 'no-database' | 'unavailable' | 'incompatible' = 'ready';
   terminateCount = 0;
   /** Answers a refresh request; a test leaves it unset to let a round hang. */
   onRefresh: ((request: RefreshRequest) => void) | null = null;
@@ -99,6 +100,10 @@ class FakeWorker implements SnapshotWorkerLike {
       queueMicrotask(() => this.emit('message', { type: 'failed', code: 'SNAPSHOT_NO_DATABASE' }));
     if (message.type === 'init' && this.initReply === 'unavailable')
       queueMicrotask(() => this.emit('message', { type: 'failed', code: 'SNAPSHOT_UNAVAILABLE' }));
+    if (message.type === 'init' && this.initReply === 'incompatible')
+      queueMicrotask(() =>
+        this.emit('message', { type: 'failed', code: 'SNAPSHOT_INCOMPATIBLE_DATABASE' }),
+      );
     if (message.type === 'refresh') this.onRefresh?.(message as RefreshRequest);
   }
 
@@ -361,6 +366,75 @@ test('an unreadable database is an error, not an empty one', async () => {
     generation: null,
     message: '无法读取本地数据；请检查数据库与配置版本。',
   });
+});
+
+test('a database this reader can never read is named, not waited on', async () => {
+  const { coordinator } = harness({ restartCooldownMs: 5000 }, (created) => {
+    created.initReply = 'incompatible';
+  });
+  await delay(20);
+  // The file exists and is readable; what it lacks is the projection every round begins with. That
+  // is a property of the file, so no restart can change it and no budget is worth spending on one.
+  expect(coordinator.latest()).toMatchObject({
+    status: 'error',
+    generation: null,
+    refreshing: false,
+    message: '本地数据库缺少实时投影表；请指向 recorder 正在写入的数据库。',
+  });
+});
+
+test('a first snapshot that never arrives becomes a stated fault, not an endless wait', async () => {
+  let clock = 1_000_000;
+  const { coordinator } = harness(
+    { now: () => clock, refreshIntervalMs: 60_000, restartCooldownMs: 60_000 },
+    (created) => {
+      // The reader warms up and then every round it runs fails: a fault with no restart to blame.
+      created.onRefresh = () =>
+        queueMicrotask(() => created.emit('message', { type: 'failed', code: 'SNAPSHOT_ERROR' }));
+    },
+  );
+  await delay(20);
+  // Below the budget the page still says it is generating, because a reader that has just started
+  // failing may still be about to succeed, and a page that cried wolf on every transient is worse.
+  expect(coordinator.latest()).toMatchObject({ status: 'empty', message: '正在生成首个快照' });
+  clock += SNAPSHOT_FAULT_VISIBILITY_MS - 1;
+  expect(coordinator.latest()).toMatchObject({ status: 'empty', message: '正在生成首个快照' });
+  // Past it, and with nothing ever published, "generating" is no longer a true statement.
+  clock += 1;
+  expect(coordinator.latest()).toMatchObject({
+    status: 'error',
+    generation: null,
+    message: '实时数据暂时不可用，尚未生成任何结果。',
+  });
+});
+
+test('a worker that throws is reported to the log, and never described on the page', async () => {
+  const errors = vi.spyOn(console, 'error').mockImplementation(() => undefined);
+  let clock = 2_000_000;
+  try {
+    const { worker, coordinator } = harness(
+      { now: () => clock, restartCooldownMs: 60_000 },
+      (created) => {
+        created.initReply = 'ready';
+      },
+    );
+    await Promise.resolve();
+    const failure = new Error('thread died holding an internal detail');
+    worker.emit('error', failure);
+    // The stack the page may never be shown is exactly what the log has to have: the thread's own
+    // failure is the only account of why it left, and dropping it is what made this undiagnosable.
+    expect(errors).toHaveBeenCalledWith('dashboard snapshot reader failed:', failure);
+    expect(worker.terminateCount).toBe(1);
+    expect(JSON.stringify(coordinator.latest())).not.toContain('internal detail');
+    // The same budget applies to a reader that died as to one whose rounds fail.
+    clock += SNAPSHOT_FAULT_VISIBILITY_MS;
+    expect(coordinator.latest()).toMatchObject({
+      status: 'error',
+      message: '实时数据暂时不可用，尚未生成任何结果。',
+    });
+  } finally {
+    errors.mockRestore();
+  }
 });
 
 test('closing releases the worker and every waiting caller', async () => {

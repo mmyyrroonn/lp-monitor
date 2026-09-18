@@ -17,6 +17,12 @@ export const SNAPSHOT_DETAIL_TIMEOUT_MS = 2000;
 export const SNAPSHOT_DETAIL_CONCURRENCY = 8;
 /** The shortest gap between two automatic worker restarts, so a crash loop cannot spin. */
 export const SNAPSHOT_RESTART_COOLDOWN_MS = 30000;
+/**
+ * How long a reader that has never published anything may keep failing before the page stops saying
+ * it is generating its first snapshot and states the fault instead. Longer than one restart cooldown
+ * plus a round, so a reader that recovers by being restarted is never reported as broken.
+ */
+export const SNAPSHOT_FAULT_VISIBILITY_MS = 45000;
 
 /** A detail request that could not be served in time and is safe to retry. */
 export class SnapshotBusyError extends Error {
@@ -46,6 +52,25 @@ export type SnapshotWorkerLike = {
 };
 
 export type SnapshotWorkerFactory = () => SnapshotWorkerLike;
+
+/**
+ * The reader a dashboard gets when its caller does not supply one.
+ *
+ * The built artifact is plain JavaScript sitting beside this module, and Node resolves it unaided.
+ * The source tree is TypeScript, which a worker thread cannot read on its own, so the source entry
+ * is paired with a loader module the worker imports for itself. Both spellings name the same module;
+ * which one this is follows from how this file itself was loaded, never from a flag a caller sets.
+ */
+function defaultWorkerFactory(): SnapshotWorkerLike {
+  const source = import.meta.url.endsWith('.ts'),
+    entry = new URL(source ? './snapshot-worker.ts' : './snapshot-worker.js', import.meta.url);
+  return new Worker(
+    entry,
+    source
+      ? { execArgv: ['--import', new URL('./worker-loader.mjs', import.meta.url).href] }
+      : undefined,
+  ) as unknown as SnapshotWorkerLike;
+}
 
 /** Everything the coordinator needs to start a reader, all of it JSON-safe. */
 export type SnapshotCoordinatorOptions = {
@@ -142,6 +167,8 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
   #closed = false;
   #fatal: 'empty' | 'error' | null = null;
   #fault: string | null = null;
+  /** When the current run of faults began. Only the pair with `#fault` separates transient from fatal. */
+  #faultSinceMs: number | null = null;
   #job: Job | null = null;
   #pendingLive = false;
   #pendingHistory: { at: number } | null = null;
@@ -155,9 +182,7 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
   constructor(options: SnapshotCoordinatorOptions) {
     this.#options = {
       ...options,
-      workerFactory:
-        options.workerFactory ??
-        (() => new Worker(new URL('./snapshot-worker.js', import.meta.url)) as SnapshotWorkerLike),
+      workerFactory: options.workerFactory ?? defaultWorkerFactory,
       refreshIntervalMs: options.refreshIntervalMs ?? SNAPSHOT_REFRESH_INTERVAL_MS,
       refreshTimeoutMs: options.refreshTimeoutMs ?? SNAPSHOT_REFRESH_TIMEOUT_MS,
       initTimeoutMs: options.initTimeoutMs ?? SNAPSHOT_INIT_TIMEOUT_MS,
@@ -241,15 +266,23 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
     let worker: SnapshotWorkerLike;
     try {
       worker = this.#options.workerFactory();
-    } catch {
+    } catch (error) {
+      console.error('dashboard snapshot reader could not start:', error);
       this.#fault = 'SNAPSHOT_UNAVAILABLE';
+      this.#faultSinceMs ??= this.#options.now();
       this.#scheduleRestart();
       return;
     }
     this.#worker = worker;
     this.#ready = false;
     worker.on('message', (value) => this.#onMessage(value as WorkerReply));
-    worker.on('error', () => this.#onWorkerLost('SNAPSHOT_ERROR'));
+    worker.on('error', (error) => {
+      // The thread's own failure is the only account of why it left, and it is not a stack the page
+      // may ever be shown. Dropping it is what made this state undiagnosable: the page said it was
+      // still generating its first snapshot, and nothing anywhere said otherwise.
+      console.error('dashboard snapshot reader failed:', error);
+      this.#onWorkerLost('SNAPSHOT_ERROR');
+    });
     worker.on('exit', () => {
       if (!this.#closed && this.#worker === worker) this.#onWorkerLost('SNAPSHOT_ERROR');
     });
@@ -287,6 +320,7 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
         this.#ready = true;
         this.#fatal = null;
         this.#fault = null;
+        this.#faultSinceMs = null;
         // The first summary is not something a viewer should have to wait an interval for.
         this.#pendingLive = true;
         this.#pump();
@@ -297,6 +331,7 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
           this.#historyFaults.delete(Number(reply.key));
           this.#finishJob(reply.key);
           this.#fault = null;
+          this.#faultSinceMs = null;
           this.#pump();
         }
         return;
@@ -323,6 +358,7 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
     this.#clearInitTimer();
     if (unwarmed) this.#fatal = code === 'SNAPSHOT_NO_DATABASE' ? 'empty' : 'error';
     this.#fault = code;
+    this.#faultSinceMs ??= this.#options.now();
     const job = this.#job;
     if (job !== null) {
       this.#job = null;
@@ -338,6 +374,7 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
   #onWorkerLost(code: string): void {
     if (this.#closed) return;
     this.#fault = this.#fault ?? code;
+    this.#faultSinceMs ??= this.#options.now();
     this.#clearInitTimer();
     const worker = this.#worker;
     this.#worker = null;
@@ -359,8 +396,10 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
     if (job === null) return;
     this.#job = null;
     if (job.timer !== null) clearTimeout(job.timer);
-    if (job.at === undefined) this.#fault = 'SNAPSHOT_TIMEOUT';
-    else this.#historyFaults.set(job.at, reasonFor('SNAPSHOT_TIMEOUT', true));
+    if (job.at === undefined) {
+      this.#fault = 'SNAPSHOT_TIMEOUT';
+      this.#faultSinceMs ??= this.#options.now();
+    } else this.#historyFaults.set(job.at, reasonFor('SNAPSHOT_TIMEOUT', true));
     this.#onWorkerLost('SNAPSHOT_TIMEOUT');
   }
 
@@ -444,11 +483,27 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
     return value;
   }
 
-  /** The honest answer before any generation exists: nothing is claimed about data not yet read. */
+  /**
+   * The honest answer before any generation exists: nothing is claimed about data not yet read.
+   *
+   * A reader that has never published anything and has been failing for longer than one restart is
+   * not still generating its first snapshot — it is broken, and the fault is the whole answer. That
+   * is the only way this state can ever be told apart from a slow first round: `#decorate` reports a
+   * fault over published data, and here there is none to report it over. Below the budget the
+   * placeholder stays what it was, because a restart may yet succeed and a page that cried wolf on
+   * every transient would be worse than one that waits.
+   */
   #placeholder(at?: number): DashboardSummary {
-    const fatal = this.#fatal;
+    const fatal = this.#fatal,
+      since = this.#faultSinceMs;
+    const failed =
+      at === undefined &&
+      fatal === null &&
+      this.#fault !== null &&
+      since !== null &&
+      this.#options.now() - since >= SNAPSHOT_FAULT_VISIBILITY_MS;
     return {
-      status: fatal === 'error' ? 'error' : 'empty',
+      status: fatal === 'error' || failed ? 'error' : 'empty',
       generatedAtMs: this.#options.now(),
       sourceChainTimeSec: null,
       selectedEndSec: at ?? null,
@@ -461,12 +516,20 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
       health: unavailableHealth(),
       message:
         fatal === 'error'
-          ? '无法读取本地数据；请检查数据库与配置版本。'
-          : fatal === 'empty'
-            ? '尚无本地数据库；请先运行已有的有界采集流程。'
-            : at === undefined
-              ? '正在生成首个快照'
-              : '正在生成所选时点的快照',
+          ? // The one fatal whose cause the page can name: the file was read, and what it is missing
+            // is a fact about the file rather than a suspicion about the whole stack. Every other
+            // fatal keeps the sentence that points at the database and the configuration together,
+            // because for those the reader genuinely cannot tell which of them is at fault.
+            this.#fault === 'SNAPSHOT_INCOMPATIBLE_DATABASE'
+            ? reasonFor(this.#fault, false, false)
+            : '无法读取本地数据；请检查数据库与配置版本。'
+          : failed
+            ? reasonFor(this.#fault!, false, false)
+            : fatal === 'empty'
+              ? '尚无本地数据库；请先运行已有的有界采集流程。'
+              : at === undefined
+                ? '正在生成首个快照'
+                : '正在生成所选时点的快照',
       notes: [],
       apiVersion: 2,
       generation: null,
@@ -571,11 +634,19 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
 }
 
 /** A short, non-leaking reason: no SQL, no path and no configuration value reaches a page. */
-function reasonFor(code: string, historical: boolean): string {
-  if (code === 'SNAPSHOT_TIMEOUT') return '快照刷新超时，正在显示上一次结果。';
+function reasonFor(code: string, historical: boolean, warm = true): string {
+  if (code === 'SNAPSHOT_TIMEOUT')
+    return warm ? '快照刷新超时，正在显示上一次结果。' : '快照刷新超时，尚未生成任何结果。';
   if (code === 'SNAPSHOT_NO_DATABASE') return '尚无本地数据库；请先运行已有的有界采集流程。';
+  // Asked before the historical fallback: a file without the projection cannot answer for a past
+  // moment either, and "temporarily" would be the wrong word for a property of the file itself.
+  if (code === 'SNAPSHOT_INCOMPATIBLE_DATABASE')
+    return '本地数据库缺少实时投影表；请指向 recorder 正在写入的数据库。';
   if (historical) return '所选时点的快照暂时无法生成。';
-  return '实时数据暂时不可用，正在显示上一次结果。';
+  // "keeping the last result" is a promise only a reader that has one can make.
+  return warm
+    ? '实时数据暂时不可用，正在显示上一次结果。'
+    : '实时数据暂时不可用，尚未生成任何结果。';
 }
 
 /** The coordinator a server holds: one reader, one interval, one place to close. */
