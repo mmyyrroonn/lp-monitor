@@ -891,25 +891,50 @@ export function commitAcceptedSignalBatch(
     liveWorksetFor(db, input.scopeId, eventIndexFor(db, input.scopeId)).commit();
 }
 
-/** Content-addressed objects may be shared by batches and evaluations in any
- * scope, so an object is reclaimed only when no surviving row references it. */
-const RECLAIM_PAYLOAD_OBJECTS = `delete from payload_objects where hash not in (
-  select hash from (
-    select json_extract(payload_json,'$.payload.hash') as hash from ingest_batches
+/** Objects the stored batches reference, in every scope. */
+const BATCH_PAYLOAD_HASHES = `select json_extract(payload_json,'$.payload.hash') as hash from ingest_batches
     union all
     select json_extract(value,'$.hash') as hash
-      from ingest_batches, json_each(ingest_batches.payload_json,'$.payloads')
+      from ingest_batches, json_each(ingest_batches.payload_json,'$.payloads')`;
+/** Objects the stored evaluations reference, in every scope. */
+const EVALUATION_PAYLOAD_HASHES = `select json_extract(payload_json,'$.payload.hash') as hash from signal_evaluations
     union all
-    select json_extract(payload_json,'$.payload.hash') as hash from signal_evaluations
+    select json_extract(value,'$.hash') as hash
+      from signal_evaluations, json_each(signal_evaluations.payload_json,'$.payloads')`;
+/** The same evaluation references, restricted to the rows a retention pass leaves behind. */
+const SURVIVING_EVALUATION_PAYLOAD_HASHES = `select json_extract(payload_json,'$.payload.hash') as hash
+      from signal_evaluations where rowid in survivors
     union all
     select json_extract(value,'$.hash') as hash
       from signal_evaluations, json_each(signal_evaluations.payload_json,'$.payloads')
-  ) where hash is not null
-)`;
+      where signal_evaluations.rowid in survivors`;
+/** Every object a stored row of either table still references, which is what keeps it alive. */
+const LIVE_PAYLOAD_HASHES = `select hash from (
+    ${BATCH_PAYLOAD_HASHES}
+    union all
+    ${EVALUATION_PAYLOAD_HASHES}
+  ) where hash is not null`;
+/** Content-addressed objects may be shared by batches and evaluations in any
+ * scope, so an object is reclaimed only when no surviving row references it. */
+const RECLAIM_PAYLOAD_OBJECTS = `delete from payload_objects where hash not in (${LIVE_PAYLOAD_HASHES})`;
+
+/**
+ * Collect the objects no surviving row references.
+ *
+ * Kept apart from the row deletions it follows: the live set is re-derived by reading every batch
+ * and evaluation payload, which is why the recorder deletes rows at its poll gap but reclaims
+ * objects only once the rows have stopped moving. A caller that deletes rows and never reclaims
+ * leaves unreferenced objects behind; it does not corrupt anything.
+ */
+export function reclaimPayloadObjects(db: Database.Database): { payloadObjects: number } {
+  return { payloadObjects: statement(db, RECLAIM_PAYLOAD_OBJECTS).run().changes };
+}
 
 /** Explicit maintenance only: preserve raw history, current alerts, snapshots,
  * cursors and all pending/failed deliveries. Limits count newest derived rows
- * per scope; terminal outbox payloads remain in the alert ledger where current. */
+ * per scope; terminal outbox payloads remain in the alert ledger where current.
+ * Its evaluation limit is a scope-wide newest-N, which the per-pool retention
+ * below supersedes for anything that runs continuously. */
 export function pruneSignalDerivedHistory(
   db: Database.Database,
   scopeId: string,
@@ -931,6 +956,115 @@ export function pruneSignalDerivedHistory(
     ).run(scopeId, scopeId, limits.terminalDeliveries).changes,
     // Runs inside the same transaction: deleted evaluation content cannot be
     // left behind as an orphan, and a failure keeps every row and object.
-    payloadObjects: statement(db, RECLAIM_PAYLOAD_OBJECTS).run().changes,
+    payloadObjects: reclaimPayloadObjects(db).payloadObjects,
   }))();
+}
+
+/**
+ * Evaluation rows past their pool's retention, oldest first within the pool.
+ *
+ * A scope-wide newest-N cannot express this: one full snapshot writes a row for every pool at
+ * once, so a global limit keeps whichever pools the last batches happened to touch and ages out
+ * the rest — including pools that simply stopped trading, whose newest row is also their last
+ * state. Ranking inside the pool keeps one row per pool instead of one batch's worth of pools.
+ */
+const DOOMED_EVALUATIONS = `select rowid from (
+    select rowid, row_number() over (partition by pool_id order by rowid desc) as rank
+    from signal_evaluations where scope_id = ?
+  ) where rank > ?`;
+
+/**
+ * Keep the newest `keepPerPool` evaluation rows of each pool in the scope, oldest deleted first.
+ *
+ * `maxRows` bounds one pass. A backlog is drained over several passes rather than in a single
+ * transaction that would hold the writer for its whole duration and grow the WAL by the pages it
+ * touches; a caller that deleted exactly `maxRows` rows is asked to come back for the rest.
+ * Payload objects the deletions orphan are collected by `reclaimPayloadObjects`, not here.
+ */
+export function pruneSignalEvaluations(
+  db: Database.Database,
+  scopeId: string,
+  keepPerPool: number,
+  options: { maxRows?: number } = {},
+): { deleted: number } {
+  if (!Number.isSafeInteger(keepPerPool) || keepPerPool < 0)
+    throw new RangeError('Retention must be a non-negative safe integer');
+  // SQLite reads a negative limit as unbounded, which keeps one statement for both callers.
+  const maxRows = options.maxRows ?? -1;
+  if (maxRows !== -1 && (!Number.isSafeInteger(maxRows) || maxRows < 1))
+    throw new RangeError('Retention batch must be a positive safe integer');
+  return {
+    deleted: statement(
+      db,
+      `delete from signal_evaluations where rowid in
+      (select rowid from (${DOOMED_EVALUATIONS}) order by rowid limit ?)`,
+    ).run(scopeId, keepPerPool, maxRows).changes,
+  };
+}
+
+export interface SignalEvaluationRetentionPreview {
+  /** Rows the retention would delete now. */
+  rows: number;
+  /** Rows the scope holds, so the deleted share of the table's pages is a division away. */
+  totalRows: number;
+  /** Pools that would lose at least one row. */
+  pools: number;
+  /** Payload text those rows hold; row and primary-key index overhead is not counted. */
+  payloadBytes: number;
+  /** Objects no surviving row would reference, exactly as `reclaimPayloadObjects` would find. */
+  orphanPayloadObjects: number;
+  orphanPayloadBytes: number;
+}
+
+/** Evaluation rows a retention pass would leave behind, in every scope: the target scope keeps its
+ * per-pool newest rows, and a scope this pass does not name keeps all of its own. */
+const SURVIVING_EVALUATIONS = `select rowid from (
+    select rowid, scope_id, row_number() over (partition by scope_id, pool_id order by rowid desc) as rank
+    from signal_evaluations
+  ) where scope_id <> ? or rank <= ?`;
+
+const ORPHANED_PAYLOAD_OBJECTS = `with survivors as (${SURVIVING_EVALUATIONS}),
+  live as (
+    ${BATCH_PAYLOAD_HASHES}
+    union all
+    ${SURVIVING_EVALUATION_PAYLOAD_HASHES}
+  )
+  select count(*) as objects, coalesce(sum(length(payload)),0) as bytes from payload_objects
+  where hash not in (select hash from live where hash is not null)`;
+
+/**
+ * What `pruneSignalEvaluations` would delete, without deleting it. The orphan count is what the
+ * reclaim would find afterwards, not an estimate of it: the reference set is derived from the
+ * rows that survive the retention, and the deletions it assumes are the ones this pass reports.
+ */
+export function previewSignalEvaluationRetention(
+  db: Database.Database,
+  scopeId: string,
+  keepPerPool: number,
+): SignalEvaluationRetentionPreview {
+  if (!Number.isSafeInteger(keepPerPool) || keepPerPool < 0)
+    throw new RangeError('Retention must be a non-negative safe integer');
+  const ranked = `select pool_id, payload_json,
+      row_number() over (partition by pool_id order by rowid desc) as rank
+    from signal_evaluations where scope_id = ?`;
+  const counted = statement(
+    db,
+    `select count(*) as totalRows,
+      coalesce(sum(rank > ?),0) as rows,
+      count(distinct case when rank > ? then pool_id end) as pools,
+      coalesce(sum(case when rank > ? then length(payload_json) else 0 end),0) as payloadBytes
+    from (${ranked})`,
+  ).get(keepPerPool, keepPerPool, keepPerPool, scopeId) as Omit<
+    SignalEvaluationRetentionPreview,
+    'orphanPayloadObjects' | 'orphanPayloadBytes'
+  >;
+  const orphaned = statement(db, ORPHANED_PAYLOAD_OBJECTS).get(scopeId, keepPerPool) as {
+    objects: number;
+    bytes: number;
+  };
+  return {
+    ...counted,
+    orphanPayloadObjects: Number(orphaned.objects),
+    orphanPayloadBytes: Number(orphaned.bytes),
+  };
 }

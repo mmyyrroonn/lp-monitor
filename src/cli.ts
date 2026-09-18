@@ -20,6 +20,7 @@ const help = `Robinhood read-only P0/P1/P2/P3/P4/P5/P6 CLI
   pnpm lp catalogue --duration 10m --db data/recorder.sqlite --out artifacts/catalogue [--to-block N]
   pnpm lp storage audit --db data/recorder.sqlite [--artifacts artifacts/p1]
   pnpm lp storage compact --source data/recorder.sqlite --out data/recorder-compact.sqlite
+  pnpm lp storage retention --db data/recorder.sqlite [--keep N] [--scope SCOPE_ID]
   pnpm lp status --db data/recorder.sqlite --scope SCOPE_ID
   pnpm lp backup --db data/recorder.sqlite --out data/backup.sqlite
   P6: follow writes <db>.health.json and per-run ops-report.json; SIGINT stops cooperatively.

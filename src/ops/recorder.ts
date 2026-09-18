@@ -11,7 +11,13 @@ import type { MetricInput } from '../storage/metric-store.js';
 import { ConfigError } from '../config/env.js';
 import type { SignalConfig } from '../signals/config.js';
 import { loadMetricMetadata, type MetricMetadata } from '../metrics/metadata.js';
-import { commitAcceptedSignalBatch, projectSignals, retractSignals } from '../signals/project.js';
+import {
+  commitAcceptedSignalBatch,
+  projectSignals,
+  pruneSignalEvaluations,
+  reclaimPayloadObjects,
+  retractSignals,
+} from '../signals/project.js';
 import { LiveProjectionStore } from '../storage/live-projection.js';
 import { registryCacheFor } from '../storage/registry-cache.js';
 import { OperationFilterIndex } from '../ingest/operation-filter-index.js';
@@ -447,6 +453,39 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     }
     countMetadata(counts);
     logMetadata();
+  };
+  /**
+   * Row retention for the evaluation audit trail, on a throttle of its own at the same poll gap.
+   *
+   * The table is written by every round and read by nothing, and a full snapshot writes a row for
+   * every pool at once, so without this it is the largest thing in the database. A pass deletes
+   * at most a batch of rows and comes back for the rest: a backlog drains over several passes
+   * rather than in one transaction that would hold the writer, and grow the WAL, for the size of
+   * the table. A pass that uses its whole batch is still behind, and asking it to also collect
+   * what it just orphaned would pay for a live-set scan on every one of those passes; the pass
+   * that finds the table at its floor pays for it instead, and by then it is a cheap scan.
+   */
+  let lastEvaluationPruneAtMs = 0;
+  const maintainSignalEvaluations = () => {
+    if (!metricInput || !options.signalConfig) return;
+    const nowMs = Date.now();
+    if (nowMs - lastEvaluationPruneAtMs < config.signalEvaluationPruneIntervalMinutes * 60_000)
+      return;
+    lastEvaluationPruneAtMs = nowMs;
+    const { deleted } = pruneSignalEvaluations(
+      db,
+      metricInput.scopeId,
+      config.signalEvaluationRetentionPerPool,
+      { maxRows: config.signalEvaluationPruneBatchRows },
+    );
+    const payloadObjects =
+      deleted < config.signalEvaluationPruneBatchRows
+        ? reclaimPayloadObjects(db).payloadObjects
+        : 0;
+    if (deleted > 0 || payloadObjects > 0)
+      console.log(
+        encodeJson({ event: 'signal-evaluation-retention', runId: id, deleted, payloadObjects }),
+      );
   };
   const batchRecords: {
     id: string;
@@ -1035,6 +1074,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           // worker start the next token now that the wire is free.
           maintainMetadata();
           metadataWorker.kick();
+          maintainSignalEvaluations();
         },
         onStateChange: (state) => {
           if (telemetry.transition(state))

@@ -36,6 +36,21 @@ const historyHint = z
         path: ['fromBlock'],
       });
   });
+/**
+ * Evaluation audit rows kept per pool.
+ *
+ * Nothing reads `signal_evaluations`, so one row per pool is the state that pool was last
+ * evaluated in; a larger number only keeps more audit history behind it. The limit is per pool
+ * rather than per scope because a full snapshot writes every pool at once, and a scope-wide
+ * limit would keep the pools of the newest snapshot and drop every other pool's last state.
+ */
+export const SIGNAL_EVALUATION_RETENTION_PER_POOL = 1;
+/** How often the recorder prunes, at its poll gap: often enough to keep up with a live round,
+ * rare enough that the pass which ranks every row is not paying for itself continuously. */
+export const SIGNAL_EVALUATION_PRUNE_INTERVAL_MINUTES = 5;
+/** Rows one pass may delete. A backlog drains over several passes instead of in a single
+ * transaction that holds the writer for its whole duration and grows the WAL by the table. */
+export const SIGNAL_EVALUATION_PRUNE_BATCH_ROWS = 50_000;
 const schema = z
   .strictObject({
     version: z.string(),
@@ -66,6 +81,24 @@ const schema = z
     discoveryMaxRangeBlocks: z.number().int().positive().safe().default(1000000),
     maxFilterValues: z.number().int().positive().safe().default(1000),
     maxLogsPerResponse: z.number().int().positive().safe().nullable().default(null),
+    signalEvaluationRetentionPerPool: z
+      .number()
+      .int()
+      .nonnegative()
+      .safe()
+      .default(SIGNAL_EVALUATION_RETENTION_PER_POOL),
+    signalEvaluationPruneIntervalMinutes: z
+      .number()
+      .int()
+      .positive()
+      .safe()
+      .default(SIGNAL_EVALUATION_PRUNE_INTERVAL_MINUTES),
+    signalEvaluationPruneBatchRows: z
+      .number()
+      .int()
+      .positive()
+      .safe()
+      .default(SIGNAL_EVALUATION_PRUNE_BATCH_ROWS),
   })
   .superRefine((value, context) => {
     const configured = new Set(value.v4PoolIds.map((id) => id.toLowerCase()));
