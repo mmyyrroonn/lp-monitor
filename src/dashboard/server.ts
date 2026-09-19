@@ -333,6 +333,8 @@ export function createDashboardServer(options: DashboardServerOptions): Server {
       }
       res.statusCode = 200;
       res.setHeader('Content-Type', asset.mime);
+      // Local dashboard assets are rebuilt in place; never let the browser hide a new build.
+      res.setHeader('Cache-Control', 'no-cache');
       res.end(req.method === 'HEAD' ? undefined : body);
     } catch (error) {
       json(error instanceof RangeError ? 400 : 503, {
