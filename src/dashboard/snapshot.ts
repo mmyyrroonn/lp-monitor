@@ -10,7 +10,7 @@ import {
 } from '../storage/metric-store.js';
 import { SqliteRangeStore } from '../storage/raw-store.js';
 import { PoolRegistry, poolRegistrationId, type PoolRegistration } from '../registry/pools.js';
-import { inRollingWindow, ROLLING_DURATIONS } from '../metrics/rolling.js';
+import { inRollingWindow, liveWindowEnd, ROLLING_DURATIONS } from '../metrics/rolling.js';
 import type { SwapValuation } from '../metrics/notional.js';
 import { inspectDatabaseStatus } from '../ops/status.js';
 import { aggregateWindow } from './read-model.js';
@@ -118,13 +118,17 @@ export function buildDashboardSnapshot(
       value.sourceChainTimeSec = tip.timestampSec;
       return value;
     }
-    const end = options.at ?? report.at.timestampSec;
-    const from = Math.max(
-      0,
-      Math.floor(report.at.timestampSec / 60) * 60 - 180 * 60,
-      report.coverage.find((c) => c.fromBlock !== null)?.minuteStartSec ?? report.at.timestampSec,
-    );
-    if (end > report.at.timestampSec || end < from)
+    const watermark = report.at.timestampSec,
+      from = Math.max(
+        0,
+        Math.floor(watermark / 60) * 60 - 180 * 60,
+        report.coverage.find((c) => c.fromBlock !== null)?.minuteStartSec ?? watermark,
+      ),
+      // Same trade as the worker path: a live window ends on the last complete minute so a
+      // mid-minute watermark cannot put a minute-precision event on an undecidable edge. A run
+      // with no complete minute in evidence keeps the watermark and stays conservative.
+      end = options.at ?? liveWindowEnd(watermark, from);
+    if (end > watermark || end < from)
       throw new RangeError('Cutoff is outside retained chain-time evidence');
     const registrations = new PoolRegistry([
       ...raw.pools(input.registryScopeId),

@@ -27,6 +27,7 @@ import {
   type MetricsReport,
 } from '../../src/storage/metric-store.js';
 import { unavailableHealth } from '../../src/dashboard/snapshot.js';
+import { liveWindowEnd } from '../../src/metrics/rolling.js';
 import type { GenerationInput } from '../../src/dashboard/read-model.js';
 
 export const address = (value: number): Address => toHex(value, { size: 20 });
@@ -450,7 +451,7 @@ export function generationInput(
     metadataRevision: fixture.input.metadata.version,
     cutoffSec,
     sourceChainTimeSec: watermark,
-    selectedEndSec: cutoffSec ?? watermark,
+    selectedEndSec: cutoffSec ?? liveWindowEnd(watermark, from),
     availableFromSec: from,
     nowMs: options.nowMs ?? 4900000,
     status: 'ok',

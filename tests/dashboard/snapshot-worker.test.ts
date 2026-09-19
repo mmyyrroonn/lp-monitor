@@ -221,6 +221,10 @@ test('a worker round answers the legacy snapshot and reads the catalogue once', 
   expectSameAsLegacy(summary, legacy);
   expect(summary.apiVersion).toBe(2);
   expect(summary.generation).toMatch(/^[0-9a-f]{32}$/);
+  // The watermark is the first second of a minute that is still running, so the live generation's
+  // windows end on the last whole minute instead of on the watermark itself.
+  expect(summary.sourceChainTimeSec).toBe(4860);
+  expect(summary.selectedEndSec).toBe(4859);
   // The one catalogue read happened, and it happened inside the first round.
   expect(run.counts().registryRowsRead).toBeGreaterThan(0);
   run.send({ type: 'refresh', key: 'live' });

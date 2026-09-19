@@ -19,6 +19,27 @@ export type RollingMetric = Omit<AggregateMetric, 'status' | Counts> & {
   reasons: readonly string[];
 } & { readonly [K in Counts]: number | null };
 export type RollingWindows = Record<RollingWindowName, RollingMetric>;
+/**
+ * The end of the last minute this window rule can decide against.
+ *
+ * Buckets are the closed [m, m+59] intervals the rule reads and the window is left-open, so a
+ * window only answers when both its edges sit on a bucket edge — and for the left edge that edge
+ * is the final second of a minute, never its start. A live watermark lands wherever the chain
+ * happens to be, so a window ending on it straddles a bucket and refuses to answer; ending on the
+ * last complete minute gives up at most the final 59 seconds and lets whole windows answer.
+ */
+export function lastCompleteMinuteEnd(timestampSec: number): number {
+  return Math.floor((timestampSec - 59) / 60) * 60 + 59;
+}
+/**
+ * The end a live window set takes: the last complete minute when the retained evidence reaches
+ * it, and the watermark itself when it does not. A run younger than one complete minute has no
+ * complete minute to answer from, and shortening its windows would invent one.
+ */
+export function liveWindowEnd(watermarkSec: number, availableFromSec: number): number {
+  const aligned = lastCompleteMinuteEnd(watermarkSec);
+  return aligned >= availableFromSec ? aligned : watermarkSec;
+}
 /** (start, end], measured against accepted chain time, never wall clock. */
 export function inRollingWindow(
   time: LogTime,

@@ -17,6 +17,7 @@ import { openDatabase } from '../storage/database.js';
 import { eventIndexFor, type LiveEventIndexStore } from '../storage/live-event-index.js';
 import { LiveProjectionStore } from '../storage/live-projection.js';
 import { rawLogKey } from '../storage/manifest.js';
+import { liveWindowEnd } from '../metrics/rolling.js';
 import { metadataJournalPresent, metadataRevision } from '../storage/metadata-queue.js';
 import {
   buildMetricsReport,
@@ -432,14 +433,18 @@ export class SnapshotWorker {
 
   /** Publish the round's report as this reader's newest generation. */
   #publish(report: MetricsReport, input: MetricInput, at: number | undefined): DashboardSummary {
-    const end = at ?? report.at.timestampSec,
+    const watermark = report.at.timestampSec,
       availableFromSec = Math.max(
         0,
-        Math.floor(report.at.timestampSec / 60) * 60 - SNAPSHOT_HISTORY_MINUTES * 60,
-        report.coverage.find((row) => row.fromBlock !== null)?.minuteStartSec ??
-          report.at.timestampSec,
-      );
-    if (end > report.at.timestampSec || end < availableFromSec)
+        Math.floor(watermark / 60) * 60 - SNAPSHOT_HISTORY_MINUTES * 60,
+        report.coverage.find((row) => row.fromBlock !== null)?.minuteStartSec ?? watermark,
+      ),
+      // A live watermark can land mid-minute. A window ending on it would straddle the bucket that
+      // contains it, and a minute-precision event cannot be split across the edge, so the window
+      // would answer nothing. Ending on the last complete minute is the trade the page makes:
+      // at most the current partial minute, in exchange for windows that can actually answer.
+      end = at ?? liveWindowEnd(watermark, availableFromSec);
+    if (end > watermark || end < availableFromSec)
       throw new RangeError('Cutoff is outside retained chain-time evidence');
     const valuations = new Map(report.rwa.map((row) => [row.asset.address, row.valuations ?? []]));
     // Every registered stock is reported, not only the ones this bounded round selected: a stock

@@ -50,10 +50,29 @@ test('fresh snapshot is read-only and compares equal duration against chain time
   const result = buildDashboardSnapshot(readonly, metricInput, { nowMs: 4900000 });
   expect(result.sourceChainTimeSec).toBe(4860);
   expect(result.generatedAtMs).toBe(4900000);
-  expect(result.tokens[0]!.windows['1m'].current.endSec).toBe(4860);
-  expect(result.tokens[0]!.windows['1m'].previous.endSec).toBe(4800);
+  // The live watermark is 4860 but a window may only end on a complete minute: the final second of
+  // 4860 is the still-running minute, so the 1m window ends at 4859 and the previous one at 4799.
+  expect(result.selectedEndSec).toBe(4859);
+  expect(result.tokens[0]!.windows['1m'].current.endSec).toBe(4859);
+  expect(result.tokens[0]!.windows['1m'].previous.endSec).toBe(4799);
   expect(result.tokens[0]!.minutes.find((m) => m.minuteStartSec === 4740)?.txCount).toBe(1);
   expect(db.prepare('select total_changes() as n').get()).toEqual(before);
+});
+test('a live window waits for the minute it would end inside', () => {
+  // The swap in the still-running minute stays visible as a partial heatmap cell, but it is not
+  // part of a window that claims to be whole: the ranking counts it once its minute closes.
+  const { readonly } = fixture(true, [...hotLogs(), swap(4800)]);
+  const result = buildDashboardSnapshot(readonly, metricInput, { nowMs: 4900000 });
+  expect(result.tokens[0]!.windows['1m'].current).toMatchObject({
+    startSec: 4799,
+    endSec: 4859,
+    available: true,
+    swapCount: 1,
+  });
+  const running = result.tokens[0]!.minutes.at(-1)!;
+  expect(running.minuteStartSec).toBe(4860);
+  expect(running.status).toBe('partial');
+  expect(running.swapCount).toBe(1);
 });
 test('unprojected data is explicitly stale and cannot be silently repaired', () => {
   const { readonly } = fixture(false);

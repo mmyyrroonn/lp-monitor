@@ -2,6 +2,8 @@ import { expect, test } from 'vitest';
 import {
   buildRollingMetrics,
   inRollingWindow,
+  lastCompleteMinuteEnd,
+  liveWindowEnd,
   prepareRollingCoverage,
   rollingCoverage,
 } from '../../src/metrics/rolling.js';
@@ -86,6 +88,41 @@ test('a minute bucket ending exactly on a left-open start is outside, not unknow
   expect(inRollingWindow(time(7200, 1), start, endSec)).toBe(false); // [7200, 7259] touches start
   expect(inRollingWindow(time(7260, 2), start, endSec)).toBe(true); // target minute, fully inside
   expect(inRollingWindow(time(7140, 3), start, endSec)).toBe(false); // earlier buckets stay excluded
+});
+test('the live end is the last complete minute, and a run younger than one keeps the watermark', () => {
+  expect(lastCompleteMinuteEnd(7259)).toBe(7259); // already a minute end
+  expect(lastCompleteMinuteEnd(7260)).toBe(7259);
+  expect(lastCompleteMinuteEnd(7290)).toBe(7259); // mid-minute watermark
+  expect(lastCompleteMinuteEnd(7319)).toBe(7319);
+  // The fallback is the honest one: with less than a minute of evidence there is no complete
+  // minute to end on, and inventing one would read data the run never retained.
+  expect(liveWindowEnd(7290, 7200)).toBe(7259);
+  expect(liveWindowEnd(7290, 7260)).toBe(7290);
+});
+test('the aligned live end answers what a raw mid-minute watermark must refuse', () => {
+  const watermark = 7290, // mid-minute: (7230, 7290] straddles the [7200, 7259] bucket
+    events = [event(7200, 1, false), event(7260, 2, false)],
+    live = (watermarkSec: number) =>
+      buildRollingMetrics(
+        events,
+        coverage,
+        { ...end, timestampSec: watermarkSec },
+        {
+          pools: [{ pool, discoveredAtBlock: null, rawToken: null }],
+        },
+      )[0]!;
+  const raw = live(watermark);
+  expect(raw.rolling!['1m']).toMatchObject({ startSec: 7230, endSec: 7290, status: 'gap' });
+  expect(raw.rolling!['1m'].reasons).toContain('boundary-time-unknown');
+
+  const aligned = live(liveWindowEnd(watermark, 7200));
+  expect(aligned.rolling!['1m']).toMatchObject({
+    startSec: 7199,
+    endSec: 7259,
+    status: 'closed',
+    swapCount: 1, // the [7200, 7259] minute; the running minute is not part of a whole window
+    txCount: 1,
+  });
 });
 test('missing edge timestamps and missing coverage remain unavailable, not zero', () => {
   expect(build([event(7181, 1, false)]).rolling!['1m']).toMatchObject({

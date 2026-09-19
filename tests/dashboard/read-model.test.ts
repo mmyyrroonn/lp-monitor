@@ -76,8 +76,9 @@ test('every stock window, pool count and active count equals the legacy snapshot
   }
 
   const hot = tokenFor(summary.tokens, stocks.a) as (typeof summary.tokens)[number];
-  // Three logs of one transaction inside the window: one transaction, three swaps.
-  expect(hot.windows['1m'].current).toMatchObject({ txCount: 1, swapCount: 3, available: true });
+  // The live window ends on the last complete minute, so two transactions land in it: the three
+  // logs of tx102 still count as one transaction and three swaps alongside tx101's single swap.
+  expect(hot.windows['1m'].current).toMatchObject({ txCount: 2, swapCount: 4, available: true });
   // The shared A/B pool is priced by neither side, so its amount stays unknown while counts do not.
   expect(hot.windows['1m'].previous.usdMicros).toBeNull();
   expect(hot.windows['1m'].previous.swapCount).toBeGreaterThan(0);
@@ -91,14 +92,16 @@ test('every stock window, pool count and active count equals the legacy snapshot
     windows: { '1m': { current: { available: false, reasons: ['no-registered-pools'] } } },
   });
   // A swap in a window the pool's discovery denies stays a swap; the count stays unknown, so the
-  // active count cannot be a swap count.
+  // denied previous window cannot be a swap count. The discovery minute itself is verifiable, so
+  // the current window counts it and the active count follows the current window alone.
   const recent = tokenFor(summary.tokens, stocks.e) as (typeof summary.tokens)[number];
   expect(recent.windows['1m'].previous).toMatchObject({
     available: false,
     txCount: null,
     reasons: ['pool-lifetime-incomplete'],
   });
-  expect(recent.activePoolCount['1m']).toBe(0);
+  expect(recent.windows['1m'].current).toMatchObject({ available: true, txCount: 1 });
+  expect(recent.activePoolCount['1m']).toBe(1);
 });
 
 test('history minutes equal the legacy minutes and follow the selected stock only', () => {
