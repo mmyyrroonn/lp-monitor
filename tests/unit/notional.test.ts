@@ -2,7 +2,18 @@ import { describe, expect, test } from 'vitest';
 import type { Address, Hex } from 'viem';
 import type { LogTime, QuoteObservation, Swap } from '../../src/domain/types.js';
 import { type SwapValuationMetadata, valueSwap } from '../../src/metrics/notional.js';
-import { quoteFromRwaUsdgSwap } from '../../src/metrics/price.js';
+import {
+  addQuote,
+  createQuoteIndex,
+  quoteFromRwaUsdgSwap,
+  type QuoteIndex,
+} from '../../src/metrics/price.js';
+
+const quoteIndexOf = (...quotes: QuoteObservation[]): QuoteIndex => {
+  const idx = createQuoteIndex();
+  for (const quote of quotes) addQuote(idx, quote);
+  return idx;
+};
 
 const RWA = '0x0000000000000000000000000000000000000001' as Address;
 const USDG = '0x0000000000000000000000000000000000000002' as Address;
@@ -99,7 +110,7 @@ describe('valueSwap', () => {
       expectedSide: 'token0',
     },
   ])('takes the USDG side once when USDG is $expectedSide', ({ metadata, event, expectedSide }) => {
-    const result = valueSwap(event, metadata, []);
+    const result = valueSwap(event, metadata, quoteIndexOf());
     expect(result.nativeSide).toBe(expectedSide);
     expect(result.nativeToken).toBe(USDG);
     expect(result.nativeAmountRaw).toBe(5_000_000n);
@@ -127,7 +138,7 @@ describe('valueSwap', () => {
       tokenOut: RWA,
       amountOut: 2_000_000_000_000_000_000n,
     });
-    const result = valueSwap(event, memeMetadata, [quote]);
+    const result = valueSwap(event, memeMetadata, quoteIndexOf(quote));
     expect(result.nativeToken).toBe(RWA);
     expect(result.nativeAmountRaw).toBe(2_000_000_000_000_000_000n);
     expect(result.nativeDecimals).toBe(18);
@@ -149,7 +160,7 @@ describe('valueSwap', () => {
       source: 'future-order',
       maxAgeSec: 60,
     };
-    expect(valueSwap(event, memeMetadata, [quote]).usdMicros).toBeNull();
+    expect(valueSwap(event, memeMetadata, quoteIndexOf(quote)).usdMicros).toBeNull();
   });
 
   test('rejects exact quotes older than 60 seconds and accepts the boundary', () => {
@@ -164,8 +175,8 @@ describe('valueSwap', () => {
       source: 'boundary',
       maxAgeSec: 60,
     });
-    expect(valueSwap(event, memeMetadata, [makeQuote(940)]).usdMicros).not.toBeNull();
-    expect(valueSwap(event, memeMetadata, [makeQuote(939)]).usdMicros).toBeNull();
+    expect(valueSwap(event, memeMetadata, quoteIndexOf(makeQuote(940))).usdMicros).not.toBeNull();
+    expect(valueSwap(event, memeMetadata, quoteIndexOf(makeQuote(939))).usdMicros).toBeNull();
   });
 
   test('uses the conservative minute age upper bound without inventing exact times', () => {
@@ -180,8 +191,8 @@ describe('valueSwap', () => {
       source: 'minute-boundary',
       maxAgeSec: 60,
     });
-    expect(valueSwap(event, memeMetadata, [makeQuote(1_020)]).usdMicros).not.toBeNull();
-    expect(valueSwap(event, memeMetadata, [makeQuote(960)]).usdMicros).toBeNull();
+    expect(valueSwap(event, memeMetadata, quoteIndexOf(makeQuote(1_020))).usdMicros).not.toBeNull();
+    expect(valueSwap(event, memeMetadata, quoteIndexOf(makeQuote(960))).usdMicros).toBeNull();
   });
 
   test('rejects unresolved quote timing even when an exact timestamp field is populated', () => {
@@ -196,10 +207,10 @@ describe('valueSwap', () => {
       source: 'unresolved-time',
       maxAgeSec: 60,
     };
-    expect(valueSwap(event, memeMetadata, [quote]).usdMicros).toBeNull();
+    expect(valueSwap(event, memeMetadata, quoteIndexOf(quote)).usdMicros).toBeNull();
   });
   test('retains native RWA volume and a null valuation when price is missing', () => {
-    const result = valueSwap(memeSwap(), memeMetadata, []);
+    const result = valueSwap(memeSwap(), memeMetadata, quoteIndexOf());
     expect(result.nativeToken).toBe(RWA);
     expect(result.nativeAmountRaw).toBe(2_000_000_000_000_000_000n);
     expect(result.usdgNotionalRaw).toBeNull();
@@ -208,12 +219,12 @@ describe('valueSwap', () => {
   });
 
   test('validates raw quantities, decimals, and quote denominators', () => {
-    expect(() => valueSwap(swap({ rawAmount1: 1n }), directMetadata, [])).toThrow();
+    expect(() => valueSwap(swap({ rawAmount1: 1n }), directMetadata, quoteIndexOf())).toThrow();
     expect(() =>
       valueSwap(
         swap(),
         { ...directMetadata, token1: { ...directMetadata.token1, decimals: 256 } },
-        [],
+        quoteIndexOf(),
       ),
     ).toThrow(/decimals/i);
     expect(() =>
@@ -239,10 +250,10 @@ test('a zero USDG quote cannot replace a preceding positive quote', () => {
     numerator: 0n,
     effectiveAt: { ...positive.effectiveAt, blockNumber: 9n },
   };
-  const result = valueSwap(memeSwap(), memeMetadata, [positive, zero]);
+  const result = valueSwap(memeSwap(), memeMetadata, quoteIndexOf(positive, zero));
   expect(result.quoteEvidence).toEqual(positive);
   expect(result.usdMicros).toBe(5_000_000n);
-  expect(valueSwap(memeSwap(), memeMetadata, [zero]).usdMicros).toBeNull();
+  expect(valueSwap(memeSwap(), memeMetadata, quoteIndexOf(zero)).usdMicros).toBeNull();
 });
 test('quote construction rejects a zero USDG side', () => {
   expect(() =>

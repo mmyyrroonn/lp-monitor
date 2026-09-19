@@ -57,27 +57,45 @@ function upperAgeSec(eventTime: LogTime, quoteTime: LogTime): number | null {
   return event[1] - quote[0];
 }
 
+export type QuoteIndex = { byPair: Map<string, QuoteObservation[]>; all: QuoteObservation[] };
+
+const pairKey = (token: string, quoteToken: string): string =>
+  token.toLowerCase() + '|' + quoteToken.toLowerCase();
+
+export function createQuoteIndex(): QuoteIndex {
+  return { byPair: new Map(), all: [] };
+}
+
+export function addQuote(index: QuoteIndex, quote: QuoteObservation): void {
+  index.all.push(quote);
+  const key = pairKey(quote.token, quote.quote);
+  const bucket = index.byPair.get(key);
+  if (bucket) bucket.push(quote);
+  else index.byPair.set(key, [quote]);
+}
+
 export function findPrecedingQuote(
   swap: Swap,
   token: Address,
   quoteToken: Address,
-  quotes: readonly QuoteObservation[],
+  index: QuoteIndex,
   maxQuoteAgeSec: number,
 ): QuoteObservation | null {
   if (!Number.isInteger(maxQuoteAgeSec) || maxQuoteAgeSec < 0)
     throw new RangeError('maxQuoteAgeSec must be a non-negative integer');
-  let selected: QuoteObservation | null = null;
-  for (const candidate of quotes) {
-    if (!sameAddress(candidate.token, token) || !sameAddress(candidate.quote, quoteToken)) continue;
-    if (candidate.denominator <= 0n || candidate.numerator <= 0n) continue;
+  const bucket = index.byPair.get(pairKey(token, quoteToken));
+  if (!bucket) return null;
+  for (let i = bucket.length - 1; i >= 0; i--) {
+    const candidate = bucket[i]!;
     if (compareRef(candidate.effectiveAt, swap.ref) >= 0) continue;
+    if (candidate.numerator <= 0n || candidate.denominator <= 0n) continue;
     const age = upperAgeSec(swap.time, candidate.time);
-    const allowedAge = Math.min(maxQuoteAgeSec, candidate.maxAgeSec);
-    if (age === null || age < 0 || age > allowedAge) continue;
-    if (selected === null || compareRef(selected.effectiveAt, candidate.effectiveAt) < 0)
-      selected = candidate;
+    if (age === null || age < 0) continue;
+    if (age > maxQuoteAgeSec) break;
+    if (age > Math.min(maxQuoteAgeSec, candidate.maxAgeSec)) continue;
+    return candidate;
   }
-  return selected;
+  return null;
 }
 
 export function quoteFromRwaUsdgSwap(

@@ -19,13 +19,18 @@ import type { RegistryView } from './registry-cache.js';
 import type { LiveEventIndex } from './live-event-index.js';
 import { LiveMetricCache } from './live-metric-cache.js';
 import { encodeJson } from '../domain/json.js';
-import type { LiquidityChange, PoolEvent, QuoteObservation, Swap } from '../domain/types.js';
+import type { LiquidityChange, PoolEvent, Swap } from '../domain/types.js';
 import { comparePosition } from '../state/observations.js';
 import { rawLogKey } from './manifest.js';
 import { readMetricCoverage } from '../metrics/coverage.js';
 import { decimalsAt, reconcileMetricMetadata, type MetricMetadata } from '../metrics/metadata.js';
 import { valueSwap, type SwapValuationMetadata, type SwapValuation } from '../metrics/notional.js';
-import { findPrecedingQuote, quoteFromRwaUsdgSwap } from '../metrics/price.js';
+import {
+  addQuote,
+  createQuoteIndex,
+  findPrecedingQuote,
+  quoteFromRwaUsdgSwap,
+} from '../metrics/price.js';
 import { aggregateRwa } from '../metrics/rwa-aggregate.js';
 import { buildMinuteMetrics, type MetricEvent } from '../metrics/windows.js';
 import { summarizeLiquidityActions, annotateLatestSwapLiquidity } from '../metrics/liquidity.js';
@@ -295,7 +300,7 @@ export function buildMetricsReport(
         if (retained.fromBlock === null || block < retained.fromBlock) retained.fromBlock = block;
         if (retained.toBlock === null || block > retained.toBlock) retained.toBlock = block;
       }
-    const quotes: QuoteObservation[] = [];
+    const quotes = createQuoteIndex();
     const valuations: SwapValuation[] = [];
     const metricEvents: MetricEvent[] = [];
     const valuedByRwa = new Map<string, SwapValuation[]>();
@@ -339,7 +344,7 @@ export function buildMetricsReport(
             // about it enters the report — no valuation, no window, no count.
             if (!selected) {
               const quote = quoteFromRwaUsdgSwap(event, metadata);
-              if (quote) quotes.push(quote);
+              if (quote) addQuote(quotes, quote);
               continue;
             }
             const hasUsdg =
@@ -355,7 +360,11 @@ export function buildMetricsReport(
                     'valuation:' + rawLogKey(event.ref) + ':' + asset.address,
                     event.time.minuteStartSec ?? Math.floor(projection.end.timestampSec / 60) * 60,
                     { event, metadata, preceding },
-                    () => valueSwap(event, metadata, preceding ? [preceding] : []),
+                    () => {
+                      const precedingIndex = createQuoteIndex();
+                      if (preceding) addQuote(precedingIndex, preceding);
+                      return valueSwap(event, metadata, precedingIndex);
+                    },
                   )
                 : valueSwap(event, metadata, quotes);
             const side = valuationIndex
@@ -381,7 +390,7 @@ export function buildMetricsReport(
             if (!valuation || (valuation.usdMicros === null && side.usdMicros !== null))
               valuation = side;
             const quote = quoteFromRwaUsdgSwap(event, metadata);
-            if (quote) quotes.push(quote);
+            if (quote) addQuote(quotes, quote);
           }
           if (selected && inWindow && valuation) valuations.push(valuation);
         }
@@ -570,7 +579,7 @@ export function buildMetricsReport(
       rwa,
       annotations,
       valuations,
-      quotes,
+      quotes: quotes.all,
       grossFees: projection.events
         .filter(inSelection)
         .filter(

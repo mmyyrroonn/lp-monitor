@@ -36,9 +36,9 @@ import {
   type MetricMetadata,
 } from '../metrics/metadata.js';
 import { valueSwap, type SwapValuation, type SwapValuationMetadata } from '../metrics/notional.js';
-import { quoteFromRwaUsdgSwap } from '../metrics/price.js';
+import { addQuote, createQuoteIndex, quoteFromRwaUsdgSwap } from '../metrics/price.js';
 import { aggregateRwa } from '../metrics/rwa-aggregate.js';
-import type { BlockAnchor, QuoteObservation } from '../domain/types.js';
+import type { BlockAnchor } from '../domain/types.js';
 import type { Address } from 'viem';
 
 export type BlockInterval = [bigint, bigint];
@@ -633,7 +633,7 @@ export async function reviewHistory(options: HistoryOptions) {
     );
     const valuations: SwapValuation[] = [];
     const valuedByRwa = new Map<string, SwapValuation[]>();
-    const quotes: QuoteObservation[] = [];
+    const quotes = createQuoteIndex();
     const registrations = registry.snapshot();
     for (const event of projection?.events ?? []) {
       if (event.kind !== 'swap') continue;
@@ -673,7 +673,7 @@ export async function reviewHistory(options: HistoryOptions) {
         if (!canonical || (canonical.usdMicros === null && side.usdMicros !== null))
           canonical = side;
         const quote = quoteFromRwaUsdgSwap(event, metadata);
-        if (quote) quotes.push(quote);
+        if (quote) addQuote(quotes, quote);
       }
       if (canonical) valuations.push(canonical);
     }

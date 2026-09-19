@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import type { Swap } from '../../src/domain/types.js';
 import { type SwapValuationMetadata, valueSwap } from '../../src/metrics/notional.js';
+import { createQuoteIndex } from '../../src/metrics/price.js';
 import { buildMinuteMetrics } from '../../src/metrics/windows.js';
 import { emptyWorkCounts, setWorkCounter } from '../../src/ops/work-counters.js';
 import { PoolRegistry, poolRegistrationId } from '../../src/registry/pools.js';
@@ -167,7 +168,7 @@ test('work counters stay off by default and count real storage, decode, valuatio
     store.acceptRange(stored);
     readBatch(db, stored.id);
     store.pools('s');
-    valueSwap(valuationSwap, valuationMetadata, []);
+    valueSwap(valuationSwap, valuationMetadata, createQuoteIndex());
     evaluate();
     expect(counts).toEqual(emptyWorkCounts());
 
@@ -180,7 +181,7 @@ test('work counters stay off by default and count real storage, decode, valuatio
     expect(counts.registryRowsRead).toBe(1);
     new PoolRegistry([stored.poolRegistrations![0]!]).preview(stored.poolRegistrations!);
     expect(counts.registryRowsSerialized).toBeGreaterThanOrEqual(2);
-    valueSwap(valuationSwap, valuationMetadata, []);
+    valueSwap(valuationSwap, valuationMetadata, createQuoteIndex());
     expect(counts.valuationComputes).toBe(1);
     evaluate();
     expect(counts.evaluatedPools).toBe(8);

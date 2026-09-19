@@ -2,7 +2,7 @@ import type { Address } from 'viem';
 import type { LogRef, LogTime, PoolRef, Quality, QuoteObservation, Swap } from '../domain/types.js';
 import { countWork } from '../ops/work-counters.js';
 import { rawLogKey } from '../storage/manifest.js';
-import { findPrecedingQuote, quoteRawToMicros, quoteRawToRaw } from './price.js';
+import { findPrecedingQuote, quoteRawToMicros, quoteRawToRaw, type QuoteIndex } from './price.js';
 
 export type TokenRole = 'rwa' | 'usdg' | 'meme' | 'other';
 export type ValuationTokenMetadata = {
@@ -87,7 +87,7 @@ function sideFor(metadata: SwapValuationMetadata, token: Address): 'token0' | 't
 export function valueSwap(
   swap: Swap,
   metadata: SwapValuationMetadata,
-  quotes: readonly QuoteObservation[],
+  quotes: QuoteIndex,
 ): SwapValuation {
   countWork('valuationComputes');
   validatePair(swap, metadata);
