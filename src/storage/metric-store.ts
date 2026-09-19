@@ -19,24 +19,18 @@ import type { RegistryView } from './registry-cache.js';
 import type { LiveEventIndex } from './live-event-index.js';
 import { LiveMetricCache } from './live-metric-cache.js';
 import { encodeJson } from '../domain/json.js';
-import type { LiquidityChange, PoolEvent, Swap } from '../domain/types.js';
+import type { LiquidityChange, PoolEvent } from '../domain/types.js';
 import { comparePosition } from '../state/observations.js';
 import { rawLogKey } from './manifest.js';
 import { readMetricCoverage } from '../metrics/coverage.js';
-import { decimalsAt, reconcileMetricMetadata, type MetricMetadata } from '../metrics/metadata.js';
-import { valueSwap, type SwapValuationMetadata, type SwapValuation } from '../metrics/notional.js';
-import {
-  addQuote,
-  createQuoteIndex,
-  findPrecedingQuote,
-  quoteFromRwaUsdgSwap,
-} from '../metrics/price.js';
+import { reconcileMetricMetadata, type MetricMetadata } from '../metrics/metadata.js';
 import { aggregateRwa } from '../metrics/rwa-aggregate.js';
-import { buildMinuteMetrics, type MetricEvent } from '../metrics/windows.js';
+import { assembleValuations } from '../metrics/valuation-assembly.js';
+import { buildMinuteMetrics } from '../metrics/windows.js';
 import { summarizeLiquidityActions, annotateLatestSwapLiquidity } from '../metrics/liquidity.js';
 import { estimateGrossSwapFee } from '../metrics/fees.js';
 import { measureStage, type BatchTimings } from '../ops/batch-timings.js';
-import { valuationIndexFor, valuationKey } from '../metrics/valuation-index.js';
+import { valuationIndexFor } from '../metrics/valuation-index.js';
 
 export const METRIC_VERSION = 'rolling-v1';
 export class StaleMetricProjectionError extends Error {
@@ -232,11 +226,6 @@ export function buildMetricsReport(
       ? workset.poolIds.filter((poolId) => workset.registry.get(poolId) === undefined)
       : [];
     const byId = new Map(registrations.map((r) => [poolRegistrationId(r), r]));
-    /** The registration of an event: the workset's own view for a pool it did not select. */
-    const registrationFor = (event: Swap): PoolRegistration | undefined => {
-      const id = poolRegistrationId(event);
-      return byId.get(id) ?? workset?.registry.get(id);
-    };
     /** Whether this round reports the event at all — every event, unless a workset bounds it. */
     const inSelection = (event: PoolEvent): boolean => {
       if (workset === null) return true;
@@ -300,127 +289,33 @@ export function buildMetricsReport(
         if (retained.fromBlock === null || block < retained.fromBlock) retained.fromBlock = block;
         if (retained.toBlock === null || block > retained.toBlock) retained.toBlock = block;
       }
-    const quotes = createQuoteIndex();
     const assetsByAddress = new Map(input.assets.assets.map((a) => [a.address.toLowerCase(), a]));
-    const valuations: SwapValuation[] = [];
-    const metricEvents: MetricEvent[] = [];
-    const valuedByRwa = new Map<string, SwapValuation[]>();
-    // One measured leaf around swap valuation; the projections read above and the
-    // window assembly below are measured separately, so no interval is counted twice.
-    measureStage(options.timings, 'valuation', () => {
-      const sortedEvents = (() => {
-        const events = [...projection.events];
-        let ordered = true;
-        for (let i = 1; i < events.length; i++)
-          if (comparePosition(events[i - 1]!.ref, events[i]!.ref) > 0) {
-            ordered = false;
-            break;
-          }
-        return ordered ? events : events.sort((a, b) => comparePosition(a.ref, b.ref));
-      })();
-      for (const event of sortedEvents) {
-        const selected = inSelection(event);
-        let valuation: SwapValuation | null = null;
-        if (event.kind === 'swap') {
-          const registration = registrationFor(event);
-          if (!registration) throw new Error('Projected swap lacks registration');
-          const related = [
-            assetsByAddress.get(registration.token0.toLowerCase()),
-            assetsByAddress.get(registration.token1.toLowerCase()),
-          ].filter((a): a is (typeof input.assets.assets)[number] => a !== undefined);
-          const inWindow =
-            sinceSec === null ||
-            event.time.minuteStartSec === null ||
-            event.time.minuteStartSec >= sinceSec;
-          for (const asset of related) {
-            const token = (address: Address) => ({
-              address,
-              decimals: decimalsAt(metricMetadata, address, event.ref.blockNumber),
-              role:
-                address === input.usdg
-                  ? ('usdg' as const)
-                  : input.assets.has(address)
-                    ? ('rwa' as const)
-                    : ('other' as const),
-            });
-            const metadata: SwapValuationMetadata = {
-              token0: token(registration.token0),
-              token1: token(registration.token1),
-              rwa: asset.address,
-              usdg: input.usdg,
-              usdgDecimals: decimalsAt(metricMetadata, input.usdg, event.ref.blockNumber),
-              maxQuoteAgeSec: 60,
-            };
-            // A pool the round did not select is in the walk for one reason only: a selected pool
-            // reads its quote. It publishes that quote at this point in the order and nothing else
-            // about it enters the report — no valuation, no window, no count.
-            if (!selected) {
-              const quote = quoteFromRwaUsdgSwap(event, metadata);
-              if (quote) addQuote(quotes, quote);
-              continue;
-            }
-            const hasUsdg =
-              registration.token0 === input.usdg || registration.token1 === input.usdg;
-            const preceding = hasUsdg
-              ? null
-              : findPrecedingQuote(event, asset.address, input.usdg, quotes, 60);
-            // The durable cache survives a restart; the index sits in front of it so a round that
-            // values the same window again does not re-serialize the input and decode the payload.
-            const compute = () =>
-              cache
-                ? cache.memo(
-                    'valuation:' + rawLogKey(event.ref) + ':' + asset.address,
-                    event.time.minuteStartSec ?? Math.floor(projection.end.timestampSec / 60) * 60,
-                    { event, metadata, preceding },
-                    () => {
-                      const precedingIndex = createQuoteIndex();
-                      if (preceding) addQuote(precedingIndex, preceding);
-                      return valueSwap(event, metadata, precedingIndex);
-                    },
-                  )
-                : valueSwap(event, metadata, quotes);
-            const side = valuationIndex
-              ? valuationIndex.lookup(
-                  valuationKey({
-                    eventId: rawLogKey(event.ref),
-                    event,
-                    metadata,
-                    preceding,
-                  }),
-                  [asset.address],
-                  event,
-                  compute,
-                )
-              : compute();
-            if (inWindow) {
-              const group = valuedByRwa.get(asset.address) ?? [];
-              group.push(side);
-              valuedByRwa.set(asset.address, group);
-            }
-            // One pool contribution, preferring the first priced stock in stable address order.
-            // Stock aggregates retain each side's own raw amount and as-of valuation.
-            if (!valuation || (valuation.usdMicros === null && side.usdMicros !== null))
-              valuation = side;
-            const quote = quoteFromRwaUsdgSwap(event, metadata);
-            if (quote) addQuote(quotes, quote);
-          }
-          if (selected && inWindow && valuation) valuations.push(valuation);
+    const sortedEvents = (() => {
+      const events = [...projection.events];
+      let ordered = true;
+      for (let i = 1; i < events.length; i++)
+        if (comparePosition(events[i - 1]!.ref, events[i]!.ref) > 0) {
+          ordered = false;
+          break;
         }
-        if (!selected) {
-          // A liquidity change of a pool outside the selection counts towards nothing above.
-          continue;
-        }
-        metricEvents.push({
-          event,
-          scopeId: input.scopeId,
-          usdMicros: valuation?.usdMicros ?? null,
-          usdgNotionalRaw: valuation?.usdgNotionalRaw ?? null,
-          rawNotional: valuation
-            ? { token: valuation.nativeToken, raw: valuation.nativeAmountRaw }
-            : null,
-        });
-      }
+      return ordered ? events : events.sort((a, b) => comparePosition(a.ref, b.ref));
+    })();
+    const assembly = assembleValuations({
+      events: sortedEvents,
+      registrations,
+      assetsByAddress,
+      assets: input.assets,
+      usdg: input.usdg,
+      metadata: metricMetadata,
+      sinceSec,
+      inSelection,
+      valuationIndex,
+      cache,
+      scopeId: input.scopeId,
+      projectionEndTimestampSec: projection.end.timestampSec,
+      ...(workset ? { worksetRegistry: workset.registry } : {}),
     });
+    const { quotes, valuations, metricEvents, valuedByRwa } = assembly;
     const windows = measureStage(options.timings, 'windows', () =>
       (options.legacyWindows ? buildMinuteMetrics : buildRollingMetrics)(
         sinceSec === null
