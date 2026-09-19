@@ -1,5 +1,5 @@
 import type { BlockAnchor, ChainReader, MinuteBoundary } from '../domain/types.js';
-import { validateTimeAnchor } from '../rpc/resolve-time.js';
+import { bracketBlockRate, interpolateProbe, validateTimeAnchor } from '../rpc/resolve-time.js';
 
 function addAnchor(cache: Map<bigint, BlockAnchor>, anchor: BlockAnchor): void {
   validateTimeAnchor(anchor, cache.values());
@@ -40,8 +40,18 @@ export async function resolveMinuteBoundary(
 
   let before = lo;
   let at = hi;
+  // The rate over the widest bracket is what the flat-run step in the probe needs; it stays fixed
+  // for the search because every narrower bracket is a worse estimate of the same local rate.
+  const blockRate = bracketBlockRate(lo.number, lo.timestampSec, hi.number, hi.timestampSec);
   while (at.number - before.number > 1n) {
-    const middle = before.number + (at.number - before.number) / 2n;
+    const middle = interpolateProbe(
+      before.number,
+      before.timestampSec,
+      at.number,
+      at.timestampSec,
+      timestampSec,
+      blockRate,
+    );
     const sampled = await getAnchor(reader, cache, middle);
     if (sampled.timestampSec >= timestampSec) at = sampled;
     else before = sampled;

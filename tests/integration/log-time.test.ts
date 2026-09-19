@@ -71,7 +71,9 @@ test('a failed minute boundary leaves only its affected unsampled logs unresolve
     anchor(BigInt(number), timestampSec),
   );
   const raw = log(3n, 1);
-  const { reader } = readerFrom(anchors, [2n]);
+  // Both interior probes are unreachable, so neither minute boundary can be proven and the log's
+  // own block is never sampled; the search order only decides which probe reports the failure.
+  const { reader } = readerFrom(anchors, [2n, 3n]);
 
   const result = await resolveLogTimes(reader, [raw], 1n, anchors[4]!);
 
@@ -136,4 +138,61 @@ test('uses same-minute sparse anchor brackets at the beginning of a cross-minute
   expect(result.failures).toEqual([]);
   expect(result.times.get(logTimeKey(early))?.minuteStartSec).toBe(1080);
   expect(result.times.get(logTimeKey(later))?.minuteStartSec).toBe(1140);
+});
+
+/** A second-tick chain: every second holds `perSecond` blocks with the same timestamp. */
+function tickChain(seconds: number, perSecond = 10, start = 1_800_000_000) {
+  const times = new Map<bigint, number>();
+  let block = 0n;
+  for (let s = 0; s < seconds; s++)
+    for (let i = 0; i < perSecond; i++) times.set(block++, start + s);
+  return { times, start, lastBlock: block - 1n, lastTime: start + seconds - 1 };
+}
+function chainReader(times: ReadonlyMap<bigint, number>) {
+  return readerFrom(
+    [...times.entries()].map(([number, timestampSec]) => anchor(number, timestampSec)),
+  );
+}
+
+test('finds a minute boundary on a second-tick chain in a few probes', async () => {
+  const chain = tickChain(120),
+    { reader, calls } = chainReader(chain.times),
+    early = log(0n, 1),
+    late = log(605n, 2);
+
+  const result = await resolveLogTimes(
+    reader,
+    [early, late],
+    0n,
+    anchor(chain.lastBlock, chain.lastTime),
+  );
+
+  expect(result.failures).toEqual([]);
+  expect(result.times.get(logTimeKey(early))?.minuteStartSec).toBe(chain.start);
+  expect(result.times.get(logTimeKey(late))?.minuteStartSec).toBe(chain.start + 60);
+  // Five probes for the boundary plus the two range endpoints; bisection needs about a dozen.
+  expect(calls.length).toBeLessThanOrEqual(9);
+});
+
+test('a stalled chain keeps the bracket invariant and still resolves the boundary', async () => {
+  // Blocks 0-599 all sit in the first second, then time jumps 120 seconds: the target second has
+  // no block at all, so the answer is the first block past it. An interpolated step must not
+  // treat the flat run as a line and the search must still prove the adjacent pair.
+  const times = new Map<bigint, number>(),
+    start = 1_800_000_000;
+  for (let block = 0; block < 600; block++) times.set(BigInt(block), start);
+  for (let block = 600; block < 1200; block++)
+    times.set(BigInt(block), start + 120 + Math.floor((block - 600) / 10));
+  const { reader, calls } = chainReader(times),
+    raw = log(700n, 3);
+
+  const result = await resolveLogTimes(reader, [raw], 0n, anchor(1199n, times.get(1199n)!));
+
+  expect(result.failures).toEqual([]);
+  expect(result.times.get(logTimeKey(raw))).toEqual({
+    minuteStartSec: start + 120,
+    exactTimestampSec: null,
+    source: 'minute-boundary',
+  });
+  expect(calls.length).toBeLessThanOrEqual(14);
 });
