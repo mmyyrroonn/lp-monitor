@@ -1,4 +1,5 @@
 import type Database from 'better-sqlite3';
+import { encodeJson } from '../domain/json.js';
 import type { PoolEvent } from '../domain/types.js';
 import { countWork } from '../ops/work-counters.js';
 import { poolRegistrationId } from '../registry/pools.js';
@@ -39,7 +40,7 @@ const WINDOW_ROWS = `select payload_json from live_events where scope_id=? and (
      or (minute_start_sec is null and (? is null or block_number>=?))
    )`;
 
-type Indexed = { poolId: string | null; event: PoolEvent };
+type Indexed = { poolId: string | null; event: PoolEvent; revision: string };
 
 /** The tokens an event's valuation can depend on. Liquidity actions carry no quote of their own. */
 function tokensOf(event: PoolEvent): readonly string[] {
@@ -96,6 +97,10 @@ export class LiveEventIndexStore implements LiveEventIndex {
   #token: string | null = null;
   #recentlyExpired = new Set<string>();
   #generation = 0;
+  /** Whether mutations accumulate an event delta for `takeEventDelta`. Writers leave it off. */
+  #trackDelta = false;
+  #pendingUpserts = new Map<string, PoolEvent>();
+  #pendingDeleted = new Set<string>();
 
   constructor(
     private readonly db: Database.Database,
@@ -145,6 +150,7 @@ export class LiveEventIndexStore implements LiveEventIndex {
 
   /** Drop the in-memory window and derive it again from the rows that survive. */
   reload(bounds: EventWindowBounds = this.#bounds ?? UNBOUNDED): void {
+    const previous = new Map(this.#byKey);
     this.#byKey.clear();
     this.#keysByPool.clear();
     this.#poolsByToken.clear();
@@ -157,10 +163,22 @@ export class LiveEventIndexStore implements LiveEventIndex {
       .prepare(WINDOW_ROWS)
       .all(this.scopeId, bounds.sinceSec, sinceBlock, sinceBlock) as { payload_json: string }[];
     countWork('liveEventRowsRead', rows.length);
+    const seen = new Set<string>();
     for (const row of rows) {
       const event = reviveEvent(JSON.parse(row.payload_json) as PoolEvent);
-      this.install(rawLogKey(event.ref), event);
+      const key = rawLogKey(event.ref);
+      seen.add(key);
+      this.put(key, event, row.payload_json, previous.get(key));
     }
+    // The revision is the projection's own stored payload, so an unchanged row is recognized by its
+    // bytes and never re-reported; a key that vanished is a removal, and one whose payload moved is
+    // an upsert. Only a window that opted into tracking keeps the account.
+    if (this.#trackDelta)
+      for (const key of previous.keys())
+        if (!seen.has(key)) {
+          this.#pendingUpserts.delete(key);
+          this.#pendingDeleted.add(key);
+        }
     this.#token = this.cursorToken();
     this.#contextIncomplete = this.contextIncomplete(bounds);
   }
@@ -179,6 +197,29 @@ export class LiveEventIndexStore implements LiveEventIndex {
       if (!insideWindow(event, this.#bounds)) this.remove(key);
       else this.install(key, event);
     }
+  }
+
+  /**
+   * Opt this window into collecting what each round's mutations installed, revised or removed.
+   * Off by default: a writer's index applies every batch's delta and would otherwise accumulate it
+   * forever.
+   */
+  enableDeltaTracking(): void {
+    this.#trackDelta = true;
+  }
+
+  /**
+   * The events this window installed, revised or removed since the previous call, and reset the
+   * accumulator for the next round. A window that never enabled tracking answers an empty delta.
+   */
+  takeEventDelta(): EventDelta {
+    const delta: EventDelta = {
+      upserts: [...this.#pendingUpserts.values()],
+      deletedKeys: [...this.#pendingDeleted],
+    };
+    this.#pendingUpserts.clear();
+    this.#pendingDeleted.clear();
+    return delta;
   }
 
   eventsFor(poolIds: ReadonlySet<string>): readonly PoolEvent[] {
@@ -230,11 +271,32 @@ export class LiveEventIndexStore implements LiveEventIndex {
   }
 
   private install(key: string, event: PoolEvent): void {
-    const previous = this.#byKey.get(key);
+    this.put(key, event, this.#trackDelta ? encodeJson(event) : '', this.#byKey.get(key));
+  }
+
+  /**
+   * Install or replace the event at `key`. A revision that did not move is a no-op for the delta; a
+   * new key or a moved revision is an upsert. The previous contribution, whatever it named, is
+   * retired first so the pool and token indexes never hold a stale reference.
+   */
+  private put(
+    key: string,
+    event: PoolEvent,
+    revision: string,
+    previous: Indexed | undefined,
+  ): void {
+    const changed = previous === undefined || previous.revision !== revision;
     if (previous !== undefined) this.unlink(key, previous);
     const poolId = event.pool ? poolRegistrationId({ pool: event.pool }) : null;
-    this.#byKey.set(key, { poolId, event });
-    if (poolId === null) return;
+    this.#byKey.set(key, { poolId, event, revision });
+    if (poolId !== null) this.link(key, poolId, event);
+    if (this.#trackDelta && changed) {
+      this.#pendingDeleted.delete(key);
+      this.#pendingUpserts.set(key, event);
+    }
+  }
+
+  private link(key: string, poolId: string, event: PoolEvent): void {
     const keys = this.#keysByPool.get(poolId) ?? new Set<string>();
     keys.add(key);
     this.#keysByPool.set(poolId, keys);
@@ -243,7 +305,13 @@ export class LiveEventIndexStore implements LiveEventIndex {
 
   private remove(key: string): void {
     const entry = this.#byKey.get(key);
-    if (entry !== undefined) this.unlink(key, entry);
+    if (entry !== undefined) {
+      this.unlink(key, entry);
+      if (this.#trackDelta) {
+        this.#pendingUpserts.delete(key);
+        this.#pendingDeleted.add(key);
+      }
+    }
   }
 
   private unlink(key: string, entry: Indexed): void {

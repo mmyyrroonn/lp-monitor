@@ -3,9 +3,7 @@ import { isMainThread, parentPort } from 'node:worker_threads';
 import type Database from 'better-sqlite3';
 import type { Address } from 'viem';
 import { encodeJson } from '../domain/json.js';
-import type { PoolEvent } from '../domain/types.js';
 import type { MetricMetadata } from '../metrics/metadata.js';
-import { eventRevision } from '../metrics/valuation-index.js';
 import { buildAssetRegistry, type AssetRegistration } from '../registry/assets.js';
 import {
   PoolRegistry,
@@ -14,9 +12,12 @@ import {
   type PoolRegistration,
 } from '../registry/pools.js';
 import { openDatabase } from '../storage/database.js';
-import { eventIndexFor, type LiveEventIndexStore } from '../storage/live-event-index.js';
+import {
+  eventIndexFor,
+  type EventDelta,
+  type LiveEventIndexStore,
+} from '../storage/live-event-index.js';
 import { LiveProjectionStore } from '../storage/live-projection.js';
-import { rawLogKey } from '../storage/manifest.js';
 import { liveWindowEnd } from '../metrics/rolling.js';
 import { metadataJournalPresent, metadataRevision } from '../storage/metadata-queue.js';
 import {
@@ -115,14 +116,8 @@ type RoundOutcome = {
   catalogue: Map<string, PoolRegistration> | null;
   summary: DashboardSummary | null;
   report?: MetricsReport;
-  revisions?: Map<string, string>;
   at?: number;
 };
-
-/** The revision an event contributes: swaps use the valuation index's own, others their content. */
-function revisionOf(event: PoolEvent): string {
-  return event.kind === 'swap' ? eventRevision(event) : encodeJson(event);
-}
 
 function emptySummary(
   input: Pick<MetricInput, 'scopeId' | 'assets'>,
@@ -224,8 +219,6 @@ export class SnapshotWorker {
   #catalogue = new Map<string, PoolRegistration>();
   /** Published token per request key; a key whose token is unchanged is not recomputed. */
   readonly #tokens = new Map<string, string>();
-  /** Last round's event revisions, committed only once a round has published. */
-  #eventRevisions = new Map<string, string>();
   #closed = false;
 
   constructor(private readonly port: SnapshotWorkerPort) {}
@@ -265,7 +258,6 @@ export class SnapshotWorker {
     this.#live = null;
     this.#cache = null;
     this.#raw = null;
-    this.#eventRevisions = new Map();
   }
 
   #init(init: SnapshotWorkerInit): void {
@@ -321,6 +313,7 @@ export class SnapshotWorker {
       this.#input = input;
       this.#raw = raw;
       this.#index = eventIndexFor(db, input.scopeId);
+      this.#index.enableDeltaTracking();
       this.#live = new LiveProjectionStore(db);
       this.#cache = registryCacheFor(db, input.registryScopeId, input.scopeId);
       this.#model = model;
@@ -407,7 +400,6 @@ export class SnapshotWorker {
         ...registry,
         summary: null,
         report,
-        revisions: delta.revisions,
         at,
       };
     })();
@@ -427,7 +419,6 @@ export class SnapshotWorker {
       }
     const summary = outcome.summary ?? this.#publish(outcome.report!, input, outcome.at);
     this.#tokens.set(key, outcome.token);
-    if (outcome.revisions !== undefined) this.#eventRevisions = outcome.revisions;
     this.port.postMessage({ type: 'summary', key, summary });
   }
 
@@ -501,26 +492,12 @@ export class SnapshotWorker {
   }
 
   /**
-   * What the round that accepted this batch did to the window, derived here because no caller
-   * shares this process: the events the index holds now against the ones it held last round.
+   * What the round that accepted this batch did to the window, read from the index that applied it.
+   * The index records every event it installs, revises or removes across the round's reads, so the
+   * delta is the index's own account rather than a second full walk over the window.
    */
-  #eventDelta(): {
-    upserts: readonly PoolEvent[];
-    deletedKeys: readonly string[];
-    revisions: Map<string, string>;
-  } {
-    const events = this.#index!.eventsFor(this.#index!.pools()),
-      revisions = new Map<string, string>(),
-      upserts: PoolEvent[] = [];
-    for (const event of events) {
-      const key = rawLogKey(event.ref),
-        revision = revisionOf(event);
-      revisions.set(key, revision);
-      if (this.#eventRevisions.get(key) !== revision) upserts.push(event);
-    }
-    const deletedKeys: string[] = [];
-    for (const key of this.#eventRevisions.keys()) if (!revisions.has(key)) deletedKeys.push(key);
-    return { upserts, deletedKeys, revisions };
+  #eventDelta(): EventDelta {
+    return this.#index!.takeEventDelta();
   }
 
   /**

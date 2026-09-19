@@ -1,4 +1,7 @@
 import { afterEach, expect, test } from 'vitest';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { encodeAbiParameters, encodeEventTopics, toHex, type Hex } from 'viem';
 import type Database from 'better-sqlite3';
 import { openDatabase } from '../../src/storage/database.js';
@@ -358,4 +361,62 @@ test('a window that outlived a rolled back round is derived again from the rows 
     rows: 0,
   });
   expect(index.size).toBe(1);
+});
+
+test('delta tracking follows the sync delta applied directly to the index', () => {
+  const { db, raw } = fixture();
+  raw.acceptRange(batch('a', [swap(105), swap(110)], [minute(120), minute(120)]));
+  const index = eventIndexFor(db, SCOPE);
+  index.enableDeltaTracking();
+  // The first sync applies its own delta to the same index the test holds, and the tracker reports
+  // exactly that delta without a second walk.
+  sync(db);
+  expect(index.takeEventDelta().upserts.map((e) => Number(e.ref.blockNumber))).toEqual([105, 110]);
+  expect(index.takeEventDelta()).toEqual({ upserts: [], deletedKeys: [] });
+});
+
+test('delta tracking reports installs, revisions, removals and slide-outs across reloads', () => {
+  const path = join(mkdtempSync(join(tmpdir(), 'live-index-delta-')), 'test.sqlite');
+  const db = openDatabase(path);
+  dbs.push(db);
+  const raw = new SqliteRangeStore(db);
+  raw.acceptRange(
+    batch('a', [swap(105), swap(110), swap(115)], [minute(120), minute(180), minute(240)]),
+  );
+  sync(db);
+  // The reader is a second, read-only handle on the file, exactly as the dashboard worker opens it:
+  // its window is derived from the rows, never from the writer's own applied delta.
+  const readonly = openDatabase(path, { readonly: true });
+  dbs.push(readonly);
+  const index = eventIndexFor(readonly, SCOPE);
+  index.enableDeltaTracking();
+
+  // The first load reads the window rows and reports every event as new, once.
+  expect(open(index).rows).toBe(3);
+  expect(index.takeEventDelta().upserts.map((e) => Number(e.ref.blockNumber))).toEqual([
+    105, 110, 115,
+  ]);
+  expect(index.takeEventDelta()).toEqual({ upserts: [], deletedKeys: [] });
+
+  // A re-timing revises the keys already held: each is an upsert again, none is a deletion.
+  db.prepare('update log_times set minute_start_sec=300 where scope_id=?').run(SCOPE);
+  sync(db);
+  index.expire({ sinceSec: 0, sinceBlock: null });
+  expect(index.takeEventDelta().upserts).toHaveLength(3);
+  expect(index.takeEventDelta()).toEqual({ upserts: [], deletedKeys: [] });
+
+  // A removal retires its key, and the unchanged keys are recognized as such rather than re-reported.
+  const removed = rawLogKey(swap(105));
+  db.prepare(
+    'delete from active_logs where scope_id=? and raw_log_id=(select id from raw_logs where raw_key=?)',
+  ).run(SCOPE, removed);
+  sync(db);
+  index.expire({ sinceSec: 0, sinceBlock: null });
+  expect(index.takeEventDelta()).toEqual({ upserts: [], deletedKeys: [removed] });
+
+  // Sliding the window out reports the keys that left as removals, never as upserts.
+  index.expire({ sinceSec: 360, sinceBlock: null });
+  const slid = index.takeEventDelta();
+  expect(slid.upserts).toEqual([]);
+  expect(slid.deletedKeys).toHaveLength(2);
 });
