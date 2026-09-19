@@ -101,6 +101,15 @@ const schema = z
       .default(SIGNAL_EVALUATION_PRUNE_BATCH_ROWS),
   })
   .superRefine((value, context) => {
+    // A backfill rate above the shared budget is invisible to the transport: the master limiter
+    // paces every request below it, so the faster bucket silently does nothing. Refuse the config
+    // rather than run a rate nobody asked for.
+    if (value.maxBackfillRpcRps > value.rpcPerSecond)
+      context.addIssue({
+        code: 'custom',
+        message: 'maxBackfillRpcRps must not exceed rpcPerSecond',
+        path: ['maxBackfillRpcRps'],
+      });
     const configured = new Set(value.v4PoolIds.map((id) => id.toLowerCase()));
     const hinted = value.v4PoolHistoryHints.map((hint) => hint.poolId.toLowerCase());
     for (const poolId of configured)

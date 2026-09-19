@@ -39,5 +39,6 @@
   "maxRpcCalls": 150,
   "rpcPerSecond": 5,
   "timeoutMs": 10000,
-  "maxRetries": 2
+  "maxRetries": 2,
+  "maxBackfillRpcRps": 3
 }

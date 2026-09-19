@@ -41,7 +41,7 @@
   "maxRetries": 2,
   "recorderMaxRpcCalls": 45000,
   "maxConcurrentRpc": 2,
-  "maxBackfillRpcRps": 1,
+  "maxBackfillRpcRps": 3,
   "maxFilterValues": 1000,
   "warmupMinutes": 1
 }

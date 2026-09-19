@@ -78,6 +78,35 @@ test('runtime config permits explicit long-run quota and provider limits', () =>
   );
 });
 
+test('rejects a backfill rate the shared RPC budget would silently swallow', () => {
+  withConfig(
+    (c) => {
+      c.maxBackfillRpcRps = c.rpcPerSecond + 1;
+    },
+    (path) => expect(() => loadChainConfig(path)).toThrow(/maxBackfillRpcRps/),
+  );
+  withConfig(
+    (c) => {
+      c.maxBackfillRpcRps = c.rpcPerSecond;
+    },
+    (path) => expect(loadChainConfig(path).maxBackfillRpcRps).toBe(5),
+  );
+});
+test('a config without a backfill rate keeps the conservative default', () => {
+  withConfig(
+    (c) => {
+      delete c.maxBackfillRpcRps;
+    },
+    (path) => expect(loadChainConfig(path).maxBackfillRpcRps).toBe(1),
+  );
+});
+test('the shipped config keeps backfill above the 1 rps break-even', () => {
+  // The diagnosis of 2026-09-19 measured 1 rps at roughly break-even against this chain's
+  // ~10 blocks/s, so a backlog never drains; the config has to say so explicitly.
+  const c = loadChainConfig('config/robinhood.json');
+  expect(c.maxBackfillRpcRps).toBeGreaterThan(1);
+  expect(c.maxBackfillRpcRps).toBeLessThanOrEqual(c.rpcPerSecond);
+});
 test('history hint search bounds must be paired and ordered', () => {
   withConfig(
     (c) => {
