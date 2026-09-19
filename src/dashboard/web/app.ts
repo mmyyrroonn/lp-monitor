@@ -423,7 +423,7 @@ function renderHeatmap() {
         );
   const all = listTokens().sort(
     (a, b) =>
-      peak(blocksByToken.get(a.address)!) - peak(blocksByToken.get(b.address)!) ||
+      peak(blocksByToken.get(b.address)!) - peak(blocksByToken.get(a.address)!) ||
       a.symbol.localeCompare(b.symbol),
   );
   const tokens = expandedHeatmap ? all : all.slice(0, 12);
