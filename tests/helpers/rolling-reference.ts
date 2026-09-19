@@ -26,7 +26,7 @@ function insideWindow(
     return time.exactTimestampSec > start && time.exactTimestampSec <= end;
   const m = time.minuteStartSec;
   if (m === null) return null;
-  if (m + 60 <= start || m > end) return false;
+  if (m + 59 <= start || m > end) return false;
   if (m > start && (m + 59 <= end || atWatermark)) return true;
   return null;
 }

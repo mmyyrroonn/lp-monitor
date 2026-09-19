@@ -1,6 +1,7 @@
 import { expect, test } from 'vitest';
 import {
   buildRollingMetrics,
+  inRollingWindow,
   prepareRollingCoverage,
   rollingCoverage,
 } from '../../src/metrics/rolling.js';
@@ -73,6 +74,18 @@ test('four windows end at the watermark, expire the left edge and include the la
   expect(w.rolling!['15m'].swapCount).toBe(5);
   expect(w.rolling!['1h'].swapCount).toBe(6);
   expect(w.natural5mBuckets).toEqual([]);
+});
+test('a minute bucket ending exactly on a left-open start is outside, not unknown', () => {
+  // Buckets are closed [m, m+59] and the window (start, end] is left-open, so a bucket whose
+  // last second equals start has every second at or before start: it must be excluded outright
+  // instead of poisoning the window with boundary-time-unknown. The heatmap queries exactly this
+  // shape (start = minuteStartSec - 1).
+  const start = 7259; // ≡ 59 (mod 60)
+  const endSec = 7319;
+  const time = (t: number, id: number) => event(t, id, false).event.time;
+  expect(inRollingWindow(time(7200, 1), start, endSec)).toBe(false); // [7200, 7259] touches start
+  expect(inRollingWindow(time(7260, 2), start, endSec)).toBe(true); // target minute, fully inside
+  expect(inRollingWindow(time(7140, 3), start, endSec)).toBe(false); // earlier buckets stay excluded
 });
 test('missing edge timestamps and missing coverage remain unavailable, not zero', () => {
   expect(build([event(7181, 1, false)]).rolling!['1m']).toMatchObject({
