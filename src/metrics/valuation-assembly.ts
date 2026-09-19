@@ -46,11 +46,19 @@ export function assembleValuations(input: {
   scopeId: string;
   projectionEndTimestampSec: number; // for the cache memo fallback minute
   worksetRegistry?: RegistryView; // the workset's own view, for a pool it did not select
+  seed?: ValuationAssembly; // when present, start from it and append the new events
 }): ValuationAssembly {
-  const quotes = createQuoteIndex();
-  const valuations: SwapValuation[] = [];
-  const metricEvents: MetricEvent[] = [];
-  const valuedByRwa = new Map<string, SwapValuation[]>();
+  const quotes = input.seed ? input.seed.quotes : createQuoteIndex();
+  const valuations = input.seed ? input.seed.valuations.slice() : [];
+  const metricEvents = input.seed ? input.seed.metricEvents.slice() : [];
+  const valuedByRwa = input.seed
+    ? new Map<string, SwapValuation[]>(
+        [...input.seed.valuedByRwa].map(([asset, list]): [string, SwapValuation[]] => [
+          asset,
+          list.slice(),
+        ]),
+      )
+    : new Map<string, SwapValuation[]>();
   const byId = new Map(input.registrations.map((r) => [poolRegistrationId(r), r]));
   /** The registration of an event: the workset's own view for a pool it did not select. */
   const registrationFor = (event: Swap): PoolRegistration | undefined => {
@@ -168,6 +176,12 @@ export type AssemblyCache = {
   valuedByRwa: Map<string, SwapValuation[]>;
   /** refs parallel to the event order; used to find the truncation point and expire the head. */
   orderedRefs: LogRef[];
+  /** The metadata revision the cached assembly was stamped under; null means the cache is cold. */
+  metadataRevision?: number | string | null;
+  /** The window lower bound the cached assembly was stamped under; a move means the cache is stale. */
+  windowSinceSec?: number | null;
+  /** The selection the cached assembly was stamped for (null for the whole catalogue). */
+  selectionKey?: string | null;
 };
 
 export function createAssemblyCache(): AssemblyCache {
@@ -177,6 +191,9 @@ export function createAssemblyCache(): AssemblyCache {
     metricEvents: [],
     valuedByRwa: new Map(),
     orderedRefs: [],
+    metadataRevision: null,
+    windowSinceSec: null,
+    selectionKey: null,
   };
 }
 

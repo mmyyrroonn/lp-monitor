@@ -2,12 +2,17 @@ import { describe, expect, it } from 'vitest';
 import type { Address, Hex } from 'viem';
 import {
   applyAssemblyDelta,
+  assembleValuations,
   createAssemblyCache,
   type EventContribution,
 } from '../../src/metrics/valuation-assembly.js';
 import type { SwapValuation } from '../../src/metrics/notional.js';
 import type { MetricEvent } from '../../src/metrics/windows.js';
-import type { LogRef, LogTime, QuoteObservation, Swap } from '../../src/domain/types.js';
+import type { LogRef, LogTime, PoolRef, QuoteObservation, Swap } from '../../src/domain/types.js';
+import type { AssetRegistration } from '../../src/registry/assets.js';
+import { createAssetRegistry } from '../../src/registry/assets.js';
+import type { MetricMetadata } from '../../src/metrics/metadata.js';
+import type { PoolRegistration } from '../../src/registry/pools.js';
 
 const hex = (n: bigint | number): Hex => ('0x' + n.toString(16).padStart(64, '0')) as Hex;
 const addressOf = (hexChar: string): Address => ('0x' + hexChar.repeat(40)) as Address;
@@ -190,5 +195,97 @@ describe('assembly cache', () => {
     expect(cache.quotes.all.map((q) => q.effectiveAt.blockNumber)).toEqual([5n, 6n, 7n]);
     expect(cache.valuedByRwa.get(A)?.map((v) => v.ref.blockNumber)).toEqual([5n]);
     expect(cache.valuedByRwa.get(B)?.map((v) => v.ref.blockNumber)).toEqual([6n, 7n]);
+  });
+});
+
+describe('assembleValuations seed', () => {
+  it('seeded append equals a full walk over the combined events', () => {
+    const RWA = addressOf('a');
+    const OTHER = addressOf('e');
+    const pool1: PoolRef = { chainId: 4663, protocol: 'v3', address: addressOf('1') };
+    const pool2: PoolRef = { chainId: 4663, protocol: 'v3', address: addressOf('2') };
+
+    const swap = (
+      blockNumber: bigint,
+      pool: PoolRef,
+      tokenIn: Address,
+      tokenOut: Address,
+    ): Swap => ({
+      kind: 'swap',
+      ref: ref(blockNumber),
+      time: time(Number(blockNumber) * 10),
+      tokenIn,
+      tokenOut,
+      rawAmount0: -1n,
+      rawAmount1: 1n,
+      amountIn: 1n,
+      amountOut: 1n,
+      sqrtPriceX96After: 1n,
+      liquidityAfter: 1n,
+      tickAfter: 0,
+      effectiveSwapFeePips: 0,
+      pool,
+    });
+
+    const eventsA = [swap(5n, pool1, RWA, USDG)];
+    const eventsB = [swap(10n, pool2, RWA, OTHER)];
+
+    const registration = (pool: PoolRef, token0: Address, token1: Address): PoolRegistration => ({
+      pool,
+      token0,
+      token1,
+      feePips: 3000,
+      tickSpacing: 60,
+      hooks: addressOf('0'),
+      discoveredAt: ref(0n),
+      assetVersion: 'test',
+      source: 'synthetic',
+    });
+
+    const registrations = [registration(pool1, RWA, USDG), registration(pool2, RWA, OTHER)];
+    const assets = createAssetRegistry('test', [RWA]);
+    const assetsByAddress = new Map<string, AssetRegistration>(
+      assets.assets.map((a) => [a.address.toLowerCase(), a] as [string, AssetRegistration]),
+    );
+    const metadata: MetricMetadata = {
+      version: 'test',
+      chainId: 4663,
+      source: 'synthetic',
+      entries: [RWA, USDG, OTHER].map((entry) => ({
+        address: entry,
+        decimals: 6,
+        observedAtBlock: '0',
+        blockHash: hex(0),
+      })),
+    };
+
+    const context = {
+      registrations,
+      assetsByAddress,
+      assets,
+      usdg: USDG,
+      metadata,
+      sinceSec: null,
+      inSelection: () => true,
+      valuationIndex: null,
+      cache: null,
+      scopeId: 'test',
+      projectionEndTimestampSec: 100,
+    };
+
+    const first = assembleValuations({ events: eventsA, ...context });
+    const seed = {
+      quotes: first.quotes,
+      valuations: first.valuations,
+      metricEvents: first.metricEvents,
+      valuedByRwa: first.valuedByRwa,
+    };
+    const incremental = assembleValuations({ events: eventsB, ...context, seed });
+    const full = assembleValuations({ events: [...eventsA, ...eventsB], ...context });
+
+    expect(incremental.valuations).toEqual(full.valuations);
+    expect(incremental.metricEvents).toEqual(full.metricEvents);
+    expect(incremental.valuedByRwa).toEqual(full.valuedByRwa);
+    expect(incremental.quotes.all).toEqual(full.quotes.all);
   });
 });

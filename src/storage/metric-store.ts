@@ -19,13 +19,19 @@ import type { RegistryView } from './registry-cache.js';
 import type { LiveEventIndex } from './live-event-index.js';
 import { LiveMetricCache } from './live-metric-cache.js';
 import { encodeJson } from '../domain/json.js';
-import type { LiquidityChange, PoolEvent } from '../domain/types.js';
+import type { LiquidityChange, LogRef, PoolEvent } from '../domain/types.js';
 import { comparePosition } from '../state/observations.js';
 import { rawLogKey } from './manifest.js';
 import { readMetricCoverage } from '../metrics/coverage.js';
 import { reconcileMetricMetadata, type MetricMetadata } from '../metrics/metadata.js';
 import { aggregateRwa } from '../metrics/rwa-aggregate.js';
-import { assembleValuations } from '../metrics/valuation-assembly.js';
+import {
+  applyAssemblyDelta,
+  assembleValuations,
+  assemblyCacheFor,
+  createAssemblyCache,
+  type ValuationAssembly,
+} from '../metrics/valuation-assembly.js';
 import { buildMinuteMetrics } from '../metrics/windows.js';
 import { summarizeLiquidityActions, annotateLatestSwapLiquidity } from '../metrics/liquidity.js';
 import { estimateGrossSwapFee } from '../metrics/fees.js';
@@ -300,21 +306,104 @@ export function buildMetricsReport(
         }
       return ordered ? events : events.sort((a, b) => comparePosition(a.ref, b.ref));
     })();
-    const assembly = assembleValuations({
-      events: sortedEvents,
-      registrations,
-      assetsByAddress,
-      assets: input.assets,
-      usdg: input.usdg,
-      metadata: metricMetadata,
-      sinceSec,
-      inSelection,
-      valuationIndex,
-      cache,
-      scopeId: input.scopeId,
-      projectionEndTimestampSec: projection.end.timestampSec,
-      ...(workset ? { worksetRegistry: workset.registry } : {}),
-    });
+
+    const cacheForScope = assemblyCacheFor(db, input.scopeId);
+    const selectionKey = workset ? workset.poolIds.join('\u0000') : null;
+    const metadataChanged =
+      cacheForScope.metadataRevision !== null &&
+      cacheForScope.metadataRevision !== input.metadata.version;
+    // A cold cache has nothing a bounded round can append to, and a cache stamped for a different
+    // selection or an older window is stale in a way the delta cannot name. All three mean rebuild.
+    const incrementalOk =
+      workset !== null &&
+      changes?.eventDelta !== undefined &&
+      cacheForScope.metadataRevision !== null &&
+      !metadataChanged &&
+      cacheForScope.windowSinceSec === sinceSec &&
+      cacheForScope.selectionKey === selectionKey;
+
+    const assemble = (events: readonly PoolEvent[], seed?: ValuationAssembly) =>
+      measureStage(options.timings, 'valuation', () =>
+        assembleValuations({
+          events,
+          registrations,
+          assetsByAddress,
+          assets: input.assets,
+          usdg: input.usdg,
+          metadata: metricMetadata,
+          sinceSec,
+          inSelection,
+          valuationIndex,
+          cache,
+          scopeId: input.scopeId,
+          projectionEndTimestampSec: projection.end.timestampSec,
+          ...(workset ? { worksetRegistry: workset.registry } : {}),
+          ...(seed ? { seed } : {}),
+        }),
+      );
+
+    const stampCache = (result: ValuationAssembly, refs: readonly LogRef[]) => {
+      cacheForScope.quotes = result.quotes;
+      cacheForScope.valuations = result.valuations;
+      cacheForScope.metricEvents = result.metricEvents;
+      cacheForScope.valuedByRwa = result.valuedByRwa;
+      cacheForScope.orderedRefs = [...refs];
+      cacheForScope.metadataRevision = input.metadata.version;
+      cacheForScope.windowSinceSec = sinceSec;
+      cacheForScope.selectionKey = selectionKey;
+    };
+
+    let assembly: ValuationAssembly;
+    if (!incrementalOk) {
+      assembly = assemble(sortedEvents);
+      stampCache(
+        assembly,
+        sortedEvents.map((event) => event.ref),
+      );
+    } else {
+      const delta = changes!.eventDelta!;
+      try {
+        const upserts = [...delta.upserts].sort((a, b) => comparePosition(a.ref, b.ref));
+        if (delta.deletedKeys.length > 0) {
+          // Deletions are a contiguous reorg suffix. Walk the cached order from the end matching
+          // the deleted keys; a deletion that does not sit in that suffix is not something this
+          // round can prove, so it falls back to the full walk rather than risk a scattered cut.
+          const deleted = new Set(delta.deletedKeys);
+          let cut = cacheForScope.orderedRefs.length;
+          while (cut > 0 && deleted.has(rawLogKey(cacheForScope.orderedRefs[cut - 1]!))) cut--;
+          if (cacheForScope.orderedRefs.length - cut !== delta.deletedKeys.length)
+            throw new Error('deleted keys are not a contiguous suffix of the cached order');
+          applyAssemblyDelta(cacheForScope, {
+            appended: [],
+            truncateAfter: cacheForScope.orderedRefs[cut]!,
+            expireBefore: null,
+          });
+        }
+        // Window slide-out is not expired incrementally: the lower bound is a seconds value and
+        // `applyAssemblyDelta` needs a LogRef, so out-of-window entries leave only on the full path.
+        const seed = {
+          quotes: cacheForScope.quotes,
+          valuations: cacheForScope.valuations,
+          metricEvents: cacheForScope.metricEvents,
+          valuedByRwa: cacheForScope.valuedByRwa,
+        };
+        const incremental = assemble(upserts, seed);
+        stampCache(incremental, [
+          ...cacheForScope.orderedRefs,
+          ...upserts.map((event) => event.ref),
+        ]);
+        assembly = incremental;
+      } catch {
+        // The cache may be half-updated; start over and recompute everything.
+        Object.assign(cacheForScope, createAssemblyCache());
+        assembly = assemble(sortedEvents);
+        stampCache(
+          assembly,
+          sortedEvents.map((event) => event.ref),
+        );
+      }
+    }
+
     const { quotes, valuations, metricEvents, valuedByRwa } = assembly;
     const windows = measureStage(options.timings, 'windows', () =>
       (options.legacyWindows ? buildMinuteMetrics : buildRollingMetrics)(
