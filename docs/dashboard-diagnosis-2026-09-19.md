@@ -72,3 +72,44 @@
 - "24 次超时":agent 报告 24,我在日志数到 6;不影响结论。
 - 排序列的 DOM 行为由用户浏览器人工验收,无自动化 e2e。
 - 修复分支的测试是我亲自跑的三处文件(7/7、18/18),未跑全量套件。
+
+---
+
+## 八、复核与处置(2026-09-19 完成)
+
+按第七节口径逐条复核后,第六节剩余问题均已修复并验证。复现均在停止采集的同一个 `data/recorder.sqlite` 上进行。
+
+### 1. 分钟桶 off-by-one:已合并(commit `806ff0e`)
+
+在运行中的旧构建上直接复现:watermark 秒数 ≡35,GLD 5m `reasons: ["boundary-time-unknown"]`,GLD 热力图可见格全为 `gap`;直接调用 `inRollingWindow` 也复现“前一分钟有交易 → 下一格被误判为未知”。先前中止的 `task/fix-minute-boundary-off-by-one` 未被丢弃:rebase 后合并,`m + 60` → `m + 59`,两个测试参考实现同步,≡59 回归用例锁定契约。
+
+### 2. live 排行 `—`:采用方案 (b)(commit `8c836fd`)
+
+选择 (b) 而非 (d):实时窗口结束点取最后一个完整分钟 `lastCompleteMinuteEnd(wm) = floor((wm−59)/60)×60+59`;不足一个完整分钟的新 run 回退到 watermark,保持旧保守行为。worker 与 legacy snapshot 两条路径共用同一 helper,不再各自为政;热力图照旧展示当前未完整分钟。代价为 1m 视图最多滞后 59 秒,已在 `docs/dashboard.md` 指标口径注明。
+
+### 3. `maxBackfillRpcRps`:设为 3 并加校验(commit `fed5784`)
+
+- `config/robinhood.json` 显式 `maxBackfillRpcRps: 3`(高于 ~0.85 rps 平衡线,低于 `rpcPerSecond: 5`),`config/runtime.local.json` 同步为 3。
+- `src/config/chain.ts` 新增 `maxBackfillRpcRps ≤ rpcPerSecond` 校验(补上 P6 review M-6 的静默吞限流),超限在加载时直接拒绝。
+- `tests/unit/config.test.ts` 固定发行配置必须高于 1 rps 平衡线,防止悄悄回退。
+
+### 4. GLD:确认与结案
+
+新构建在同一库上端到端复测:
+
+| 指标 | 修复前(旧构建) | 修复后 |
+|---|---|---|
+| watermark / selectedEndSec | 1789757555 (≡35) / 同 | 1789757555 (≡35) / 1789757519 (≡59) |
+| 194 个代币中 5m `boundary-time-unknown` | 35 | **0** |
+| GLD 5m | `null`,`boundary-time-unknown` | **90 笔**,available |
+| GLD 热力图 8 格 | 全 `gap` | 7 个 closed(26/20/18/17/18/13/24)+ 最后 1 个 partial(19) |
+| GLD 排行 1m | `—` | 24,等于热力图最后一个完整格 |
+
+GLD 5m 的 90 与直接 SQL 统计该对齐窗口内不同交易数(90)一致。AMZN/SPY/AMC 修复后仍为 `pool-lifetime-incomplete`,是池出生晚于窗口的真实 warming,不属于时间边界问题。
+
+### 5. 验证状态
+
+- `pnpm typecheck`、`pnpm lint`、`pnpm build` 通过。
+- 全量测试 146 文件 / 1288 用例通过(修复前基线 1281,新增 7 条)。
+- 端到端:新构建在 8799 复测通过;8787 已用同一构建重启。
+- 未做:方案 (d)(为事件写精确秒)未采纳;`metric-store` 的滚动窗口(信号/提醒/CLI)仍以 watermark 为结束点,保持原有保守语义,属另行决策。
