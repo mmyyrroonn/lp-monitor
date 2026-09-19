@@ -19,6 +19,7 @@ import {
   retractSignals,
 } from '../signals/project.js';
 import { LiveProjectionStore } from '../storage/live-projection.js';
+import { pruneLiveWindow, pruneRawBatches, pruneRawLogs } from '../storage/retention.js';
 import { registryCacheFor } from '../storage/registry-cache.js';
 import { OperationFilterIndex } from '../ingest/operation-filter-index.js';
 import { AlertOutbox } from '../notify/outbox.js';
@@ -138,7 +139,8 @@ export interface RecorderOptions {
   fromBlock?: bigint;
   toBlock?: bigint;
   durationMs: number | null;
-  maxCalls: number;
+  /** RPC call budget for the run, or null for unlimited (bounded only by duration/rate). */
+  maxCalls: number | null;
   evidenceMode: 'full' | 'sampled' | 'off';
   readerFactory?: typeof createChainReader;
   shutdown?: ShutdownController;
@@ -485,6 +487,73 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     if (deleted > 0 || payloadObjects > 0)
       console.log(
         encodeJson({ event: 'signal-evaluation-retention', runId: id, deleted, payloadObjects }),
+      );
+  };
+  // Physical retention for the live window: the projection keeps every derived event on disk, so
+  // without this the live tables grow as fast as the raw ones. It runs at the same poll gap and
+  // throttle as the signal-evaluation pass; the cutoff is at least the longest signal lookback.
+  let lastLiveRetentionAtMs = 0;
+  const maintainLiveRetention = () => {
+    const nowMs = Date.now();
+    if (nowMs - lastLiveRetentionAtMs < config.signalEvaluationPruneIntervalMinutes * 60_000)
+      return;
+    lastLiveRetentionAtMs = nowMs;
+    const tip = store.acceptedTip(scopeId);
+    if (!tip || tip.timestampSec <= 0) return;
+    const sinceSec = Math.max(0, tip.timestampSec - config.liveRetentionMinutes * 60);
+    const pruned = pruneLiveWindow(db, scopeId, sinceSec, {
+      maxRows: config.signalEvaluationPruneBatchRows,
+    });
+    if (pruned.liveEvents > 0 || pruned.qualityErrors > 0 || pruned.liveInputs > 0)
+      console.log(encodeJson({ event: 'live-window-retention', runId: id, ...pruned }));
+  };
+  // Raw batch retention is opt-in: `rawRetentionDays: null` keeps every batch forever. When set,
+  // both scopes' transports older than the cutoff are dropped and their payload objects reclaimed.
+  let lastRawRetentionAtMs = 0;
+  const maintainRawRetention = () => {
+    if (config.rawRetentionDays === null) return;
+    const nowMs = Date.now();
+    if (nowMs - lastRawRetentionAtMs < config.signalEvaluationPruneIntervalMinutes * 60_000)
+      return;
+    lastRawRetentionAtMs = nowMs;
+    const tip = store.acceptedTip(scopeId);
+    if (!tip || tip.timestampSec <= 0) return;
+    const cutoffSec = tip.timestampSec - config.rawRetentionDays * 86400;
+    // Nothing on the chain is older than the window yet (a short run or a fresh fixture): skip.
+    if (cutoffSec < 0) return;
+    let batches = 0;
+    let acceptedRanges = 0;
+    for (const scope of [scopeId, discoveryScope]) {
+      const pruned = pruneRawBatches(db, scope, cutoffSec, {
+        maxBatches: config.signalEvaluationPruneBatchRows,
+      });
+      batches += pruned.batches;
+      acceptedRanges += pruned.acceptedRanges;
+    }
+    // The raw-log tier is global: map the time cutoff to a block height through the anchors the
+    // scopes persisted, then drop old operation logs (discovery logs stay pinned by `pools`).
+    const blockRow = db
+      .prepare('select max(block_number) as b from anchors where timestamp_sec <= ?')
+      .get(cutoffSec) as { b: number | null };
+    const rawLogs =
+      blockRow.b === null
+        ? { rawLogs: 0, activeLogs: 0, logTimes: 0, liveEvents: 0, liveInputs: 0, qualityErrors: 0 }
+        : pruneRawLogs(db, blockRow.b, { maxRows: config.signalEvaluationPruneBatchRows });
+    const payloadObjects =
+      batches < config.signalEvaluationPruneBatchRows * 2 &&
+      rawLogs.rawLogs < config.signalEvaluationPruneBatchRows
+        ? reclaimPayloadObjects(db).payloadObjects
+        : 0;
+    if (batches > 0 || acceptedRanges > 0 || rawLogs.rawLogs > 0 || payloadObjects > 0)
+      console.log(
+        encodeJson({
+          event: 'raw-retention',
+          runId: id,
+          batches,
+          acceptedRanges,
+          ...rawLogs,
+          payloadObjects,
+        }),
       );
   };
   const batchRecords: {
@@ -1075,6 +1144,8 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           maintainMetadata();
           metadataWorker.kick();
           maintainSignalEvaluations();
+          maintainLiveRetention();
+          maintainRawRetention();
         },
         onStateChange: (state) => {
           if (telemetry.transition(state))

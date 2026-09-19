@@ -24,12 +24,13 @@ export type CatalogueOptions = Pick<
   | 'watchlistPath'
   | 'databasePath'
   | 'outputDirectory'
-  | 'maxCalls'
   | 'evidenceMode'
   | 'readerFactory'
   | 'shutdown'
 > & {
   durationMs: number;
+  /** The catalogue is a one-shot backfill and requires a finite budget; null is rejected below. */
+  maxCalls: number | null;
   targetBlock?: bigint;
 };
 
@@ -81,7 +82,7 @@ function runDirectory(outputDirectory: string, before: ReadonlySet<string>): str
 function validateOptions(options: CatalogueOptions): void {
   if (!Number.isSafeInteger(options.durationMs) || options.durationMs <= 0)
     throw new ConfigError('Catalogue duration must be a positive safe integer');
-  if (!Number.isSafeInteger(options.maxCalls) || options.maxCalls < 1)
+  if (options.maxCalls === null || !Number.isSafeInteger(options.maxCalls) || options.maxCalls < 1)
     throw new ConfigError('Invalid RPC budget');
   if (
     options.targetBlock !== undefined &&

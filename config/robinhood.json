@@ -40,5 +40,6 @@
   "rpcPerSecond": 5,
   "timeoutMs": 10000,
   "maxRetries": 2,
-  "maxBackfillRpcRps": 3
+  "maxBackfillRpcRps": 3,
+  "rawRetentionDays": 2
 }

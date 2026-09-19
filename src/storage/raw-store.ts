@@ -14,7 +14,7 @@ import type {
 import { verifySuccessfulShardCoverage } from '../ingest/completeness.js';
 import { countWork } from '../ops/work-counters.js';
 import { BatchCoverageStore } from './batch-coverage.js';
-import { readBatch, writeCompactBatch } from './payload-store.js';
+import { decodeJsonColumn, encodeJsonColumn, readBatch, writeCompactBatch } from './payload-store.js';
 import {
   decodeStoredRegistration,
   storedPoolKey,
@@ -826,12 +826,15 @@ export class SqliteRangeStore {
     const key = rawLogKey(log);
     const existing = this.database
       .prepare('select id, payload_json from raw_logs where raw_key = ?')
-      .get(key) as { id: number; payload_json: string } | undefined;
+      .get(key) as { id: number; payload_json: string | Buffer } | undefined;
     if (existing !== undefined) {
       // rawBlockTimestamp is an untrusted provider annotation and may drift across
       // overlapping fetches. Keep the first raw row byte-for-byte; each ingest batch
       // still preserves the exact annotation observed in its transport payload.
-      if (canonicalRawLogPayload(existing.payload_json) !== canonicalRawLogPayload(payloadJson))
+      if (
+        canonicalRawLogPayload(decodeJsonColumn(existing.payload_json)) !==
+        canonicalRawLogPayload(payloadJson)
+      )
         throw new Error('Raw log payload is immutable');
       return existing.id;
     }
@@ -854,7 +857,7 @@ export class SqliteRangeStore {
         losslessJson(log.topics.map(normalizeHex)),
         normalizeHex(log.data),
         log.rawBlockTimestamp === null ? null : normalizeHex(log.rawBlockTimestamp),
-        payloadJson,
+        encodeJsonColumn(payloadJson),
       );
     return Number(result.lastInsertRowid);
   }

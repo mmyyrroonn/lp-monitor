@@ -99,6 +99,17 @@ const schema = z
       .positive()
       .safe()
       .default(SIGNAL_EVALUATION_PRUNE_BATCH_ROWS),
+    // How many minutes of projected live rows (`live_events`/`live_inputs`/`live_quality_errors`)
+    // are kept on disk. The live read window is much smaller (1m..1h, dashboard 3h); this is the
+    // physical bound that stops those tables growing forever, and it must be at least the longest
+    // signal lookback (up to 10080 minutes) or a re-issued signal would lose its history.
+    liveRetentionMinutes: z.number().int().positive().max(10080).safe().default(10080),
+    // Days of raw batch transports (`ingest_batches` + `payload_objects`) to keep. `null` keeps
+    // them forever (the current behaviour). Set it to bound long-running disk: old batches are
+    // deleted and their payload objects reclaimed, which also drops offline history/replay of the
+    // pruned ranges. The live recorder reads `raw_logs`, not the batch transport, so it is
+    // unaffected.
+    rawRetentionDays: z.number().int().positive().safe().nullable().default(null),
   })
   .superRefine((value, context) => {
     // A backfill rate above the shared budget is invisible to the transport: the master limiter

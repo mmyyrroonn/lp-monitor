@@ -13,6 +13,7 @@ import {
   type RecordedRangeBatch,
 } from '../../src/storage/manifest.js';
 import { SqliteRangeStore } from '../../src/storage/raw-store.js';
+import { decodeJsonColumn } from '../../src/storage/payload-store.js';
 
 const databases: Database.Database[] = [];
 const tempDirectories: string[] = [];
@@ -306,9 +307,9 @@ describe('SqliteRangeStore', () => {
     expect(database.prepare('select count(*) as count from raw_logs').get()).toEqual({ count: 1 });
     const raw = database
       .prepare('select raw_block_timestamp, payload_json from raw_logs where raw_key = ?')
-      .get(rawLogKey(first)) as { raw_block_timestamp: string; payload_json: string };
+      .get(rawLogKey(first)) as { raw_block_timestamp: string; payload_json: string | Buffer };
     expect(raw.raw_block_timestamp).toBe('0x6aa28ff3');
-    expect(JSON.parse(raw.payload_json).rawBlockTimestamp).toBe('0x6aa28ff3');
+    expect(JSON.parse(decodeJsonColumn(raw.payload_json)).rawBlockTimestamp).toBe('0x6aa28ff3');
 
     const batches = database
       .prepare('select id, payload_json from ingest_batches order by rowid')

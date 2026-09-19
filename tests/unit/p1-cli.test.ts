@@ -18,8 +18,10 @@ test.each([
   ['10m', 600000],
   ['5s', 5000],
   ['1h', 3600000],
+  ['1d', 86400000],
+  ['30d', 2592000000],
 ])('bounded duration %s', (s, ms) => expect(parseDuration(String(s))).toBe(ms));
-test.each(['', '0m', 'Infinity', '1d', '1000000000000h', '-1m', '1.5m'])(
+test.each(['', '0m', 'Infinity', '1000000000000h', '-1m', '1.5m'])(
   'bad duration %s rejected',
   (s) => expect(() => parseDuration(s)).toThrow(),
 );

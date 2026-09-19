@@ -8,11 +8,11 @@ import { loadChainConfig } from '../config/chain.js';
 import type { createChainReader } from '../rpc/client.js';
 
 export function parseDuration(value: string): number {
-  const match = /^([1-9][0-9]*)(s|m|h)$/.exec(value);
-  if (!match) throw new ConfigError('Duration must be a positive integer with s, m or h');
-  const duration = Number(match[1]) * { s: 1000, m: 60000, h: 3600000 }[match[2]!]!;
-  if (!Number.isSafeInteger(duration) || duration > 24 * 3600000)
-    throw new ConfigError('Duration must not exceed 24h');
+  const match = /^([1-9][0-9]*)(s|m|h|d)$/.exec(value);
+  if (!match) throw new ConfigError('Duration must be a positive integer with s, m, h or d');
+  const duration = Number(match[1]) * { s: 1000, m: 60000, h: 3600000, d: 86400000 }[match[2]!]!;
+  if (!Number.isSafeInteger(duration))
+    throw new ConfigError('Duration is too large to represent safely');
   return duration;
 }
 export async function runRecorderCli(
@@ -73,6 +73,8 @@ export async function runRecorderCli(
   const evidence = String(values.evidence ?? 'sampled');
   if (!['full', 'sampled', 'off'].includes(evidence))
     throw new ConfigError('Invalid evidence policy');
+  // --max-rpc-calls N caps a run; without it a follow/ingest run is unbounded, so the
+  // duration flag (and the per-second rate limit) is the only thing that stops a long run.
   const budget = values['max-rpc-calls'];
   if (
     budget !== undefined &&
@@ -116,7 +118,7 @@ export async function runRecorderCli(
     ...(fromBlock === undefined ? {} : { fromBlock }),
     ...(toBlock === undefined ? {} : { toBlock }),
     durationMs,
-    maxCalls: budget === undefined ? config.recorderMaxRpcCalls : Number(budget),
+    maxCalls: budget === undefined ? null : Number(budget),
     evidenceMode: evidence as 'full' | 'sampled' | 'off',
     ...(options.readerFactory ? { readerFactory: options.readerFactory } : {}),
   });

@@ -42,7 +42,7 @@ const help = `Robinhood read-only P0/P1/P2/P3/P4/P5/P6 CLI
   Default follow starts at the latest block on every launch; no historical discovery or catch-up.
   Known pools only; unregistered historical pools remain unknown. Explicit --from-block keeps historical discovery.
   Live follow incrementally projects changed logs and retains bounded metric windows; 2s polling is not a latency guarantee.
-  P1: --db PATH --watchlist PATH --max-rpc-calls N (default 10000)
+  P1: --db PATH --watchlist PATH --max-rpc-calls N (default unlimited; --duration bounds the run)
   P1: --evidence full|sampled|off (default sampled); bounded run only.
   pnpm lp probe --config config/robinhood.json --out artifacts/p0/capabilities.json
   pnpm lp capture --config config/robinhood.json --last-blocks 300 --out artifacts/p0/raw
