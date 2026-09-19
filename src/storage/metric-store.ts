@@ -301,21 +301,32 @@ export function buildMetricsReport(
         if (retained.toBlock === null || block > retained.toBlock) retained.toBlock = block;
       }
     const quotes = createQuoteIndex();
+    const assetsByAddress = new Map(
+      input.assets.assets.map((a) => [a.address.toLowerCase(), a]),
+    );
     const valuations: SwapValuation[] = [];
     const metricEvents: MetricEvent[] = [];
     const valuedByRwa = new Map<string, SwapValuation[]>();
     // One measured leaf around swap valuation; the projections read above and the
     // window assembly below are measured separately, so no interval is counted twice.
     measureStage(options.timings, 'valuation', () => {
-      for (const event of [...projection.events].sort((a, b) => comparePosition(a.ref, b.ref))) {
+      const sortedEvents = (() => {
+        const events = [...projection.events];
+        let ordered = true;
+        for (let i = 1; i < events.length; i++)
+          if (comparePosition(events[i - 1]!.ref, events[i]!.ref) > 0) { ordered = false; break; }
+        return ordered ? events : events.sort((a, b) => comparePosition(a.ref, b.ref));
+      })();
+      for (const event of sortedEvents) {
         const selected = inSelection(event);
         let valuation: SwapValuation | null = null;
         if (event.kind === 'swap') {
           const registration = registrationFor(event);
           if (!registration) throw new Error('Projected swap lacks registration');
-          const related = input.assets.assets.filter(
-            (a) => a.address === registration.token0 || a.address === registration.token1,
-          );
+          const related = [
+            assetsByAddress.get(registration.token0.toLowerCase()),
+            assetsByAddress.get(registration.token1.toLowerCase()),
+          ].filter((a): a is (typeof input.assets.assets)[number] => a !== undefined);
           const inWindow =
             sinceSec === null ||
             event.time.minuteStartSec === null ||
