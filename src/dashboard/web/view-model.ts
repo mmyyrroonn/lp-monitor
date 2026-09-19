@@ -54,6 +54,107 @@ export function compareHeat(a: HeatInput, b: HeatInput, mode: SortMode): number 
     b.current - a.current
   );
 }
+export type ColumnKey = 'name' | 'count' | 'amount' | 'pools';
+export type SortDirection = 'asc' | 'desc';
+/** One column and the way it is being read. A column and a view never order the ranking at once. */
+export interface ColumnSort {
+  key: ColumnKey;
+  dir: SortDirection;
+}
+/** What one column of the ranking needs from a row: its value, and how to tell rows apart. */
+export interface ColumnInput {
+  symbol: string;
+  address: string;
+  poolCount: number;
+  txCount: number | null;
+  usdMicros: string | null;
+}
+/** A missing symbol still needs a label; the address is the only name such a row has. */
+const columnName = (t: ColumnInput) => t.symbol || t.address;
+/** Equal values read in the same order whichever way the column is read, so the list stays put. */
+const byIdentity = (a: ColumnInput, b: ColumnInput) =>
+  a.symbol.localeCompare(b.symbol) || a.address.localeCompare(b.address);
+/**
+ * Unknown is not zero: a row whose window is unknown sorts after every row that has a value,
+ * ascending and descending alike. Only the known values turn around with the direction.
+ */
+const byNumber = (a: number | null, b: number | null, dir: SortDirection) =>
+  a === null || b === null ? (a === b ? 0 : a === null ? 1 : -1) : dir === 'desc' ? b - a : a - b;
+/** Case differences should not decide the list; the spelling only settles names that tie. */
+const byName = (a: ColumnInput, b: ColumnInput, dir: SortDirection) => {
+  const order =
+    columnName(a).toLowerCase().localeCompare(columnName(b).toLowerCase()) ||
+    columnName(a).localeCompare(columnName(b));
+  return dir === 'desc' ? -order : order;
+};
+/** Amounts arrive as micro-unit decimal strings; anything else is unpriced, exactly as the page reads it. */
+const microsOf = (value: string | null) =>
+  value !== null && /^-?\d+$/.test(value) ? BigInt(value) : null;
+const byAmount = (a: string | null, b: string | null, dir: SortDirection) => {
+  const x = microsOf(a),
+    y = microsOf(b);
+  if (x === null || y === null) return x === y ? 0 : x === null ? 1 : -1;
+  const order = x < y ? -1 : x > y ? 1 : 0;
+  return dir === 'desc' ? -order : order;
+};
+
+/**
+ * Orders the ranking by one column instead of by a heat view. The column decides which value is
+ * compared and the direction only turns that value around; every tie falls back to the symbol and
+ * then the address, so the same rows in the same order do not shuffle between two equal columns.
+ */
+export function compareColumn(
+  a: ColumnInput,
+  b: ColumnInput,
+  key: ColumnKey,
+  dir: SortDirection,
+): number {
+  const order =
+    key === 'name'
+      ? byName(a, b, dir)
+      : key === 'count'
+        ? byNumber(a.txCount, b.txCount, dir)
+        : key === 'amount'
+          ? byAmount(a.usdMicros, b.usdMicros, dir)
+          : byNumber(a.poolCount, b.poolCount, dir);
+  return order || byIdentity(a, b);
+}
+
+/**
+ * What one click on a column header asks for. The column already in charge is read the other way;
+ * any other column starts at the end its own values are wanted from — a name from A, a number from
+ * the top — so the first click is the one the reader almost always meant.
+ */
+export function nextColumnSort(current: ColumnSort | null, key: ColumnKey): ColumnSort {
+  return current?.key === key
+    ? { key, dir: current.dir === 'desc' ? 'asc' : 'desc' }
+    : { key, dir: key === 'name' ? 'asc' : 'desc' };
+}
+
+/**
+ * The sentence above the ranking while a column, not a view, is what orders it: it names the column
+ * in the words of the table and says where the rows it cannot compare went.
+ */
+export function columnSortExplanation(
+  key: ColumnKey,
+  dir: SortDirection,
+  windowName: string,
+): string {
+  const column = {
+    name: '代币名称',
+    count: `${windowName} 交易数`,
+    amount: 'USDG 等值量',
+    pools: '池数量',
+  }[key];
+  const tail = {
+    name: '名称相同时按合约地址排列。',
+    count: '当前窗口数据不足的行排在末尾。',
+    amount: '未计价数据排在末尾。',
+    pools: '池数相同时按代币名称排列。',
+  }[key];
+  return `按「${column}」${dir === 'desc' ? '降序' : '升序'}；${tail}`;
+}
+
 export function heatIntensity(value: number | null, maximum: number): number | null {
   if (value === null) return null;
   if (value <= 0 || maximum <= 0) return 0;

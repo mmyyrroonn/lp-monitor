@@ -100,13 +100,13 @@
                   <thead>
                     <tr>
                       <th class="favorite-col"><span aria-label="自选">☆</span></th>
-                      <th># / 代币</th>
+                      <th><button class="column-sort" data-column="name" title="按代币名称排序"># / 代币</button></th>
                       <th>当前状态</th>
-                      <th class="numeric"><span id="count-heading">5m</span> 交易数</th>
+                      <th class="numeric"><button class="column-sort" data-column="count" title="按当前窗口的交易数排序"><span id="count-heading">5m</span> 交易数</button></th>
                       <th class="numeric">较前一窗口</th>
-                      <th class="numeric">USDG 等值量</th>
+                      <th class="numeric"><button class="column-sort" data-column="amount" title="按 USDG 等值量排序">USDG 等值量</button></th>
                       <th>近 15m 交易趋势</th>
-                      <th class="numeric">池</th>
+                      <th class="numeric"><button class="column-sort" data-column="pools" title="按池数量排序">池</button></th>
                     </tr>
                   </thead>
                   <tbody id="rank-body"></tbody>

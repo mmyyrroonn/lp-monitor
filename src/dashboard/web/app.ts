@@ -12,15 +12,21 @@ import {
   closedMinuteStarts,
   selectableCutoff,
   minuteOverlaps,
+  compareColumn,
   compareHeat,
+  columnSortExplanation,
   escapeHtml as e,
   favoriteKey,
   formatMicros,
   heatIntensity,
+  nextColumnSort,
   overviewMinutes,
   requestNotice,
   stillCurrent,
   summaryNotice,
+  type ColumnInput,
+  type ColumnKey,
+  type ColumnSort,
   type HeatInput,
   type SortMode,
 } from './view-model.js';
@@ -30,6 +36,8 @@ const windows = { '1m': 60, '5m': 300, '15m': 900, '1h': 3600 };
 let snapshot: DashboardSummary | null = null;
 let windowName: WindowName = '5m';
 let sort: SortMode = 'warming';
+/** The column the reader clicked and which way it reads; null while a view orders the ranking. */
+let columnSort: ColumnSort | null = null;
 let page: 'overview' | 'favorites' | 'health' = 'overview';
 let horizon = 30;
 let relative = false;
@@ -94,6 +102,17 @@ const heatInput = (t: DashboardTokenSummary): HeatInput => ({
   previous: t.windows[windowName].previous.txCount,
   minutes: closedMinutes(seriesOf(t)),
 });
+/** The drawn value of each sortable column, for the window the reader is looking at. */
+const columnInput = (t: DashboardTokenSummary): ColumnInput => {
+  const current = t.windows[windowName].current;
+  return {
+    symbol: t.symbol,
+    address: t.address,
+    poolCount: t.poolCount,
+    txCount: current.txCount,
+    usdMicros: current.usdMicros,
+  };
+};
 const heat = (t: DashboardTokenSummary) => classifyHeat(heatInput(t));
 const badge = (t: DashboardTokenSummary) => {
   const h = heat(t);
@@ -153,22 +172,18 @@ function listTokens() {
   );
 }
 function rankedTokens() {
-  const amount = $<HTMLInputElement>('amount-sort').checked;
-  return listTokens().sort((a, b) => {
-    if (amount && sort === 'activity') {
-      const aa = a.windows[windowName].current.usdMicros,
-        bb = b.windows[windowName].current.usdMicros;
-      if (aa === null || bb === null)
-        return aa === bb ? a.address.localeCompare(b.address) : aa === null ? 1 : -1;
-      const difference = BigInt(bb) - BigInt(aa);
-      return difference > 0n ? 1 : difference < 0n ? -1 : a.address.localeCompare(b.address);
-    }
-    return (
-      compareHeat(heatInput(a), heatInput(b), sort) ||
-      a.symbol.localeCompare(b.symbol) ||
-      a.address.localeCompare(b.address)
-    );
-  });
+  const column = columnSort;
+  return listTokens().sort((a, b) =>
+    column === null
+      ? compareHeat(heatInput(a), heatInput(b), sort) ||
+        a.symbol.localeCompare(b.symbol) ||
+        a.address.localeCompare(b.address)
+      : compareColumn(columnInput(a), columnInput(b), column.key, column.dir),
+  );
+}
+function toggleColumnSort(key: ColumnKey) {
+  columnSort = nextColumnSort(columnSort, key);
+  render();
 }
 /** Split paths at unknown minutes; isolated observed points remain visible. */
 function chart(values: (number | null)[], kind: string, large = false, label = '每分钟交易数趋势') {
@@ -296,19 +311,51 @@ function renderStats(tokens: DashboardTokenSummary[]) {
     )
     .join('');
 }
-function renderRanking(tokens: DashboardTokenSummary[]) {
+/** The table says which column orders it, and the view tabs say so only while a view does. */
+function renderSortState() {
+  // Read once: the sorted column decides both what the headers say and what the checkbox shows.
+  const active = columnSort;
   $('count-heading').textContent = windowName;
-  $('rank-count').textContent = `${tokens.length} TOKENS`;
-  $('sort-explanation').textContent = {
-    warming:
-      '优先展示明显升温：当前 ≥10 笔、较前窗 ≥2 倍且增加 ≥5 笔；零基线单独标注。其余按交易增量排序。',
-    activity: '按当前窗口去重交易数排序。可切换 USDG 等值量；未计价数据保留在末尾。',
-    sustained: '优先展示当前 ≥10 笔，且最近 5 个完整分钟至少 4 分钟有交易的代币。',
-    cooling: '优先展示前窗 ≥10 笔、当前交易数下降至少 50% 的代币。',
-  }[sort];
+  // Only the column in charge carries aria-sort; a sortable column that is not ordering anything
+  // leaves the attribute off rather than claiming a direction it is not reading.
+  $('rank-area')
+    .querySelectorAll<HTMLButtonElement>('[data-column]')
+    .forEach((button) => {
+      const header = button.closest('th');
+      if (active !== null && active.key === button.dataset.column)
+        header?.setAttribute('aria-sort', active.dir === 'asc' ? 'ascending' : 'descending');
+      else header?.removeAttribute('aria-sort');
+    });
+  // A view button is the current view only while a view, not a column, is what orders the ranking.
+  $('sorts')
+    .querySelectorAll<HTMLButtonElement>('button')
+    .forEach((button) => {
+      const selected = active === null && button.dataset.sort === sort;
+      button.classList.toggle('active', selected);
+      button.setAttribute('aria-pressed', String(selected));
+    });
+  // The checkbox is the amount column read largest-first: one state, shown in two places. It stays
+  // usable from the activity view as before, and stays usable while it is the state on screen, so a
+  // box that reads as checked is never a box the reader cannot uncheck.
   const amount = $<HTMLInputElement>('amount-sort');
-  amount.disabled = sort !== 'activity';
-  amount.parentElement!.style.opacity = sort === 'activity' ? '1' : '.45';
+  const usable = sort === 'activity' || active?.key === 'amount';
+  amount.disabled = !usable;
+  amount.checked = active?.key === 'amount' && active.dir === 'desc';
+  amount.parentElement!.style.opacity = usable ? '1' : '.45';
+}
+function renderRanking(tokens: DashboardTokenSummary[]) {
+  renderSortState();
+  $('rank-count').textContent = `${tokens.length} TOKENS`;
+  $('sort-explanation').textContent =
+    columnSort === null
+      ? {
+          warming:
+            '优先展示明显升温：当前 ≥10 笔、较前窗 ≥2 倍且增加 ≥5 笔；零基线单独标注。其余按交易增量排序。',
+          activity: '按当前窗口去重交易数排序。可切换 USDG 等值量；未计价数据保留在末尾。',
+          sustained: '优先展示当前 ≥10 笔，且最近 5 个完整分钟至少 4 分钟有交易的代币。',
+          cooling: '优先展示前窗 ≥10 笔、当前交易数下降至少 50% 的代币。',
+        }[sort]
+      : columnSortExplanation(columnSort.key, columnSort.dir, windowName);
   $('rank-body').innerHTML = tokens
     .map((t, index) => {
       const h = heat(t),
@@ -968,9 +1015,14 @@ document.addEventListener('click', (event) => {
     if (dialog.open && detail !== null) void loadDetail(detail.address, detail.generation);
     return;
   }
+  if (button.dataset.column) {
+    toggleColumnSort(button.dataset.column as ColumnKey);
+    return;
+  }
   if (button.dataset.sort) {
     sort = button.dataset.sort as SortMode;
-    activate('sorts', 'data-sort', sort);
+    // Choosing a view takes the ranking back from the column the reader may have clicked before.
+    columnSort = null;
     render();
     return;
   }
@@ -993,7 +1045,11 @@ $('search').addEventListener('input', (event) => {
   query = (event.target as HTMLInputElement).value;
   render();
 });
-$('amount-sort').addEventListener('change', () => render());
+$('amount-sort').addEventListener('change', (event) => {
+  // The checkbox is the same state as the amount column, not a second way to ask for it.
+  columnSort = (event.target as HTMLInputElement).checked ? { key: 'amount', dir: 'desc' } : null;
+  render();
+});
 $('refresh').addEventListener('click', () => {
   void refresh(true);
 });

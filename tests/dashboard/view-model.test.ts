@@ -1,10 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import {
   classifyHeat,
+  columnSortExplanation,
+  compareColumn,
   compareHeat,
   heatIntensity,
   formatMicros,
   favoriteKey,
+  nextColumnSort,
+  type ColumnInput,
+  type ColumnKey,
+  type SortDirection,
 } from '../../src/dashboard/web/view-model.js';
 
 const minute = (txCount: number | null) => ({
@@ -76,6 +82,149 @@ it('only selects retained minute cutoffs and counts overlapping minute intervals
   expect(selectableCutoff(179, null, null)).toBe(false);
   expect(minuteOverlaps(180, 239, 299)).toBe(false);
   expect(minuteOverlaps(240, 239, 299)).toBe(true);
+});
+
+describe('dashboard ranking column order', () => {
+  const row = (over: Partial<ColumnInput> & { symbol: string }): ColumnInput => ({
+    address: `0xaddr-${over.symbol}`,
+    poolCount: 1,
+    txCount: 0,
+    usdMicros: null,
+    ...over,
+  });
+  const sorted = (rows: ColumnInput[], key: ColumnKey, dir: SortDirection) =>
+    [...rows].sort((a, b) => compareColumn(a, b, key, dir));
+
+  it('reads the transaction-count column both ways', () => {
+    const rows = [
+      row({ symbol: 'A', txCount: 5 }),
+      row({ symbol: 'B', txCount: 40 }),
+      row({ symbol: 'C', txCount: 12 }),
+    ];
+    expect(sorted(rows, 'count', 'desc').map((r) => r.symbol)).toEqual(['B', 'C', 'A']);
+    expect(sorted(rows, 'count', 'asc').map((r) => r.symbol)).toEqual(['A', 'C', 'B']);
+  });
+  it('reads the pool column and settles equal counts by name', () => {
+    const rows = [
+      row({ symbol: 'A', poolCount: 2 }),
+      row({ symbol: 'C', poolCount: 7 }),
+      row({ symbol: 'B', poolCount: 7 }),
+    ];
+    expect(sorted(rows, 'pools', 'desc').map((r) => r.symbol)).toEqual(['B', 'C', 'A']);
+    expect(sorted(rows, 'pools', 'asc').map((r) => r.symbol)).toEqual(['A', 'B', 'C']);
+  });
+  it('keeps tokens whose window is unknown at the end, whichever way the column reads', () => {
+    const rows = [
+      row({ symbol: 'GAP', txCount: null }),
+      row({ symbol: 'LOW', txCount: 3 }),
+      row({ symbol: 'MISSING', txCount: null }),
+      row({ symbol: 'HIGH', txCount: 9 }),
+      row({ symbol: 'ZERO', txCount: 0 }),
+    ];
+    // Ascending has the quietest row first and the unknown rows last, so unknown is not zero.
+    expect(sorted(rows, 'count', 'asc').map((r) => r.symbol)).toEqual([
+      'ZERO',
+      'LOW',
+      'HIGH',
+      'GAP',
+      'MISSING',
+    ]);
+    expect(sorted(rows, 'count', 'desc').map((r) => r.symbol)).toEqual([
+      'HIGH',
+      'LOW',
+      'ZERO',
+      'GAP',
+      'MISSING',
+    ]);
+  });
+  it('compares USDG amounts as integers and leaves unpriced rows at the end', () => {
+    const rows = [
+      row({ symbol: 'BIG', usdMicros: '123456789012345678901233' }),
+      row({ symbol: 'HUGE', usdMicros: '123456789012345678901234' }),
+      row({ symbol: 'UNPRICED', usdMicros: null }),
+      row({ symbol: 'BLANK', usdMicros: '' }),
+    ];
+    // These two amounts are the same double, so only an integer comparison can tell them apart.
+    // The two unpriced rows tie with each other and keep their name order in both directions.
+    expect(sorted(rows, 'amount', 'desc').map((r) => r.symbol)).toEqual([
+      'HUGE',
+      'BIG',
+      'BLANK',
+      'UNPRICED',
+    ]);
+    expect(sorted(rows, 'amount', 'asc').map((r) => r.symbol)).toEqual([
+      'BIG',
+      'HUGE',
+      'BLANK',
+      'UNPRICED',
+    ]);
+    // Everything drawn as — is unknown rather than zero.
+    expect(formatMicros('')).toBe('—');
+  });
+  it('orders names without letting case or the runtime collation move a row around', () => {
+    const rows = [row({ symbol: 'apple' }), row({ symbol: 'Banana' }), row({ symbol: 'APPLE' })];
+    const ascending = sorted(rows, 'name', 'asc').map((r) => r.symbol);
+    expect(ascending[2]).toBe('Banana');
+    expect([ascending[0], ascending[1]].map((s) => s?.toLowerCase())).toEqual(['apple', 'apple']);
+
+    const chinese = [
+      row({ symbol: '茅台' }),
+      row({ symbol: '平安银行' }),
+      row({ symbol: '宁德时代' }),
+    ];
+    const byName = sorted(chinese, 'name', 'asc').map((r) => r.symbol);
+    const reversed = sorted(chinese, 'name', 'desc').map((r) => r.symbol);
+    expect(reversed).toEqual([...byName].reverse());
+  });
+  it('settles equal values by name and address so a refresh cannot reshuffle the table', () => {
+    const rows = [
+      row({ symbol: 'B', address: '0x2', txCount: 4 }),
+      row({ symbol: 'A', address: '0x9', txCount: 4 }),
+      row({ symbol: 'A', address: '0x1', txCount: 4 }),
+    ];
+    // Rows that tie on the column keep the same order in both directions; only the column flips.
+    expect(sorted(rows, 'count', 'desc').map((r) => r.address)).toEqual(['0x1', '0x9', '0x2']);
+    expect(sorted(rows, 'count', 'asc').map((r) => r.address)).toEqual(['0x1', '0x9', '0x2']);
+    for (const a of rows)
+      for (const b of rows) if (a !== b) expect(compareColumn(a, b, 'count', 'desc')).not.toBe(0);
+  });
+  it('lets the clicked column, not the heat view, decide the order', () => {
+    const spike = row({ symbol: 'SPIKE', txCount: 30, poolCount: 1 });
+    const quiet = row({ symbol: 'QUIET', txCount: 4, poolCount: 9 });
+    const heat = (r: ColumnInput) => ({ current: r.txCount, previous: 1, minutes: [] });
+    expect(compareHeat(heat(spike), heat(quiet), 'warming')).toBeLessThan(0);
+    expect(compareColumn(spike, quiet, 'pools', 'desc')).toBeGreaterThan(0);
+  });
+  it('flips the column already in charge and starts a new one at its own end', () => {
+    expect(nextColumnSort(null, 'count')).toEqual({ key: 'count', dir: 'desc' });
+    expect(nextColumnSort(null, 'name')).toEqual({ key: 'name', dir: 'asc' });
+    expect(nextColumnSort({ key: 'pools', dir: 'desc' }, 'name')).toEqual({
+      key: 'name',
+      dir: 'asc',
+    });
+    expect(nextColumnSort({ key: 'amount', dir: 'desc' }, 'pools')).toEqual({
+      key: 'pools',
+      dir: 'desc',
+    });
+    expect(nextColumnSort({ key: 'count', dir: 'desc' }, 'count')).toEqual({
+      key: 'count',
+      dir: 'asc',
+    });
+    expect(nextColumnSort({ key: 'count', dir: 'asc' }, 'count')).toEqual({
+      key: 'count',
+      dir: 'desc',
+    });
+  });
+  it('names the column ordering the ranking and where the rows it cannot compare went', () => {
+    expect(columnSortExplanation('amount', 'desc', '5m')).toBe(
+      '按「USDG 等值量」降序；未计价数据排在末尾。',
+    );
+    expect(columnSortExplanation('count', 'asc', '1m')).toBe(
+      '按「1m 交易数」升序；当前窗口数据不足的行排在末尾。',
+    );
+    expect(columnSortExplanation('name', 'asc', '5m')).toContain('代币名称');
+    expect(columnSortExplanation('pools', 'desc', '5m')).toContain('池数量');
+  });
 });
 
 describe('dashboard request bookkeeping', () => {

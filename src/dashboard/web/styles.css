@@ -520,6 +520,23 @@ tbody tr:hover {
 th.numeric {
   font-family: var(--sans);
 }
+.column-sort {
+  padding: 0;
+  text-align: inherit;
+}
+th[aria-sort] .column-sort {
+  color: var(--orange);
+}
+th[aria-sort='ascending'] .column-sort:after {
+  content: ' ↑';
+}
+th[aria-sort='descending'] .column-sort:after {
+  content: ' ↓';
+}
+th[aria-sort] .column-sort:hover,
+.column-sort:hover {
+  color: #fff;
+}
 .favorite-col {
   width: 31px;
   padding-right: 0;
