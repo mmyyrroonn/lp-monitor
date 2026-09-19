@@ -1,10 +1,12 @@
+import type Database from 'better-sqlite3';
 import type { Address } from 'viem';
-import type { PoolEvent, Swap } from '../domain/types.js';
+import type { LogRef, PoolEvent, QuoteObservation, Swap } from '../domain/types.js';
 import type { AssetRegistration, AssetRegistry } from '../registry/assets.js';
 import { poolRegistrationId, type PoolRegistration } from '../registry/pools.js';
 import type { RegistryView } from '../storage/registry-cache.js';
 import type { LiveMetricCache } from '../storage/live-metric-cache.js';
 import { rawLogKey } from '../storage/manifest.js';
+import { comparePosition } from '../state/observations.js';
 import { decimalsAt, type MetricMetadata } from './metadata.js';
 import { valueSwap, type SwapValuationMetadata, type SwapValuation } from './notional.js';
 import {
@@ -157,4 +159,127 @@ export function assembleValuations(input: {
     });
   }
   return { quotes, valuations, metricEvents, valuedByRwa };
+}
+
+export type AssemblyCache = {
+  quotes: QuoteIndex;
+  valuations: SwapValuation[];
+  metricEvents: MetricEvent[];
+  valuedByRwa: Map<string, SwapValuation[]>;
+  /** refs parallel to the event order; used to find the truncation point and expire the head. */
+  orderedRefs: LogRef[];
+};
+
+export function createAssemblyCache(): AssemblyCache {
+  return {
+    quotes: createQuoteIndex(),
+    valuations: [],
+    metricEvents: [],
+    valuedByRwa: new Map(),
+    orderedRefs: [],
+  };
+}
+
+const sharedAssemblyCaches = new WeakMap<Database.Database, Map<string, AssemblyCache>>();
+
+/**
+ * The assembly cache one scope of one database is evaluated through. It mirrors the
+ * `valuationIndexFor` WeakMap pattern: two builds over the same database share it, so the round
+ * that assembled a window is the round the next build updates, and a read-only database — a
+ * distinct handle on the same file — keeps a memory-only cache of its own that can never reach a
+ * write path.
+ */
+export function assemblyCacheFor(db: Database.Database, scopeId: string): AssemblyCache {
+  let byScope = sharedAssemblyCaches.get(db);
+  if (!byScope) {
+    byScope = new Map();
+    sharedAssemblyCaches.set(db, byScope);
+  }
+  let cache = byScope.get(scopeId);
+  if (!cache) {
+    cache = createAssemblyCache();
+    byScope.set(scopeId, cache);
+  }
+  return cache;
+}
+
+export type EventContribution = {
+  ref: LogRef;
+  quote: QuoteObservation | null;
+  valuation: SwapValuation | null;
+  metricEvent: MetricEvent | null;
+  assetValuations: readonly [Address, SwapValuation][];
+};
+
+export type AssemblyDelta = {
+  /** newly inserted events, ascending by ref (already valued elsewhere). */
+  appended: readonly EventContribution[];
+  /** reorg point: every cached contribution with ref >= this is dropped. */
+  truncateAfter: LogRef | null;
+  /** window lower bound: every cached contribution with ref < this is dropped. */
+  expireBefore: LogRef | null;
+};
+
+/** The same identity `comparePosition` uses, so a dropped ref matches its contribution everywhere. */
+function refKey(ref: LogRef): string {
+  return `${ref.blockNumber}:${ref.transactionIndex}:${ref.logIndex}`;
+}
+
+function dropContributions(cache: AssemblyCache, dropped: ReadonlySet<string>): void {
+  const retained = (ref: LogRef): boolean => !dropped.has(refKey(ref));
+  cache.valuations = cache.valuations.filter((value) => retained(value.ref));
+  cache.metricEvents = cache.metricEvents.filter((value) => retained(value.event.ref));
+  for (const [asset, list] of cache.valuedByRwa) {
+    const next = list.filter((value) => retained(value.ref));
+    if (next.length === 0) cache.valuedByRwa.delete(asset);
+    else cache.valuedByRwa.set(asset, next);
+  }
+  // Truncation/expiry is the reorg and window path, and it is rare. Rather than unpick each
+  // dropped quote from `byPair`, rebuild the quote index linearly from the retained quotes — the
+  // surviving `quotes.all` entries — so `byPair` and `all` always agree. Append keeps the index in
+  // sync through `addQuote`, so only this drop path pays the rebuild.
+  const retainedQuotes = cache.quotes.all.filter((quote) => retained(quote.effectiveAt));
+  cache.quotes = createQuoteIndex();
+  for (const quote of retainedQuotes) addQuote(cache.quotes, quote);
+}
+
+export function applyAssemblyDelta(cache: AssemblyCache, delta: AssemblyDelta): void {
+  if (delta.expireBefore !== null || delta.truncateAfter !== null) {
+    const dropped = new Set<string>();
+    // Expire the window head: leading entries strictly before the lower bound leave.
+    if (delta.expireBefore !== null) {
+      let cut = 0;
+      while (
+        cut < cache.orderedRefs.length &&
+        comparePosition(cache.orderedRefs[cut]!, delta.expireBefore) < 0
+      ) {
+        dropped.add(refKey(cache.orderedRefs[cut]!));
+        cut++;
+      }
+      if (cut > 0) cache.orderedRefs = cache.orderedRefs.slice(cut);
+    }
+    // Truncate a reorg suffix: trailing entries at or after the reorg point leave. The spec
+    // guarantees the deletion is a contiguous suffix, so walking from the end is exact.
+    if (delta.truncateAfter !== null) {
+      let cut = cache.orderedRefs.length;
+      while (cut > 0 && comparePosition(cache.orderedRefs[cut - 1]!, delta.truncateAfter) >= 0) {
+        dropped.add(refKey(cache.orderedRefs[cut - 1]!));
+        cut--;
+      }
+      if (cut < cache.orderedRefs.length) cache.orderedRefs = cache.orderedRefs.slice(0, cut);
+    }
+    if (dropped.size > 0) dropContributions(cache, dropped);
+  }
+
+  for (const contribution of delta.appended) {
+    if (contribution.quote) addQuote(cache.quotes, contribution.quote);
+    if (contribution.valuation) cache.valuations.push(contribution.valuation);
+    if (contribution.metricEvent) cache.metricEvents.push(contribution.metricEvent);
+    for (const [asset, valuation] of contribution.assetValuations) {
+      const list = cache.valuedByRwa.get(asset) ?? [];
+      list.push(valuation);
+      cache.valuedByRwa.set(asset, list);
+    }
+    cache.orderedRefs.push(contribution.ref);
+  }
 }
