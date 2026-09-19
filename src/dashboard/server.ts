@@ -35,9 +35,9 @@ export type DashboardServerOptions = DashboardSnapshotSource & {
 export const HISTORY_BATCH_MAX_ADDRESSES = 250;
 /**
  * How many minutes one overview batch may ask for. The page derives its own ask from the drawn
- * horizon through `overviewMinutes`, which stops at the same hour.
+ * horizon through `overviewMinutes`, which stops at the same three hours the reader retains.
  */
-export const HISTORY_BATCH_MAX_MINUTES = 60;
+export const HISTORY_BATCH_MAX_MINUTES = 180;
 export const HISTORY_BATCH_DEFAULT_MINUTES = 30;
 const ADDRESS_PATTERN = /^0x[0-9a-fA-F]{40}$/;
 const WINDOWS: readonly string[] = ['1m', '5m', '15m', '1h'];

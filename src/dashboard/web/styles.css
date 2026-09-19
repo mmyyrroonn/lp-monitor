@@ -762,6 +762,10 @@ td:first-child {
 .legend .partial {
   background: repeating-linear-gradient(135deg, #716347, #716347 2px, #27291d 2px, #27291d 5px);
 }
+.heat-cell.unpriced,
+.legend .unpriced {
+  background: #2b2f29;
+}
 .heat-cell.h1,
 .legend .h1 {
   background: #414c2c;

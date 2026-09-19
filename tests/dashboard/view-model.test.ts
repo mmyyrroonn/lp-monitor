@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  aggregateHeatBlocks,
   classifyHeat,
   columnSortExplanation,
   compareColumn,
@@ -7,11 +8,13 @@ import {
   heatIntensity,
   formatMicros,
   favoriteKey,
+  microsToDollars,
   nextColumnSort,
   type ColumnInput,
   type ColumnKey,
   type SortDirection,
 } from '../../src/dashboard/web/view-model.js';
+import type { TokenMinute } from '../../src/dashboard/types.js';
 
 const minute = (txCount: number | null) => ({
   txCount,
@@ -71,6 +74,106 @@ it('includes the selected complete minute at xx:xx:59, while live partial minute
   expect(closedMinuteStarts(299, 3)).toEqual([120, 180, 240]);
   expect(closedMinuteStarts(298, 3)).toEqual([60, 120, 180]);
   expect(closedMinuteStarts(300, 3)).toEqual([120, 180, 240]);
+});
+
+describe('dashboard heat blocks', () => {
+  const minute = (start: number, over: Partial<TokenMinute> = {}): TokenMinute => ({
+    minuteStartSec: start,
+    status: 'closed',
+    txCount: 0,
+    swapCount: 0,
+    usdMicros: '0',
+    reasons: [],
+    ...over,
+  });
+  it('converts micro-unit amounts to dollars for the log-scaled colouring', () => {
+    expect(microsToDollars(0n)).toBe(0);
+    expect(microsToDollars(1_000_000n)).toBe(1);
+    expect(microsToDollars(4_318_357_708n)).toBeCloseTo(4318.36, 1);
+  });
+  it('sums closed minutes into a block and keeps the block closed', () => {
+    const blocks = aggregateHeatBlocks(
+      [
+        minute(0, { txCount: 3, usdMicros: '1000000' }),
+        minute(60, { txCount: 7, usdMicros: '2000000' }),
+      ],
+      [0],
+      600,
+    );
+    expect(blocks).toEqual([
+      {
+        startSec: 0,
+        status: 'closed',
+        closedMinutes: 2,
+        txCount: 10,
+        usdMicros: 3000000n,
+        reasons: [],
+      },
+    ]);
+  });
+  it('marks a block touching the still-running minute partial and never counts it', () => {
+    const blocks = aggregateHeatBlocks(
+      [
+        minute(0, { txCount: 4, usdMicros: '5000000' }),
+        minute(60, { status: 'partial', txCount: 9, usdMicros: '9000000' }),
+      ],
+      [0],
+      600,
+    );
+    expect(blocks[0]).toMatchObject({ status: 'partial', closedMinutes: 1, txCount: 4 });
+  });
+  it('treats gaps, warming and missing minutes as no evidence', () => {
+    const blocks = aggregateHeatBlocks(
+      [
+        minute(0, { status: 'gap', txCount: null, usdMicros: null }),
+        minute(60, { status: 'warming', txCount: null, usdMicros: null }),
+      ],
+      [0],
+      600,
+    );
+    expect(blocks).toEqual([
+      { startSec: 0, status: 'gap', closedMinutes: 0, txCount: 0, usdMicros: 0n, reasons: [] },
+    ]);
+  });
+  it('propagates one unpriced minute into a null block amount without losing the count', () => {
+    const blocks = aggregateHeatBlocks(
+      [
+        minute(0, { txCount: 5, usdMicros: '7000000' }),
+        minute(60, { txCount: 2, usdMicros: null }),
+      ],
+      [0],
+      600,
+    );
+    expect(blocks[0]).toMatchObject({ status: 'closed', txCount: 7, usdMicros: null });
+  });
+  it('keeps one-minute blocks at one minute and carries their coverage reasons', () => {
+    const blocks = aggregateHeatBlocks(
+      [
+        minute(0, { txCount: 4, usdMicros: '8000000' }),
+        minute(60, { status: 'gap', txCount: null, usdMicros: null, reasons: ['coverage-gap'] }),
+      ],
+      [0, 60],
+      60,
+    );
+    expect(blocks).toEqual([
+      {
+        startSec: 0,
+        status: 'closed',
+        closedMinutes: 1,
+        txCount: 4,
+        usdMicros: 8000000n,
+        reasons: [],
+      },
+      {
+        startSec: 60,
+        status: 'gap',
+        closedMinutes: 0,
+        txCount: 0,
+        usdMicros: 0n,
+        reasons: ['coverage-gap'],
+      },
+    ]);
+  });
 });
 
 it('only selects retained minute cutoffs and counts overlapping minute intervals', async () => {
@@ -232,8 +335,10 @@ describe('dashboard request bookkeeping', () => {
     const { overviewMinutes } = await import('../../src/dashboard/web/view-model.js');
     expect(overviewMinutes(15)).toBe(16);
     expect(overviewMinutes(30)).toBe(31);
-    // The reader refuses more than an hour, so the overview never asks for one.
-    expect(overviewMinutes(60)).toBe(60);
+    // The reader keeps three hours now, so a full hour also keeps its comparison minute.
+    expect(overviewMinutes(60)).toBe(61);
+    expect(overviewMinutes(120)).toBe(121);
+    expect(overviewMinutes(180)).toBe(180);
     expect(overviewMinutes(0)).toBe(1);
   });
   it('tells a viewer what can be done next, in the words of the page and not of the reader', async () => {

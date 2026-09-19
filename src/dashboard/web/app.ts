@@ -8,6 +8,7 @@ import type {
   WindowName,
 } from '../types.js';
 import {
+  aggregateHeatBlocks,
   classifyHeat,
   closedMinuteStarts,
   selectableCutoff,
@@ -19,6 +20,7 @@ import {
   favoriteKey,
   formatMicros,
   heatIntensity,
+  microsToDollars,
   nextColumnSort,
   overviewMinutes,
   requestNotice,
@@ -27,6 +29,7 @@ import {
   type ColumnInput,
   type ColumnKey,
   type ColumnSort,
+  type HeatBlock,
   type HeatInput,
   type SortMode,
 } from './view-model.js';
@@ -40,7 +43,7 @@ let sort: SortMode = 'warming';
 let columnSort: ColumnSort | null = null;
 let page: 'overview' | 'favorites' | 'health' = 'overview';
 let horizon = 30;
-let relative = false;
+let heatMetric: 'count' | 'amount' = 'count';
 let query = '';
 let historyAt: number | null = null;
 let favorites = new Set<string>();
@@ -395,55 +398,91 @@ function renderRanking(tokens: DashboardTokenSummary[]) {
       : `(${time(selectedEnd()! - windows[windowName])}, ${time(selectedEnd())}] · ${windowName}`;
 }
 function renderHeatmap() {
+  // Short horizons stay one minute per cell; the three-hour horizon widens to ten minutes.
+  const blockMinutes = horizon > 60 ? 10 : 1;
+  const blockSeconds = blockMinutes * 60;
   const end = Math.floor((snapshot?.sourceChainTimeSec ?? 0) / 60) * 60;
-  const starts = Array.from({ length: horizon }, (_, i) => end - (horizon - 1 - i) * 60);
-  const peak = (t: DashboardTokenSummary) =>
-    Math.max(
-      0,
-      ...seriesOf(t)
-        .filter((m) => m.minuteStartSec >= starts[0]!)
-        .map((m) => (m.status === 'closed' ? (m.txCount ?? 0) : 0)),
-    );
-  const all = listTokens().sort((a, b) => peak(b) - peak(a) || a.symbol.localeCompare(b.symbol));
+  const lastBlockStart = Math.floor(end / blockSeconds) * blockSeconds;
+  const blockCount = Math.max(1, Math.round(horizon / blockMinutes));
+  const blockStarts = Array.from(
+    { length: blockCount },
+    (_, i) => lastBlockStart - (blockCount - 1 - i) * blockSeconds,
+  );
+  // One block row per token, built once so the ranking and the paint read the same numbers.
+  const blocksByToken = new Map<string, HeatBlock[]>();
+  for (const t of listTokens())
+    blocksByToken.set(t.address, aggregateHeatBlocks(seriesOf(t), blockStarts, blockSeconds));
+  const peak = (blocks: HeatBlock[]): number =>
+    heatMetric === 'count'
+      ? Math.max(0, ...blocks.filter((b) => b.status === 'closed').map((b) => b.txCount))
+      : Math.max(
+          0,
+          ...blocks
+            .filter((b) => b.status === 'closed' && b.usdMicros !== null)
+            .map((b) => microsToDollars(b.usdMicros!)),
+        );
+  const all = listTokens().sort(
+    (a, b) =>
+      peak(blocksByToken.get(a.address)!) - peak(blocksByToken.get(b.address)!) ||
+      a.symbol.localeCompare(b.symbol),
+  );
   const tokens = expandedHeatmap ? all : all.slice(0, 12);
   if (!tokens.length) {
     $('heatmap').innerHTML =
       '<div class="empty-state"><span>▥</span><p>有分钟证据后，会在这里显示热度轨迹。</p></div>';
     return;
   }
-  const maximum = Math.max(1, ...tokens.map(peak));
+  const maximum = Math.max(1, ...tokens.map((t) => peak(blocksByToken.get(t.address)!)));
+  const valueOf = (b: HeatBlock): number | null =>
+    heatMetric === 'count' ? b.txCount : b.usdMicros === null ? null : microsToDollars(b.usdMicros);
+  const caption = (t: DashboardTokenSummary, b: HeatBlock): string => {
+    const head = `${t.symbol} · ${time(b.startSec)}`;
+    const reasonTail = b.reasons.length ? ` · ${reasons(b.reasons)}` : '';
+    if (b.status === 'gap') return `${head} · 缺少完整数据${reasonTail}`;
+    if (b.status === 'partial') {
+      const unit = blockMinutes > 1 ? '本块尚未完整' : '本分钟尚未完整';
+      const done =
+        blockMinutes > 1
+          ? ` · 已完整 ${b.closedMinutes}/${blockMinutes} 分钟 · ${number(b.txCount)} 笔`
+          : '';
+      return `${head} · ${unit}${done}${reasonTail}`;
+    }
+    const counts =
+      `${number(b.txCount)} 笔` +
+      (blockMinutes > 1 ? ` · ${b.closedMinutes}/${blockMinutes} 分钟` : '');
+    const amount =
+      heatMetric === 'amount'
+        ? ` · USDG ${b.usdMicros === null ? '未计价' : formatMicros(b.usdMicros.toString())}`
+        : '';
+    return `${head} · ${counts}${amount}${reasonTail}`;
+  };
   $('heatmap').innerHTML =
     tokens
       .map((t) => {
-        const map = new Map(seriesOf(t).map((m) => [m.minuteStartSec, m]));
-        const localMax = Math.max(1, peak(t));
-        return `<div class="heat-row"><button class="heat-name" data-token="${e(t.address)}" title="${e(t.symbol)} ${e(t.address)}">${e(t.symbol)}</button><div class="heat-cells">${starts
-          .map((sec) => {
-            const m = map.get(sec),
-              closed = m?.status === 'closed';
-            const intensity = heatIntensity(
-              closed ? m.txCount : null,
-              relative ? localMax : maximum,
-            );
+        const blocks = blocksByToken.get(t.address)!;
+        return `<div class="heat-row"><button class="heat-name" data-token="${e(t.address)}" title="${e(t.symbol)} ${e(t.address)}">${e(t.symbol)}</button><div class="heat-cells">${blocks
+          .map((b) => {
+            const intensity = b.status === 'closed' ? heatIntensity(valueOf(b), maximum) : null;
             const cls =
-              !m || m.status === 'gap' || m.status === 'warming'
+              b.status === 'gap'
                 ? 'gap'
-                : m.status === 'partial'
+                : b.status === 'partial'
                   ? 'partial'
-                  : intensity === null
-                    ? 'gap'
-                    : intensity === 0
+                  : heatMetric === 'amount' && b.usdMicros === null
+                    ? 'unpriced'
+                    : intensity === null || intensity === 0
                       ? ''
                       : `h${Math.max(1, Math.ceil(intensity * 4))}`;
-            const caption = `${t.symbol} · ${time(sec)} · ${closed ? number(m.txCount) + ' 笔' : m?.status === 'partial' ? '分钟尚未完整' : '缺少完整数据'} · USDG 等值 ${formatMicros(m?.usdMicros ?? null)}${m?.reasons.length ? ' · ' + reasons(m.reasons) : ''}`;
-            return `<button class="heat-cell ${cls} ${historyAt === sec + 59 ? 'selected' : ''}" data-at="${sec + 59}" ${!selectableCutoff(sec + 59, snapshot?.availableFromSec ?? null, snapshot?.sourceChainTimeSec ?? null) ? 'disabled' : ''} aria-label="${e(caption)}" title="${e(caption)}"></button>`;
+            const at = b.startSec + blockSeconds - 1;
+            const text = caption(t, b);
+            return `<button class="heat-cell ${cls} ${historyAt === at ? 'selected' : ''}" data-at="${at}" ${!selectableCutoff(at, snapshot?.availableFromSec ?? null, snapshot?.sourceChainTimeSec ?? null) ? 'disabled' : ''} aria-label="${e(text)}" title="${e(text)}"></button>`;
           })
           .join('')}</div></div>`;
       })
       .join('') +
-    `<div class="heat-times"><span>${time(starts[0]!)}</span><span>${time(starts[Math.floor(horizon / 2)]!)}</span><span>${time(end)}</span></div>${all.length > 12 ? `<button id="expand-heat" class="subtle">${expandedHeatmap ? '收起到最活跃 12 个' : `展开全部 ${all.length} 个代币`} ↓</button>` : ''}`;
+    `<div class="heat-times"><span>${time(blockStarts[0]!)}</span><span>${time(blockStarts[Math.floor(blockStarts.length / 2)]!)}</span><span>${time(end)}</span></div>${all.length > 12 ? `<button id="expand-heat" class="subtle">${expandedHeatmap ? '收起到最活跃 12 个' : `展开全部 ${all.length} 个代币`} ↓</button>` : ''}`;
   $('heat-caption').textContent =
-    `每格 1 分钟 · ${relative ? '各代币自身峰值归一化，颜色不可跨行比' : '跨代币统一色阶'} · ${expandedHeatmap ? '全部' : '最活跃12个'}`;
+    `每格 ${blockMinutes} 分钟 · ${heatMetric === 'count' ? '交易笔数' : 'USDG 等值金额'} · ${expandedHeatmap ? '全部' : '最活跃12个'}`;
   $('expand-heat')?.addEventListener('click', () => {
     expandedHeatmap = !expandedHeatmap;
     renderHeatmap();
@@ -1035,9 +1074,9 @@ document.addEventListener('click', (event) => {
     void syncSeries();
     return;
   }
-  if (button.dataset.scale) {
-    relative = button.dataset.scale === 'relative';
-    activate('scales', 'data-scale', button.dataset.scale);
+  if (button.dataset.metric) {
+    heatMetric = button.dataset.metric === 'amount' ? 'amount' : 'count';
+    activate('metrics', 'data-metric', heatMetric);
     renderHeatmap();
   }
 });

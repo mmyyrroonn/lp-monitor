@@ -100,13 +100,33 @@
                   <thead>
                     <tr>
                       <th class="favorite-col"><span aria-label="自选">☆</span></th>
-                      <th><button class="column-sort" data-column="name" title="按代币名称排序"># / 代币</button></th>
+                      <th>
+                        <button class="column-sort" data-column="name" title="按代币名称排序">
+                          # / 代币
+                        </button>
+                      </th>
                       <th>当前状态</th>
-                      <th class="numeric"><button class="column-sort" data-column="count" title="按当前窗口的交易数排序"><span id="count-heading">5m</span> 交易数</button></th>
+                      <th class="numeric">
+                        <button
+                          class="column-sort"
+                          data-column="count"
+                          title="按当前窗口的交易数排序"
+                        >
+                          <span id="count-heading">5m</span> 交易数
+                        </button>
+                      </th>
                       <th class="numeric">较前一窗口</th>
-                      <th class="numeric"><button class="column-sort" data-column="amount" title="按 USDG 等值量排序">USDG 等值量</button></th>
+                      <th class="numeric">
+                        <button class="column-sort" data-column="amount" title="按 USDG 等值量排序">
+                          USDG 等值量
+                        </button>
+                      </th>
                       <th>近 15m 交易趋势</th>
-                      <th class="numeric"><button class="column-sort" data-column="pools" title="按池数量排序">池</button></th>
+                      <th class="numeric">
+                        <button class="column-sort" data-column="pools" title="按池数量排序">
+                          池
+                        </button>
+                      </th>
                     </tr>
                   </thead>
                   <tbody id="rank-body"></tbody>
@@ -127,29 +147,29 @@
                 <div class="panel-header">
                   <div>
                     <span class="section-number">02</span>
-                    <h2>分钟热力图</h2>
+                    <h2>热度轨迹</h2>
                   </div>
                   <div class="segmented small" id="horizons">
                     <button data-horizon="15">15m</button
                     ><button data-horizon="30" class="active" aria-pressed="true">30m</button
-                    ><button data-horizon="60">60m</button>
+                    ><button data-horizon="60">60m</button><button data-horizon="180">3h</button>
                   </div>
                 </div>
                 <div class="heat-controls">
-                  <div class="segmented small" id="scales">
-                    <button data-scale="absolute" class="active" aria-pressed="true">
-                      绝对活跃度</button
-                    ><button data-scale="relative">相对自身</button>
+                  <div class="segmented small" id="metrics">
+                    <button data-metric="count" class="active" aria-pressed="true">交易笔数</button
+                    ><button data-metric="amount">USDG 金额</button>
                   </div>
-                  <span>点击分钟，回看当时排行</span>
+                  <span>点击格子，回看当时排行</span>
                 </div>
-                <div id="heatmap" class="heatmap" aria-label="每分钟代币交易活跃度"></div>
+                <div id="heatmap" class="heatmap" aria-label="代币交易活跃度轨迹"></div>
                 <div class="heat-footer">
-                  <span id="heat-caption">每格 1 分钟 · 交易数</span>
+                  <span id="heat-caption">每格 10 分钟 · 交易笔数</span>
                   <div class="legend">
                     <span>少</span><i class="h1"></i><i class="h2"></i><i class="h3"></i
                     ><i class="h4"></i><span>多</span><i class="gap"></i><span>缺失</span
-                    ><i class="partial"></i><span>未完整</span>
+                    ><i class="partial"></i><span>未完整</span><i class="unpriced"></i
+                    ><span>未计价</span>
                   </div>
                 </div>
               </section>

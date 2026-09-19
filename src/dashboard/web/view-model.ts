@@ -1,3 +1,5 @@
+import type { TokenMinute } from '../types.js';
+
 export type HeatKind = 'warming' | 'new' | 'sustained' | 'cooling' | 'active' | 'quiet' | 'unknown';
 export type SortMode = 'warming' | 'activity' | 'sustained' | 'cooling';
 export interface HeatInput {
@@ -160,6 +162,62 @@ export function heatIntensity(value: number | null, maximum: number): number | n
   if (value <= 0 || maximum <= 0) return 0;
   return Math.min(1, Math.log1p(value) / Math.log1p(maximum));
 }
+/** Micro-unit amount read as a dollar number, for the log-scaled heat colouring only. */
+export function microsToDollars(value: bigint): number {
+  return Number(value) / 1_000_000;
+}
+
+export type HeatBlockStatus = 'closed' | 'partial' | 'gap';
+/** One fixed-length time block of a token's heat trajectory, aggregated from minute evidence. */
+export type HeatBlock = {
+  startSec: number;
+  status: HeatBlockStatus;
+  /** How many of the block's minutes are closed and therefore counted into the value. */
+  closedMinutes: number;
+  txCount: number;
+  /** Null-propagating sum of closed minutes: one unpriced minute keeps the whole block unpriced. */
+  usdMicros: bigint | null;
+  /** Deduplicated coverage reasons from the minutes the block touches. */
+  reasons: string[];
+};
+
+/**
+ * Aggregates a token's minute series into fixed-length blocks. Only closed minutes contribute a
+ * value; a block that touches the still-running minute is `partial`, and one with no evidence is
+ * `gap`. Minutes missing from the series count as no evidence, so a block that reaches past the
+ * watermark simply ignores the minutes it has not seen yet.
+ */
+export function aggregateHeatBlocks(
+  minutes: readonly TokenMinute[],
+  blockStarts: readonly number[],
+  blockSeconds: number,
+): HeatBlock[] {
+  const perBlock = Math.round(blockSeconds / 60);
+  const byStart = new Map(minutes.map((m) => [m.minuteStartSec, m]));
+  return blockStarts.map((startSec) => {
+    let status: HeatBlockStatus = 'gap';
+    let closedMinutes = 0;
+    let txCount = 0;
+    let usdMicros: bigint | null = 0n;
+    const reasons = new Set<string>();
+    for (let i = 0; i < perBlock; i++) {
+      const m = byStart.get(startSec + i * 60);
+      if (m !== undefined) for (const reason of m.reasons) reasons.add(reason);
+      if (m === undefined || m.status === 'gap' || m.status === 'warming') continue;
+      if (m.status === 'partial') {
+        status = 'partial';
+        continue;
+      }
+      status = 'closed';
+      closedMinutes += 1;
+      if (m.txCount !== null) txCount += m.txCount;
+      const usd = m.usdMicros;
+      if (usd === null) usdMicros = null;
+      else if (usdMicros !== null) usdMicros += BigInt(usd);
+    }
+    return { startSec, status, closedMinutes, txCount, usdMicros, reasons: [...reasons] };
+  });
+}
 export function formatMicros(value: string | null): string {
   if (value === null || !/^-?\d+$/.test(value)) return '—';
   const n = BigInt(value),
@@ -197,11 +255,11 @@ export function minuteOverlaps(minuteStart: number, start: number, end: number):
 
 /**
  * How many minutes the overview asks the reader for: the heatmap horizon, plus the one extra minute
- * the change list compares its oldest drawn minute against. The reader refuses more than an hour, so
- * at the longest horizon the comparison minute is the one that has to go.
+ * the change list compares its oldest drawn minute against. The reader keeps three hours of minutes,
+ * so at the longest horizon the comparison minute is the one that has to go.
  */
 export function overviewMinutes(horizon: number): number {
-  return Math.min(60, Math.max(1, Math.trunc(horizon) + 1));
+  return Math.min(180, Math.max(1, Math.trunc(horizon) + 1));
 }
 
 /**

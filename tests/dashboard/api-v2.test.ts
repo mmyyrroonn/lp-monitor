@@ -414,7 +414,7 @@ test('rejects every batch query that is not exactly one generation, a bounded ad
     `/api/history?generation=g1&addresses=${one},`,
     `/api/history?generation=g1&addresses=${tooMany}`,
     `/api/history?generation=g1&addresses=${one}&minutes=0`,
-    `/api/history?generation=g1&addresses=${one}&minutes=61`,
+    `/api/history?generation=g1&addresses=${one}&minutes=181`,
     `/api/history?generation=g1&addresses=${one}&minutes=1.5`,
     `/api/history?generation=g1&addresses=${one}&minutes=x`,
     `/api/history?generation=g1&addresses=${one}&minutes=5&minutes=6`,
