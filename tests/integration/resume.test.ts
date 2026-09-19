@@ -100,7 +100,7 @@ test('empty requested future range does not advance cursor', async () => {
 test('transient disconnect retries from unchanged cursor and fills all events', async () => {
   const f = fixture(100n, 127n);
   f.setFail();
-  const result = await follow(f.reader, f.store, 4000, f.options);
+  const result = await follow(f.reader, f.store, 6_000, f.options);
   expect(f.ranges.slice(0, 2)).toEqual([
     [81n, 127n],
     [81n, 127n],

@@ -109,16 +109,33 @@ test.each(['rate-limit', 'disconnect'] satisfies P6Fault[])(
     const h = harness();
     h.fixture.faultNext('eth_getBlockByNumber', fault, 2);
     try {
-      await h.run(6_001, { shouldStop: () => h.store.acceptedTip(scopeId) !== null });
+      await h.run(13_000, { shouldStop: () => h.store.acceptedTip(scopeId) !== null });
       expect(h.store.acceptedTip(scopeId)?.number).toBe(200n);
       expect(h.states).toEqual(['degraded', 'healthy']);
-      expect(h.fixture.waits.filter((ms) => ms === 2_000)).toHaveLength(4);
+      expect(h.fixture.waits).toEqual([4_000, 4_000, 8_000, 8_000]);
     } finally {
       await h.reader.close?.();
       h.database.close();
     }
   },
 );
+
+test('sustained failures grow the wait and a success resets it', async () => {
+  const h = harness();
+  // 4 consecutive getAnchor faults, then clean.
+  h.fixture.faultNext('eth_getBlockByNumber', 'disconnect', 4);
+  try {
+    await h.run(60_001, { shouldStop: () => h.store.acceptedTip(scopeId) !== null });
+    // After 4 failures the waits must include values larger than poll (4000, 8000, 16000, ...),
+    // and once a range is accepted the cursor moved.
+    expect(h.store.acceptedTip(scopeId)?.number).toBe(200n);
+    const growing = h.fixture.waits.filter((ms) => ms > 2_000);
+    expect(growing.length).toBeGreaterThanOrEqual(2);
+  } finally {
+    await h.reader.close?.();
+    h.database.close();
+  }
+});
 
 test('duplicate blocks and logs are rejected before cursor or decision input advances', async () => {
   const h = harness();

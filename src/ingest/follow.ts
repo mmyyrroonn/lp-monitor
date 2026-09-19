@@ -96,6 +96,7 @@ export async function follow(
   };
   let start = options.startBlock;
   let explicitNext = options.oneShot && options.toBlock !== undefined ? start : undefined;
+  let consecutiveFailures = 0;
   try {
     do {
       if (stopping()) {
@@ -172,6 +173,7 @@ export async function follow(
           if (!changes) {
             gap = true;
             result.failures.push('incomplete-range');
+            consecutiveFailures++;
             break;
           }
           const accepted = store.acceptedTip(options.scopeId);
@@ -184,6 +186,7 @@ export async function follow(
             throw new Error('Recorder did not commit the expected cursor');
           if (explicitNext !== undefined) explicitNext = end.number + 1n;
           result.acceptedRanges++;
+          consecutiveFailures = 0;
           options.onChanges?.(changes, 'range');
           store.pruneCheckpoints(options.scopeId, Math.max(0, head.timestampSec - retention * 60));
           if (end.number >= target.number) break;
@@ -217,12 +220,17 @@ export async function follow(
           throw error;
         result.failures.push(error.kind);
         gap = true;
+        consecutiveFailures++;
       }
       result.complete = !gap;
       if (!options.shouldStop?.() || !gap) publishState(gap ? 'degraded' : 'healthy');
       if (options.oneShot || stopping()) break;
       const waitingAt = now();
-      await sleep(Math.min(poll, Math.max(0, stopAtMs - now())));
+      const backoffMs =
+        consecutiveFailures === 0
+          ? poll
+          : Math.min(poll * 2 ** Math.min(consecutiveFailures, 5), 60_000);
+      await sleep(Math.min(backoffMs, Math.max(0, stopAtMs - now())));
       options.onWait?.(Math.max(0, now() - waitingAt));
     } while (!stopping());
     return result;
