@@ -301,9 +301,7 @@ export function buildMetricsReport(
         if (retained.toBlock === null || block > retained.toBlock) retained.toBlock = block;
       }
     const quotes = createQuoteIndex();
-    const assetsByAddress = new Map(
-      input.assets.assets.map((a) => [a.address.toLowerCase(), a]),
-    );
+    const assetsByAddress = new Map(input.assets.assets.map((a) => [a.address.toLowerCase(), a]));
     const valuations: SwapValuation[] = [];
     const metricEvents: MetricEvent[] = [];
     const valuedByRwa = new Map<string, SwapValuation[]>();
@@ -314,7 +312,10 @@ export function buildMetricsReport(
         const events = [...projection.events];
         let ordered = true;
         for (let i = 1; i < events.length; i++)
-          if (comparePosition(events[i - 1]!.ref, events[i]!.ref) > 0) { ordered = false; break; }
+          if (comparePosition(events[i - 1]!.ref, events[i]!.ref) > 0) {
+            ordered = false;
+            break;
+          }
         return ordered ? events : events.sort((a, b) => comparePosition(a.ref, b.ref));
       })();
       for (const event of sortedEvents) {
