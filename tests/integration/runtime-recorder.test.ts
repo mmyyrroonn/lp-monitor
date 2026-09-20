@@ -230,14 +230,13 @@ test('unexpected local processing error retains follow statistics and a sanitize
     originalSave.call(this, batch);
     if (batch.captureMode === 'live') operationRawSaved = true;
   });
-  const originalTimes = SqliteRangeStore.prototype.logTimes;
-  const times = vi.spyOn(SqliteRangeStore.prototype, 'logTimes').mockImplementation(function (
-    this: SqliteRangeStore,
-    scope,
-  ) {
-    if (operationRawSaved) throw Error('https://user:secret@private.invalid/project');
-    return originalTimes.call(this, scope);
-  });
+  const originalTimes = SqliteRangeStore.prototype.activeLogRefsWithTime;
+  const times = vi
+    .spyOn(SqliteRangeStore.prototype, 'activeLogRefsWithTime')
+    .mockImplementation(function (this: SqliteRangeStore, scope, bounds) {
+      if (operationRawSaved) throw Error('https://user:secret@private.invalid/project');
+      return originalTimes.call(this, scope, bounds);
+    });
   try {
     expect(await runRecorder(opts)).toBe(1);
     const run = readdirSync(opts.outputDirectory)[0]!;
