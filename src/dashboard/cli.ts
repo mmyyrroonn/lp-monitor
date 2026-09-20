@@ -107,8 +107,11 @@ export async function runDashboardCli(
     };
     process.once('SIGINT', stop);
     process.once('SIGTERM', stop);
-    server.once('error', () => {
-      console.error('Unable to start local dashboard; check the port and local configuration.');
+    server.once('error', (error: NodeJS.ErrnoException) => {
+      const cause = error.code ?? error.message;
+      console.error(
+        `Unable to start local dashboard; check the port and local configuration. (${cause})`,
+      );
       void finish(2);
     });
     server.listen(port, '127.0.0.1', () =>
