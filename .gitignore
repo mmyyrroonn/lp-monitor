@@ -32,6 +32,11 @@ artifacts/**/requests.jsonl.*
 /artifacts/p1/live/*.stdout.txt
 /artifacts/p1/live/*.stderr.txt
 
+# Timestamped per-run payload dumps under artifacts/p1 stay local: they are
+# reconstructible from the recorder database, and a single run directory reaches
+# gigabytes, so only the compact summaries at the p1 root belong in the index.
+/artifacts/p1/2*/
+
 # Local agent task briefs and review scratch.
 .superpowers/
 
