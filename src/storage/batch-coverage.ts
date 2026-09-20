@@ -360,11 +360,21 @@ export function warmLegacyCoverageProofs(database: Database.Database): number {
     batch_id: string;
     proof_json: string;
   }[];
+  let payloadEpoch: number | null = null;
+  try {
+    const row = database
+      .prepare('select payload_epoch from batch_coverage_source_epochs where id=1')
+      .get() as { payload_epoch: number } | undefined;
+    payloadEpoch = row?.payload_epoch ?? null;
+  } catch {
+    // Legacy databases without the dependency migration remain on the old path.
+  }
   const ids: string[] = [];
   for (const row of rows) {
     try {
       const proof = JSON.parse(row.proof_json) as BatchCoverageProof;
-      if (proof.dependencyVersion !== 1) ids.push(row.batch_id);
+      if (proof.dependencyVersion !== 1 || proof.payloadEpoch !== payloadEpoch)
+        ids.push(row.batch_id);
     } catch {
       ids.push(row.batch_id);
     }
