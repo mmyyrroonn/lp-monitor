@@ -18,6 +18,7 @@ artifacts/p0/raw/*
 # Local research/tooling retained outside application source control.
 research/
 tooling/
+.commandcode/
 .agents/
 skills-lock.json
 
