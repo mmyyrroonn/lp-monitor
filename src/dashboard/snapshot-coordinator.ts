@@ -164,6 +164,8 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
   readonly #detailPromises = new Map<string, Promise<unknown>>();
   #worker: SnapshotWorkerLike | null = null;
   #ready = false;
+  /** Whether this worker has published a live summary; old summaries survive worker replacement. */
+  #workerHasPublishedLiveSummary = false;
   #closed = false;
   #fatal: 'empty' | 'error' | null = null;
   #fault: string | null = null;
@@ -275,6 +277,7 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
     }
     this.#worker = worker;
     this.#ready = false;
+    this.#workerHasPublishedLiveSummary = false;
     worker.on('message', (value) => this.#onMessage(value as WorkerReply));
     worker.on('error', (error) => {
       // The thread's own failure is the only account of why it left, and it is not a stack the page
@@ -327,6 +330,7 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
         return;
       case 'summary':
         if (reply.key !== undefined && reply.summary !== undefined) {
+          if (reply.key === LIVE_KEY) this.#workerHasPublishedLiveSummary = true;
           this.#summaries.set(reply.key, reply.summary);
           this.#historyFaults.delete(Number(reply.key));
           this.#finishJob(reply.key);
@@ -379,6 +383,7 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
     const worker = this.#worker;
     this.#worker = null;
     this.#ready = false;
+    this.#workerHasPublishedLiveSummary = false;
     if (worker !== null) void worker.terminate();
     const job = this.#job;
     if (job !== null) {
@@ -438,7 +443,7 @@ export class SnapshotCoordinatorImpl implements SnapshotCoordinator {
     job.timer = unref(
       setTimeout(
         () => this.#onJobTimeout(),
-        this.#summaries.has(LIVE_KEY)
+        this.#workerHasPublishedLiveSummary
           ? this.#options.refreshTimeoutMs
           : this.#options.initTimeoutMs,
       ),
