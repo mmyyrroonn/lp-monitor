@@ -14,7 +14,12 @@ import type {
 import { verifySuccessfulShardCoverage } from '../ingest/completeness.js';
 import { countWork } from '../ops/work-counters.js';
 import { BatchCoverageStore } from './batch-coverage.js';
-import { decodeJsonColumn, encodeJsonColumn, readBatch, writeCompactBatch } from './payload-store.js';
+import {
+  decodeJsonColumn,
+  encodeJsonColumn,
+  readBatch,
+  writeCompactBatch,
+} from './payload-store.js';
 import {
   decodeStoredRegistration,
   storedPoolKey,
@@ -44,6 +49,8 @@ type RawRow = {
 };
 const RAW_LOG_COLUMNS =
   'r.block_hash,r.block_number,r.transaction_hash,r.transaction_index,r.log_index,r.address,r.topics_json,r.data,r.raw_block_timestamp';
+const RAW_LOG_REF_COLUMNS =
+  'r.block_hash,r.block_number,r.transaction_hash,r.transaction_index,r.log_index';
 type AssignedTimeRow = {
   time_id: number | null;
   minute_start_sec: number | null;
@@ -499,6 +506,33 @@ export class SqliteRangeStore {
     }));
   }
 
+  /** Read only log identities and assigned times; this path never parses topics or data. */
+  activeLogRefsWithTime(
+    scopeId: WatchScopeId,
+    bounds: RawReadBounds = {},
+  ): readonly { ref: LogRef; time: LogTime | undefined }[] {
+    const rows = this.activeEvidenceRows(scopeId, bounds, RAW_LOG_REF_COLUMNS) as (RefRow &
+      AssignedTimeRow)[];
+    return rows.map((row) => ({ ref: refFromRow(row), time: assignedTime(row) }));
+  }
+
+  /** Fetch full raw logs only for the unresolved identities that need time resolution. */
+  activeLogsByKeys(scopeId: WatchScopeId, keys: readonly string[]): readonly RawLog[] {
+    const unique = [...new Set(keys)];
+    if (unique.length === 0) return [];
+    const keysJson = losslessJson(unique);
+    return (
+      this.database
+        .prepare(
+          `select distinct ${RAW_LOG_COLUMNS} from active_logs a
+           join raw_logs r on r.id = a.raw_log_id
+           where a.scope_id = ? and r.raw_key in (select value from json_each(?))
+           order by r.block_number, r.transaction_index, r.log_index`,
+        )
+        .all(scopeId, keysJson) as RawRow[]
+    ).map(rawLogFromRow);
+  }
+
   /** Same active/time union as coverage, with the raw fields needed to hash signal evidence.
    * Select ids before joining payload columns so overlap never copies/decodes a log twice. */
   activeLogEvidence(
@@ -576,11 +610,11 @@ export class SqliteRangeStore {
     const retryFromBlock = sinceSec === 0 ? 0n : (proof?.firstBlock ?? batchFrom);
     const boundedFrom = retryFromBlock > end.number ? batchFrom : retryFromBlock;
     const readBounds = { fromBlock: boundedFrom, toBlock: end.number };
-    const priorTimes = this.logTimes(scopeId, readBounds);
-    const unresolved = this.activeLogs(scopeId, readBounds).filter((log) => {
-      const prior = priorTimes.get(rawLogKey(log));
-      return prior === undefined || prior.source === 'unresolved';
-    });
+    const refsWithTime = this.activeLogRefsWithTime(scopeId, readBounds);
+    const unresolvedKeys = refsWithTime
+      .filter(({ time }) => time === undefined || time.source === 'unresolved')
+      .map(({ ref }) => rawLogKey(ref));
+    const unresolved = this.activeLogsByKeys(scopeId, unresolvedKeys);
     return {
       retryFromBlock: boundedFrom,
       unresolved,
