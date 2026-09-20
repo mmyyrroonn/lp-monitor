@@ -159,12 +159,13 @@ export function acceptedMetricRanges(
   // A coverage proof is the verdict acceptRange reached when it stored this batch, so a reader
   // that finds one skips decoding the batch and reading its stored payload text.
   const proofs = new BatchCoverageStore(db);
+  const proofByBatch = proofs.readMany([...groups.keys()]);
   for (const [batchId, accepted] of groups) {
     const row = db
       .prepare('select id from ingest_batches where id=? and scope_id=?')
       .get(batchId, scopeId) as { id: string } | undefined;
     if (!row) continue;
-    const proof = proofs.read(batchId);
+    const proof = proofByBatch.get(batchId) ?? null;
     const stored = proof === null ? shardRows(db, batchId) : null;
     // One cache entry per batch behind the window, whether its verdict came from a proof or from
     // decoding it: the signature is whatever that verdict was derived from.
