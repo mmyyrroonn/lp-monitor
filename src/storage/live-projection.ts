@@ -98,7 +98,7 @@ export interface LiveProjectionChanges {
    * written. A caller never has to read `live_events` to find out what changed.
    */
   eventDelta?: EventDelta;
-  /** True when accepted coverage or a minute boundary moved under this watermark. */
+  /** True when accepted coverage, a minute boundary, or retained availability changed. */
   coverageChanged?: boolean;
 }
 /** One identity the journal moved, paired with the records that describe the move. */
@@ -370,6 +370,10 @@ export class LiveProjectionStore {
       .prepare('select min_block from live_dirty_coverage where scope_id=?')
       .get(scopeId) as { min_block: number } | undefined;
     if (coverageRepair) repair(coverageRepair.min_block);
+    // Expiry refreshes historical availability without retracting retained signal evidence.
+    const retentionChanged =
+      this.db.prepare('select scope_id from live_dirty_retention where scope_id=?').get(scopeId) !==
+      undefined;
     const previousEventKeys = new Map<number, string>();
     if (rebuild) {
       // Bulk replacement must also retire contributions held by the in-memory event index.
@@ -668,6 +672,7 @@ export class LiveProjectionStore {
     events.apply(eventDelta);
     this.db.prepare('delete from live_dirty_logs where scope_id=?').run(scopeId);
     this.db.prepare('delete from live_dirty_coverage where scope_id=?').run(scopeId);
+    this.db.prepare('delete from live_dirty_retention where scope_id=?').run(scopeId);
     if (repairFrom !== null)
       this.db
         .prepare(
@@ -679,7 +684,7 @@ export class LiveProjectionStore {
       affectedPoolIds: [...affected].sort(),
       registryInitialization,
       eventDelta,
-      coverageChanged: coverageRepair !== undefined,
+      coverageChanged: coverageRepair !== undefined || retentionChanged,
       ...(journaled
         ? { registry: { revisionKey: position.revisionKey, changes: registryChanges } }
         : {}),

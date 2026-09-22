@@ -40,17 +40,34 @@ CREATE INDEX IF NOT EXISTS live_events_retention_raw ON live_events(raw_log_id,s
 CREATE INDEX IF NOT EXISTS live_errors_retention_raw ON live_quality_errors(raw_log_id,scope_id);
 CREATE INDEX IF NOT EXISTS live_inputs_retention_raw ON live_inputs(raw_log_id,scope_id);
 
-CREATE TRIGGER IF NOT EXISTS retention_expiration_insert AFTER INSERT ON retention_expirations BEGIN
+-- Availability loss refreshes coverage, but is not a correction to retained signal evidence.
+CREATE TABLE IF NOT EXISTS live_dirty_retention(scope_id TEXT PRIMARY KEY);
+DROP TRIGGER IF EXISTS retention_expiration_insert;
+CREATE TRIGGER retention_expiration_insert AFTER INSERT ON retention_expirations BEGIN
   INSERT INTO live_source_revisions(scope_id,revision,registry_revision) VALUES(new.scope_id,1,0)
     ON CONFLICT(scope_id) DO UPDATE SET revision=revision+1;
-  INSERT INTO live_dirty_coverage(scope_id,min_block) VALUES(new.scope_id,0)
-    ON CONFLICT(scope_id) DO UPDATE SET min_block=0;
+  INSERT INTO live_dirty_retention(scope_id) VALUES(new.scope_id)
+    ON CONFLICT(scope_id) DO NOTHING;
 END;
-CREATE TRIGGER IF NOT EXISTS retention_expiration_update AFTER UPDATE ON retention_expirations
+DROP TRIGGER IF EXISTS retention_expiration_update;
+CREATE TRIGGER retention_expiration_update AFTER UPDATE ON retention_expirations
 WHEN new.raw_before_block > old.raw_before_block OR new.raw_before_sec > old.raw_before_sec
   OR new.live_before_sec > old.live_before_sec BEGIN
   INSERT INTO live_source_revisions(scope_id,revision,registry_revision) VALUES(new.scope_id,1,0)
     ON CONFLICT(scope_id) DO UPDATE SET revision=revision+1;
-  INSERT INTO live_dirty_coverage(scope_id,min_block) VALUES(new.scope_id,0)
-    ON CONFLICT(scope_id) DO UPDATE SET min_block=0;
+  INSERT INTO live_dirty_retention(scope_id) VALUES(new.scope_id)
+    ON CONFLICT(scope_id) DO NOTHING;
+END;
+
+-- Raw retention records the availability floor before removing its accepted ranges.
+-- Deleting already unavailable ranges must not enqueue source-history signal repair.
+-- Genuine repairs already queued, or ranges outside the expired prefix, are untouched.
+DROP TRIGGER IF EXISTS live_coverage_ranges_delete;
+CREATE TRIGGER live_coverage_ranges_delete AFTER DELETE ON accepted_ranges
+WHEN NOT EXISTS(SELECT 1 FROM retention_expirations
+  WHERE scope_id=old.scope_id AND old.to_block<raw_before_block) BEGIN
+  INSERT INTO live_dirty_coverage SELECT old.scope_id,old.from_block
+    WHERE EXISTS(SELECT 1 FROM live_projection_cursors
+      WHERE scope_id=old.scope_id AND block_number>=old.from_block)
+    ON CONFLICT(scope_id) DO UPDATE SET min_block=min(min_block,excluded.min_block);
 END;

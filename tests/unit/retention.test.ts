@@ -388,6 +388,37 @@ test('dry-run uses the same bounded selection and retained transports protect ra
   }
 });
 
+test('raw-only dry-run reports all shared availability owners without writing', () => {
+  const db = openDatabase(':memory:');
+  try {
+    for (const scope of ['fast', 'slow', 'later']) retentionConsumer(db, scope);
+    const first = seedRaw(db, 'raw-only', 10);
+    const later = seedRaw(db, 'next-pass', 20);
+    for (const scope of ['fast', 'slow']) {
+      db.prepare('insert into active_logs values(?,?,?)').run(scope, 'f', first);
+      seedLive(db, scope, first, 120);
+    }
+    seedLive(db, 'later', later, 180);
+    const before = db.prepare('select total_changes() as n').get();
+    const preview = previewRawRetention(db, 1);
+    expect(preview).toMatchObject({
+      batches: 0,
+      rawLogs: 1,
+      rawLogIds: [first],
+      coverageExpiryScopes: ['fast', 'slow'],
+    });
+    expect(db.prepare('select total_changes() as n').get()).toEqual(before);
+    expect(db.prepare('select * from retention_expirations').all()).toEqual([]);
+    expect(pruneRawLogs(db, 900, { maxRows: 1 }).rawLogs).toBe(preview.rawLogs);
+    expect(
+      db.prepare('select scope_id from retention_expirations order by scope_id').pluck().all(),
+    ).toEqual(preview.coverageExpiryScopes);
+    expect(db.prepare('select id from raw_logs').pluck().all()).toEqual([later]);
+  } finally {
+    db.close();
+  }
+});
+
 test('a failed parent deletion rolls back child ranges and availability metadata', () => {
   const db = openDatabase(':memory:');
   try {

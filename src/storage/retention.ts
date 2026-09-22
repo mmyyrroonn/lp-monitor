@@ -61,6 +61,24 @@ function selectedRawLogs(db: Database.Database, beforeBlock: number, max: number
     .all(Math.min(beforeBlock, safety.beforeBlock), max) as number[];
 }
 
+/** The bounded global raw-log set can invalidate availability in several scopes. */
+function rawRetentionOwners(db: Database.Database, rawLogIds: number[]) {
+  if (rawLogIds.length === 0) return [];
+  return db
+    .prepare(
+      `with doomed(id) as (select value from json_each(?))
+    select owned.scope_id,max(r.block_number) as block,max(coalesce(t.minute_start_sec,0)) as minute from (
+      select scope_id,raw_log_id from active_logs where raw_log_id in (select id from doomed)
+      union select scope_id,raw_log_id from log_times where raw_log_id in (select id from doomed)
+      union select scope_id,raw_log_id from live_events where raw_log_id in (select id from doomed)
+      union select scope_id,raw_log_id from live_quality_errors where raw_log_id in (select id from doomed)
+      union select scope_id,raw_log_id from live_inputs where raw_log_id in (select id from doomed)
+    ) owned join raw_logs r on r.id=owned.raw_log_id left join log_times t on t.raw_log_id=r.id and t.scope_id=owned.scope_id
+    group by owned.scope_id`,
+    )
+    .all(JSON.stringify(rawLogIds)) as { scope_id: string; block: number; minute: number }[];
+}
+
 /** Same selectors as the physical passes, under one read snapshot. Raw-log counts
  * describe this pass; transports removed now can release more logs on the next pass. */
 export function previewRawRetention(db: Database.Database, maxRows = 50_000) {
@@ -85,9 +103,12 @@ export function previewRawRetention(db: Database.Database, maxRows = 50_000) {
       batches: scopes.reduce((n, scope) => n + scope.batchIds.length, 0),
       rawLogs: rawLogIds.length,
       acceptedRanges,
-      coverageExpiryScopes: scopes
-        .filter((scope) => scope.batchIds.length > 0)
-        .map((scope) => scope.scopeId),
+      coverageExpiryScopes: [
+        ...new Set([
+          ...scopes.filter((scope) => scope.batchIds.length > 0).map((scope) => scope.scopeId),
+          ...rawRetentionOwners(db, rawLogIds).map((owner) => owner.scope_id),
+        ]),
+      ].sort(),
       rawLogIds,
       notes: [
         'Read-only preview. All unknown/dormant consumers and active pins block shared raw expiry.',
@@ -245,19 +266,9 @@ export function pruneRawLogs(
       db.exec('CREATE TEMP TABLE IF NOT EXISTS doomed_raw(id INTEGER PRIMARY KEY)');
       db.prepare('delete from doomed_raw').run();
       const insert = db.prepare('insert into doomed_raw(id) values(?)');
-      for (const id of selectedRawLogs(db, beforeBlock, maxRows)) insert.run(id);
-      const owners = db
-        .prepare(
-          `select owned.scope_id,max(r.block_number) as block,max(coalesce(t.minute_start_sec,0)) as minute from (
-      select scope_id,raw_log_id from active_logs where raw_log_id in (select id from doomed_raw)
-      union select scope_id,raw_log_id from log_times where raw_log_id in (select id from doomed_raw)
-      union select scope_id,raw_log_id from live_events where raw_log_id in (select id from doomed_raw)
-      union select scope_id,raw_log_id from live_quality_errors where raw_log_id in (select id from doomed_raw)
-      union select scope_id,raw_log_id from live_inputs where raw_log_id in (select id from doomed_raw)
-    ) owned join raw_logs r on r.id=owned.raw_log_id left join log_times t on t.raw_log_id=r.id and t.scope_id=owned.scope_id
-    where r.id in (select id from doomed_raw) group by owned.scope_id`,
-        )
-        .all() as { scope_id: string; block: number; minute: number }[];
+      const rawLogIds = selectedRawLogs(db, beforeBlock, maxRows);
+      for (const id of rawLogIds) insert.run(id);
+      const owners = rawRetentionOwners(db, rawLogIds);
       for (const row of owners)
         recordRetentionExpiration(
           db,
