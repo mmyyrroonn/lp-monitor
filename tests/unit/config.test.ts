@@ -134,3 +134,22 @@ test('history hint search bounds must be paired and ordered', () => {
     (path) => expect(() => loadChainConfig(path)).toThrow(),
   );
 });
+
+test('retention includes the quote margin beyond the dashboard horizon', () => {
+  withConfig(
+    (c) => {
+      c.liveRetentionMinutes = 180;
+    },
+    (path) => expect(() => loadChainConfig(path)).toThrow(/liveRetentionMinutes/),
+  );
+});
+
+test('raw retention cannot undercut the configured recovery window', () => {
+  withConfig(
+    (c) => {
+      c.rawRetentionDays = 1;
+      c.checkpointRetentionMinutes = 2000;
+    },
+    (path) => expect(() => loadChainConfig(path)).toThrow(/rawRetentionDays/),
+  );
+});

@@ -9,6 +9,7 @@ import { metadataQueueFor } from '../storage/metadata-queue.js';
 import { createMetadataWorker } from './metadata-worker.js';
 import type { MetricInput } from '../storage/metric-store.js';
 import { ConfigError } from '../config/env.js';
+import { validateRetentionConfig } from '../config/retention.js';
 import type { SignalConfig } from '../signals/config.js';
 import { loadMetricMetadata, type MetricMetadata } from '../metrics/metadata.js';
 import {
@@ -20,6 +21,7 @@ import {
 } from '../signals/project.js';
 import { LiveProjectionStore } from '../storage/live-projection.js';
 import { pruneLiveWindow, pruneRawBatches, pruneRawLogs } from '../storage/retention.js';
+import { readRetentionSafety, registerRetentionConsumer } from '../storage/retention-state.js';
 import { registryCacheFor } from '../storage/registry-cache.js';
 import { OperationFilterIndex } from '../ingest/operation-filter-index.js';
 import { AlertOutbox } from '../notify/outbox.js';
@@ -94,6 +96,26 @@ function signalStage<T>(phase: SignalEvaluationFailure['phase'], action: () => T
   }
 }
 
+class RetentionFailure extends Error {
+  constructor(
+    readonly phase: 'signal-evaluations' | 'live-window' | 'raw',
+    cause: unknown,
+  ) {
+    super('Retention failed', { cause });
+  }
+}
+function retentionStage(
+  db: ReturnType<typeof openDatabase>,
+  phase: RetentionFailure['phase'],
+  action: () => void,
+): void {
+  try {
+    db.transaction(action).immediate();
+  } catch (cause) {
+    throw new RetentionFailure(phase, cause);
+  }
+}
+
 const DISCOVERY_MAX_RECOVERY_RETRIES = 3;
 
 function sameAnchor(left: BlockAnchor, right: BlockAnchor): boolean {
@@ -151,6 +173,7 @@ export interface RecorderOptions {
 }
 export async function runRecorder(options: RecorderOptions): Promise<number> {
   const { config, env } = options;
+  const requiredRetention = validateRetentionConfig(config, options.signalConfig);
   const latestStart = options.command === 'follow' && options.fromBlock === undefined;
   if (
     options.notify !== undefined &&
@@ -175,6 +198,17 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
   mkdirSync(out, { recursive: true });
   mkdirSync(dirname(options.databasePath), { recursive: true });
   const db = openDatabase(options.databasePath);
+  db.transaction(() => {
+    for (const scope of [scopeId, discoveryScope])
+      registerRetentionConsumer(db, {
+        scopeId: scope,
+        registryScopeId: discoveryScope,
+        rawRetentionSec: config.rawRetentionDays === null ? null : config.rawRetentionDays * 86400,
+        liveRetentionSec: config.liveRetentionMinutes * 60,
+        requiredLookbackSec: requiredRetention * 60,
+        overlapBlocks: config.overlapBlocks,
+      });
+  })();
   const store = new SqliteRangeStore(db);
   const metricInput: MetricInput | null =
     options.notify === 'local' && options.metricMetadata
@@ -258,9 +292,11 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
   const stopAtMs = startedAtMs + (options.durationMs ?? 3600000);
   // Stop admitting batches at the requested cutoff; let the current batch finish bounded RPC work.
   const rpcDrainDeadlineMs = stopAtMs + 30_000;
+  const shutdown = options.shutdown ?? createShutdownController();
   const reader = (options.readerFactory ?? createChainReader)(env, {
     maxCalls: options.maxCalls,
     deadlineMs: rpcDrainDeadlineMs,
+    signal: shutdown.signal,
     perSecond: config.rpcPerSecond,
     maxConcurrentRpc: config.maxConcurrentRpc,
     maxBackfillRpcRps: config.maxBackfillRpcRps,
@@ -269,7 +305,6 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     evidenceMode: options.evidenceMode,
     evidenceFile: resolve(out, 'requests.jsonl'),
   });
-  const shutdown = options.shutdown ?? createShutdownController();
   const telemetry = new RuntimeTelemetry({
     db,
     databasePath: options.databasePath,
@@ -513,14 +548,35 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
   const maintainRawRetention = () => {
     if (config.rawRetentionDays === null) return;
     const nowMs = Date.now();
-    if (nowMs - lastRawRetentionAtMs < config.signalEvaluationPruneIntervalMinutes * 60_000)
-      return;
+    if (nowMs - lastRawRetentionAtMs < config.signalEvaluationPruneIntervalMinutes * 60_000) return;
     lastRawRetentionAtMs = nowMs;
     const tip = store.acceptedTip(scopeId);
     if (!tip || tip.timestampSec <= 0) return;
-    const cutoffSec = tip.timestampSec - config.rawRetentionDays * 86400;
+    const cutoffSec = Math.floor(tip.timestampSec / 60) * 60 - config.rawRetentionDays * 86400;
     // Nothing on the chain is older than the window yet (a short run or a fresh fixture): skip.
     if (cutoffSec < 0) return;
+    // Discovery uses checkpoints too. Retire only those older than its own
+    // configured recovery window, never a faster scope's time or wall time.
+    for (const scope of [scopeId, discoveryScope]) {
+      const cursor = store.acceptedTip(scope);
+      if (cursor)
+        store.pruneCheckpoints(
+          scope,
+          Math.max(0, cursor.timestampSec - config.checkpointRetentionMinutes * 60),
+        );
+    }
+    const safety = readRetentionSafety(db);
+    if (safety.beforeBlock === null || safety.rawCutoffSec === null) {
+      console.log(
+        encodeJson({ event: 'raw-retention-blocked', runId: id, blockers: safety.blockers }),
+      );
+      return;
+    }
+    // Read-only previews and physical passes select raw logs before transports.
+    // A transport removed in this pass releases its raw facts for the next pass.
+    const rawLogs = pruneRawLogs(db, safety.beforeBlock, {
+      maxRows: config.signalEvaluationPruneBatchRows,
+    });
     let batches = 0;
     let acceptedRanges = 0;
     for (const scope of [scopeId, discoveryScope]) {
@@ -530,15 +586,6 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       batches += pruned.batches;
       acceptedRanges += pruned.acceptedRanges;
     }
-    // The raw-log tier is global: map the time cutoff to a block height through the anchors the
-    // scopes persisted, then drop old operation logs (discovery logs stay pinned by `pools`).
-    const blockRow = db
-      .prepare('select max(block_number) as b from anchors where timestamp_sec <= ?')
-      .get(cutoffSec) as { b: number | null };
-    const rawLogs =
-      blockRow.b === null
-        ? { rawLogs: 0, activeLogs: 0, logTimes: 0, liveEvents: 0, liveInputs: 0, qualityErrors: 0 }
-        : pruneRawLogs(db, blockRow.b, { maxRows: config.signalEvaluationPruneBatchRows });
     const payloadObjects =
       batches < config.signalEvaluationPruneBatchRows * 2 &&
       rawLogs.rawLogs < config.signalEvaluationPruneBatchRows
@@ -577,7 +624,10 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     discoveryComplete: boolean;
     timingUnresolved: number;
     timingFailures: unknown[];
-    localFailure: { category: 'raw-save'; phase: RawSaveFailure['phase'] } | null;
+    localFailure:
+      | { category: 'raw-save'; phase: RawSaveFailure['phase'] }
+      | { category: 'retention'; phase: RetentionFailure['phase'] }
+      | null;
   } = {
     status: 'running',
     failures: [],
@@ -1143,9 +1193,9 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           // worker start the next token now that the wire is free.
           maintainMetadata();
           metadataWorker.kick();
-          maintainSignalEvaluations();
-          maintainLiveRetention();
-          maintainRawRetention();
+          retentionStage(db, 'signal-evaluations', maintainSignalEvaluations);
+          retentionStage(db, 'live-window', maintainLiveRetention);
+          retentionStage(db, 'raw', maintainRawRetention);
         },
         onStateChange: (state) => {
           if (telemetry.transition(state))
@@ -1514,12 +1564,25 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
   } catch (error) {
     primary = error;
     result.status = 'failed';
-    if (error instanceof ShutdownRequested) {
+    const stopped =
+      error instanceof ShutdownRequested ||
+      (shutdown.requested && error instanceof RpcFailure && error.kind === 'aborted');
+    if (stopped) {
       result.status = 'stopped';
     } else if (error instanceof RawSaveFailure) {
       result.failures.push('raw-save');
       result.localFailure = { category: 'raw-save', phase: error.phase };
       console.error(encodeJson({ event: 'raw-save-failure', ...result.localFailure }));
+    } else if (error instanceof RetentionFailure) {
+      result.failures.push('retention');
+      result.localFailure = { category: 'retention', phase: error.phase };
+      console.error(
+        encodeJson({
+          event: 'retention-failure',
+          ...result.localFailure,
+          failedPassRolledBack: true,
+        }),
+      );
     } else if (error instanceof SignalEvaluationFailure) {
       result.failures.push('signal-evaluation');
       console.error(
@@ -1531,14 +1594,13 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         }),
       );
     } else result.failures.push(error instanceof RpcFailure ? error.kind : 'local-error');
-    exitCode =
-      error instanceof ShutdownRequested
-        ? 0
-        : error instanceof RpcFailure
-          ? ['budget', 'deadline'].includes(error.kind)
-            ? 4
-            : 3
-          : 1;
+    exitCode = stopped
+      ? 0
+      : error instanceof RpcFailure
+        ? ['budget', 'deadline'].includes(error.kind)
+          ? 4
+          : 3
+        : 1;
   } finally {
     closeBatchWorkCounts();
     try {

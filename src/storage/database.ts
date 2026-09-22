@@ -32,6 +32,7 @@ const migration = [
   '013-live-workset.sql',
   '014-metadata-queue.sql',
   '016-batch-coverage-dependencies.sql',
+  '017-retention-safety.sql',
 ]
   .map(loadMigration)
   .join('\n');

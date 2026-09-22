@@ -12,6 +12,7 @@ import { createShutdownController } from '../../src/ops/shutdown.js';
 import { openDatabase } from '../../src/storage/database.js';
 import { SqliteRangeStore } from '../../src/storage/raw-store.js';
 import { recorderFixture } from '../helpers/recorder-fixture.js';
+import { RpcFailure } from '../../src/rpc/errors.js';
 
 function setup(dir: string): RecorderOptions {
   return {
@@ -33,6 +34,56 @@ function setup(dir: string): RecorderOptions {
     readerFactory: recorderFixture().factory,
   };
 }
+
+test('SIGINT cancels in-flight range acquisition and records stopped without accepting the partial range', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'p6-rpc-stop-'));
+  const opts = setup(dir);
+  const signals = new EventEmitter();
+  const shutdown = createShutdownController(signals);
+  const log = vi.spyOn(console, 'log').mockImplementation(() => {});
+  const fixture = recorderFixture();
+  let blocked = false;
+  const readerFactory: NonNullable<RecorderOptions['readerFactory']> = (env, readerOptions) => {
+    const reader = fixture.factory(env, readerOptions);
+    return {
+      ...reader,
+      getLogs: async (filter) => {
+        if (!filter.address.includes(opts.config.v3Pools[0]!)) return reader.getLogs(filter);
+        blocked = true;
+        const signal = readerOptions?.signal;
+        if (!signal) throw new Error('recorder did not pass shutdown signal');
+        return new Promise((_, reject) => {
+          signal.addEventListener('abort', () => reject(new RpcFailure('aborted')), { once: true });
+          setTimeout(() => signals.emit('SIGINT'), 10);
+        });
+      },
+    };
+  };
+  try {
+    expect(await runRecorder({ ...opts, readerFactory, shutdown })).toBe(0);
+    expect(blocked).toBe(true);
+    const run = readdirSync(opts.outputDirectory)[0]!;
+    const manifest = JSON.parse(
+      readFileSync(join(opts.outputDirectory, run, 'manifest.json'), 'utf8'),
+    );
+    expect(manifest).toMatchObject({ status: 'stopped', stopReason: 'SIGINT', failures: [] });
+    const db = openDatabase(opts.databasePath, { readonly: true });
+    try {
+      expect(new SqliteRangeStore(db).acceptedTip(manifest.scopeId)).toBeNull();
+      expect(
+        db
+          .prepare('select count(*) as n from accepted_ranges where scope_id=?')
+          .get(manifest.scopeId),
+      ).toEqual({ n: 0 });
+    } finally {
+      db.close();
+    }
+  } finally {
+    shutdown.dispose();
+    log.mockRestore();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 test('SIGINT after raw save preserves evidence without advancing operation cursor; restart commits once', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'p6-stop-'));
