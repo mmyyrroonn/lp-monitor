@@ -174,6 +174,11 @@ export type HeatBlock = {
   status: HeatBlockStatus;
   /** How many of the block's minutes are closed and therefore counted into the value. */
   closedMinutes: number;
+  expectedMinutes: number;
+  missingMinutes: number;
+  partialMinutes: number;
+  futureMinutes: number;
+  inProgress: boolean;
   txCount: number;
   /** Null-propagating sum of closed minutes: one unpriced minute keeps the whole block unpriced. */
   usdMicros: bigint | null;
@@ -183,41 +188,130 @@ export type HeatBlock = {
 
 /**
  * Aggregates a token's minute series into fixed-length blocks. Only closed minutes contribute a
- * value; a block that touches the still-running minute is `partial`, and one with no evidence is
- * `gap`. Minutes missing from the series count as no evidence, so a block that reaches past the
- * watermark simply ignores the minutes it has not seen yet.
+ * value. Every expected minute must be closed before the block is comparable to other complete
+ * blocks. The optional source watermark separates missing historical evidence from future minutes.
  */
 export function aggregateHeatBlocks(
   minutes: readonly TokenMinute[],
   blockStarts: readonly number[],
   blockSeconds: number,
+  sourceChainTimeSec?: number,
 ): HeatBlock[] {
-  const perBlock = Math.round(blockSeconds / 60);
+  if (!Number.isSafeInteger(blockSeconds) || blockSeconds < 60 || blockSeconds % 60 !== 0)
+    throw new RangeError('blockSeconds must be a positive whole number of minutes');
+  const perBlock = blockSeconds / 60;
   const byStart = new Map(minutes.map((m) => [m.minuteStartSec, m]));
   return blockStarts.map((startSec) => {
-    let status: HeatBlockStatus = 'gap';
     let closedMinutes = 0;
+    let missingMinutes = 0;
+    let partialMinutes = 0;
+    let futureMinutes = 0;
     let txCount = 0;
     let usdMicros: bigint | null = 0n;
     const reasons = new Set<string>();
     for (let i = 0; i < perBlock; i++) {
-      const m = byStart.get(startSec + i * 60);
-      if (m !== undefined) for (const reason of m.reasons) reasons.add(reason);
-      if (m === undefined || m.status === 'gap' || m.status === 'warming') continue;
-      if (m.status === 'partial') {
-        status = 'partial';
+      const minuteStart = startSec + i * 60;
+      if (sourceChainTimeSec !== undefined && minuteStart > sourceChainTimeSec) {
+        futureMinutes++;
         continue;
       }
-      status = 'closed';
+      if (sourceChainTimeSec !== undefined && minuteStart + 59 > sourceChainTimeSec) {
+        partialMinutes++;
+        reasons.add('watermark-partial');
+        continue;
+      }
+      const m = byStart.get(minuteStart);
+      if (m !== undefined) for (const reason of m.reasons) reasons.add(reason);
+      if (m === undefined || m.status === 'gap' || m.status === 'warming') {
+        missingMinutes++;
+        reasons.add(
+          m === undefined
+            ? 'missing-minute'
+            : m.status === 'warming'
+              ? 'warming-up'
+              : 'coverage-gap',
+        );
+        continue;
+      }
+      if (m.status === 'partial') {
+        partialMinutes++;
+        reasons.add('incomplete-minute');
+        continue;
+      }
       closedMinutes += 1;
       if (m.txCount !== null) txCount += m.txCount;
       const usd = m.usdMicros;
       if (usd === null) usdMicros = null;
       else if (usdMicros !== null) usdMicros += BigInt(usd);
     }
-    return { startSec, status, closedMinutes, txCount, usdMicros, reasons: [...reasons] };
+    const inProgress =
+      sourceChainTimeSec === undefined
+        ? partialMinutes > 0
+        : startSec <= sourceChainTimeSec && startSec + blockSeconds - 1 > sourceChainTimeSec;
+    const status: HeatBlockStatus =
+      closedMinutes === perBlock
+        ? 'closed'
+        : closedMinutes > 0 || partialMinutes > 0
+          ? 'partial'
+          : 'gap';
+    return {
+      startSec,
+      status,
+      closedMinutes,
+      expectedMinutes: perBlock,
+      missingMinutes,
+      partialMinutes,
+      futureMinutes,
+      inProgress,
+      txCount,
+      usdMicros: closedMinutes > 0 ? usdMicros : null,
+      reasons: [...reasons].sort(),
+    };
   });
 }
+/** Values eligible for peak ranking and normal heat intensity, never partial observations. */
+export function comparableHeatValue(block: HeatBlock, metric: 'count' | 'amount'): number | null {
+  if (block.status !== 'closed') return null;
+  return metric === 'count'
+    ? block.txCount
+    : block.usdMicros === null
+      ? null
+      : microsToDollars(block.usdMicros);
+}
+
+export function heatBlockClass(
+  block: HeatBlock,
+  metric: 'count' | 'amount',
+  maximum: number,
+): string {
+  if (
+    block.status === 'gap' ||
+    block.missingMinutes > 0 ||
+    (block.status === 'partial' && !block.inProgress)
+  )
+    return 'gap';
+  if (block.status === 'partial') return 'partial';
+  const value = comparableHeatValue(block, metric);
+  if (value === null) return 'unpriced';
+  const intensity = heatIntensity(value, maximum);
+  return intensity === null || intensity === 0 ? '' : `h${Math.max(1, Math.ceil(intensity * 4))}`;
+}
+
+export function heatCoverageLabel(block: HeatBlock): string {
+  const coverage = `已完整 ${block.closedMinutes}/${block.expectedMinutes} 分钟`;
+  if (block.status === 'closed') return coverage;
+  const state = block.inProgress
+    ? block.missingMinutes > 0
+      ? '进行中，已有缺口'
+      : '进行中'
+    : '历史数据不完整';
+  const observed =
+    block.closedMinutes > 0
+      ? ` · 已观测 ${block.txCount.toLocaleString('en-US')} 笔`
+      : ' · 暂无完整分钟观测';
+  return `${state} · ${coverage}${observed}`;
+}
+
 export function formatMicros(value: string | null): string {
   if (value === null || !/^-?\d+$/.test(value)) return '—';
   const n = BigInt(value),
