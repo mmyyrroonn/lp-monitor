@@ -8,6 +8,8 @@
 
 语义 lint 使用锁定版本的 [Oxlint 类型检查规则](https://oxc.rs/docs/guide/usage/linter/type-aware)，首批覆盖 RPC 与停止控制中的未处理/误用 Promise、finally 中覆盖原异常的控制流；不安全类型断言先覆盖限速器、请求计量和停止控制。RPC 原始响应解析处的断言尚未全部纳入，后续按模块扩展。计时器、监听器和 socket 的释放仍由取消/超时集成测试与代码审查验证，lint 不证明资源一定释放。
 
+Phase A 的本地验收结果见 [验收记录](docs/reviews/2026-09-22-phase-a-acceptance.md)；启用清理前请阅读 [retention 预览、pin 与回滚说明](docs/retention.md)。
+
 ## 2026-09-13 实时启动边界
 
 默认 `follow` 每次启动从启动时最新块开始，复用本地池登记并发现后续新池；不扫描部署历史、不从旧游标追赶、不预热历史窗口。终端输出 `live-start` 及起始块。重启跳过的区间保持缺口，旧数据不删除，窗口需随新数据积累。

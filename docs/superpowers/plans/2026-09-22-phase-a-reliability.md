@@ -25,45 +25,45 @@
 
 **Interfaces:** Existing `pruneRawBatches`, `pruneRawLogs`, `pruneLiveWindow`; recorder calls retention within follow wait. Shared raw facts outlive any one scope's cutoff.
 
-- [ ] Reproduce reversed insertion order IDs (`ffff`, `0000`) with `maxBatches: 1`, mixed states/scopes and repeated cleanup; assert the exact surviving batch and `foreign_key_check`.
-- [ ] Select a bounded doomed batch set once, ordered by `(end_timestamp_sec, id)`; use the same set for every child and parent deletion in one transaction.
-- [ ] Trace all coverage promises and consumers. Add conservative cross-scope retention eligibility, history/replay pin and reorg/quote-window protection; missing consumer progress must block reclamation rather than authorize it.
-- [ ] Invalidate affected coverage atomically with actual expiry and return unavailable/incomplete through coverage readers. Test fast/slow scopes sharing raw data and global expiry without complete zero windows.
-- [ ] Validate retention windows against actual signal, quote and reorg requirements before starting RPC. Add dry-run impact reporting and integrity audit, using no production data.
-- [ ] Classify retention failures in recorder telemetry. Run focused retention/config/coverage tests and record RED/GREEN evidence.
+- [x] Reproduce reversed insertion order IDs (`ffff`, `0000`) with `maxBatches: 1`, mixed states/scopes and repeated cleanup; assert the exact surviving batch and `foreign_key_check`.
+- [x] Select a bounded doomed batch set once, ordered by `(end_timestamp_sec, id)`; use the same set for every child and parent deletion in one transaction.
+- [x] Trace all coverage promises and consumers. Add conservative cross-scope retention eligibility, history/replay pin and reorg/quote-window protection; missing consumer progress must block reclamation rather than authorize it.
+- [x] Invalidate affected coverage atomically with actual expiry and return unavailable/incomplete through coverage readers. Test fast/slow scopes sharing raw data and global expiry without complete zero windows.
+- [x] Validate retention windows against actual signal, quote and reorg requirements before starting RPC. Add dry-run impact reporting and integrity audit, using no production data.
+- [x] Classify retention failures in recorder telemetry. Run focused retention/config/coverage tests and record RED/GREEN evidence.
 
 ### Task 2: Independent CI and reproducible evidence (#2)
 
 **Files:** `.github/workflows/ci.yml`, `package.json`, lint configuration/tooling if needed, `README.md`, relevant scripts/tests.
 
-- [ ] Run baseline lint/typecheck/tests/build separately and capture exit status.
-- [ ] Format affected source with the pinned Prettier. Split lint/typecheck/test/build into independent jobs using fail-fast false or separate jobs; require all for the final gate.
-- [ ] Upload logs and test JUnit with commit SHA, including failure paths. Verify a deliberately invalid format fixture fails format checking while another check executes.
-- [ ] Add narrowly scoped semantic lint for unhandled promises/unsafe assertions in the affected runtime boundary; document resource-lifetime review and progressive rollout.
-- [ ] Document current CI versus historical verification and unperformed long-run testing. Validate workflow/tooling locally, without claiming a remote run occurred.
+- [x] Run baseline lint/typecheck/tests/build separately and capture exit status.
+- [x] Format affected source with the pinned Prettier. Split lint/typecheck/test/build into independent jobs using fail-fast false or separate jobs; require all for the final gate.
+- [x] Upload logs and test JUnit with commit SHA, including failure paths. Verify a deliberately invalid format fixture fails format checking while another check executes.
+- [x] Add narrowly scoped semantic lint for unhandled promises/unsafe assertions in the affected runtime boundary; document resource-lifetime review and progressive rollout.
+- [x] Document current CI versus historical verification and unperformed long-run testing. Validate workflow/tooling locally, without claiming a remote run occurred.
 
 ### Task 3: Absolute RPC deadlines and shutdown cancellation (#4)
 
 **Files:** `src/rpc/client.ts`, `src/rpc/rate-limit.ts`, `src/rpc/errors.ts`, `src/ops/shutdown.ts`, reader setup/shutdown portions of `src/ops/recorder.ts`; RPC/shutdown integration tests.
 
-- [ ] Reproduce streaming responses whose chunks arrive within idle timeout but run beyond deadline using a local HTTP server.
-- [ ] Add caller AbortSignal and absolute-deadline cancellation throughout queued permit waits, headers and streamed body. Preserve idle timeout and allow legitimate slow responses within total budget.
-- [ ] Wire SIGINT/SIGTERM into the reader; bound normal drain, retain accurate abort/deadline/timeout classification and budget/queue/concurrency telemetry.
-- [ ] Release listeners/timers/sockets on every success/error/cancel path; prohibit new scheduling after cancellation and never accept an incomplete range.
-- [ ] Verify header wait, body streaming and rate queue cancellation, successful slow response, zero pending work after close and incomplete-range safety.
+- [x] Reproduce streaming responses whose chunks arrive within idle timeout but run beyond deadline using a local HTTP server.
+- [x] Add caller AbortSignal and absolute-deadline cancellation throughout queued permit waits, headers and streamed body. Preserve idle timeout and allow legitimate slow responses within total budget.
+- [x] Wire SIGINT/SIGTERM into the reader; bound normal drain, retain accurate abort/deadline/timeout classification and budget/queue/concurrency telemetry.
+- [x] Release listeners/timers/sockets on every success/error/cancel path; prohibit new scheduling after cancellation and never accept an incomplete range.
+- [x] Verify header wait, body streaming and rate queue cancellation, successful slow response, zero pending work after close and incomplete-range safety.
 
 ### Task 4: Honest heatmap completeness (#5)
 
 **Files:** `src/dashboard/web/view-model.ts`, `src/dashboard/web/app.ts`, heatmap CSS as needed, `tests/dashboard/view-model.test.ts`, dashboard UI tests.
 
-- [ ] Reproduce 1/10, 9/10 with middle gap, all-gap, warming, full ten-minute and current in-progress blocks.
-- [ ] Count expected/closed/missing/partial minutes and compute status after accumulation. Only all expected closed minutes yield closed; reason order/status cannot depend on input traversal.
-- [ ] Preserve observed totals and unknown amounts, distinguishing current progress from historical incompleteness. Ensure missing minutes have coverage reasons.
-- [ ] Use only closed blocks for peak/normal intensity; show observed labels and consistent historical click behavior. Verify one-minute view and unpriced amounts.
+- [x] Reproduce 1/10, 9/10 with middle gap, all-gap, warming, full ten-minute and current in-progress blocks.
+- [x] Count expected/closed/missing/partial minutes and compute status after accumulation. Only all expected closed minutes yield closed; reason order/status cannot depend on input traversal.
+- [x] Preserve observed totals and unknown amounts, distinguishing current progress from historical incompleteness. Ensure missing minutes have coverage reasons.
+- [x] Use only closed blocks for peak/normal intensity; show observed labels and consistent historical click behavior. Verify one-minute view and unpriced amounts.
 
 ### Task 5: Integration and review
 
-- [ ] Independently review each task's requirements and implementation, then review full branch for cross-task defects.
-- [ ] Run pinned formatter, lint, typecheck, full Vitest/JUnit and production build; fix failures introduced or exposed within scope.
-- [ ] Record commands, counts, baseline/final SHA or uncommitted diff state, migration/rollback instructions, and remaining environmental limits in an acceptance report.
-- [ ] Leave a concrete local result for review; do not mark GitHub issues closed without confirmed acceptance or claim remote CI without a run.
+- [x] Independently review each task's requirements and implementation, then review full branch for cross-task defects.
+- [x] Run pinned formatter, lint, typecheck, full Vitest/JUnit and production build; fix failures introduced or exposed within scope.
+- [x] Record commands, counts, baseline/final SHA or uncommitted diff state, migration/rollback instructions, and remaining environmental limits in an acceptance report.
+- [x] Leave a concrete local result for review; do not mark GitHub issues closed without confirmed acceptance or claim remote CI without a run.

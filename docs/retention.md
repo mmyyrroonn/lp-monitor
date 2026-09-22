@@ -55,6 +55,9 @@ including minutes with no blocks. A bounded pass can leave some rows below the f
 residual rows do not promise complete history. Floors never clear automatically, even if old
 facts are subsequently imported. Use a separate complete snapshot for historical reconstruction.
 Retention failures are reported as `retention` with the failed stage and a rolled-back pass.
+Availability invalidation is separate from source-history repair: ordinary expiry refreshes
+coverage without retracting recent alerts whose evidence is still retained. Genuine pending
+repairs remain intact.
 
 ## Migration and rollback
 
@@ -62,6 +65,9 @@ Migration `017-retention-safety.sql` is additive and idempotent. Writable opens 
 policy/pin/expiry tables, indexes, and invalidation triggers. Existing scopes are not assigned
 an assumed policy: they block raw cleanup until their recorder starts with validated settings.
 Read-only legacy databases remain readable and preview reports `retention-schema-missing`.
+The migration replaces prior development-version expiry/range-delete triggers. It does not
+erase ambiguous existing dirty-coverage or pending-repair rows, which might represent genuine
+source corrections rather than old retention side effects.
 
 Back up the database before enabling physical expiry. Deleted facts cannot be recovered by
 reverting code. A code rollback must use that backup, or keep raw retention disabled and avoid
