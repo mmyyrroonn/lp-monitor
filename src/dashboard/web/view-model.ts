@@ -215,7 +215,7 @@ export function aggregateHeatBlocks(
         futureMinutes++;
         continue;
       }
-      if (sourceChainTimeSec !== undefined && minuteStart + 59 > sourceChainTimeSec) {
+      if (sourceChainTimeSec !== undefined && minuteStart + 60 > sourceChainTimeSec) {
         partialMinutes++;
         reasons.add('watermark-partial');
         continue;
@@ -247,7 +247,7 @@ export function aggregateHeatBlocks(
     const inProgress =
       sourceChainTimeSec === undefined
         ? partialMinutes > 0
-        : startSec <= sourceChainTimeSec && startSec + blockSeconds - 1 > sourceChainTimeSec;
+        : startSec <= sourceChainTimeSec && startSec + blockSeconds > sourceChainTimeSec;
     const status: HeatBlockStatus =
       closedMinutes === perBlock
         ? 'closed'

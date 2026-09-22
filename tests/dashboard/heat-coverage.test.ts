@@ -82,6 +82,28 @@ describe('heat block coverage', () => {
       inProgress: false,
     });
   });
+  it('keeps the last second in progress until the exclusive minute boundary', () => {
+    expect(aggregateHeatBlocks(minutes(), [0], 600, 599)[0]).toMatchObject({
+      status: 'partial',
+      closedMinutes: 9,
+      partialMinutes: 1,
+      missingMinutes: 0,
+      futureMinutes: 0,
+      inProgress: true,
+      reasons: ['watermark-partial'],
+    });
+    expect(aggregateHeatBlocks(minutes(), [0], 600, 600)[0]).toMatchObject({
+      status: 'closed',
+      closedMinutes: 10,
+      partialMinutes: 0,
+      inProgress: false,
+    });
+    expect(aggregateHeatBlocks(minutes(), [0], 60, 59)[0]).toMatchObject({
+      status: 'partial',
+      partialMinutes: 1,
+      inProgress: true,
+    });
+  });
   it('excludes partial observations from comparable heat and labels their coverage', async () => {
     const { comparableHeatValue, heatCoverageLabel, heatBlockClass } =
       await import('../../src/dashboard/web/view-model.js');
