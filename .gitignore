@@ -8,6 +8,7 @@ data/
 artifacts/**/requests.jsonl
 artifacts/**/raw/
 coverage/
+artifacts/ci/
 
 # Only the audited P0 acceptance capture is committed; new runs remain local.
 !artifacts/p0/raw/

@@ -1,10 +1,33 @@
 name: CI
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
-  verify:
+  check:
+    name: ${{ matrix.check }}
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - check: format
+            command: lint
+          - check: semantic
+            command: lint:semantic
+          - check: typecheck
+            command: typecheck
+          - check: tests
+            command: test --reporter=default --reporter=junit --outputFile.junit=artifacts/ci/junit.xml
+          - check: build
+            command: build
     steps:
       - uses: actions/checkout@v4
+      - name: Record source identity
+        shell: bash
+        run: |
+          mkdir -p artifacts/ci
+          printf 'commit=%s\nrun=%s\nattempt=%s\ncheck=%s\n' "$(git rev-parse HEAD)" "$GITHUB_RUN_ID" "$GITHUB_RUN_ATTEMPT" '${{ matrix.check }}' > artifacts/ci/source.txt
       - uses: pnpm/action-setup@v4
         with:
           version: 11.19.0
@@ -12,8 +35,31 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm lint
-      - run: pnpm typecheck
-      - run: pnpm test
-      - run: pnpm build
+      - name: Install locked dependencies
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm install --frozen-lockfile 2>&1 | tee artifacts/ci/install.log
+      - name: Run ${{ matrix.check }}
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm ${{ matrix.command }} 2>&1 | tee artifacts/ci/${{ matrix.check }}.log
+      - name: Upload verification evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-${{ matrix.check }}-${{ github.sha }}-${{ github.run_attempt }}
+          path: artifacts/ci/
+          if-no-files-found: error
+          retention-days: 14
+  verify:
+    name: verify
+    if: always()
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require every check
+        env:
+          RESULT: ${{ needs.check.result }}
+        run: test "$RESULT" = success
