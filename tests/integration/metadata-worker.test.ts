@@ -173,6 +173,7 @@ function gatedFixture(fixture: ReturnType<typeof recorderFixture>) {
 test('a slow metadata lookup never delays the batch that demanded it', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'lp-metadata-slow-'));
   const gate = gatedFixture(recorderFixture());
+  let drainStarted = false;
   const lines: string[] = [];
   const spy = vi.spyOn(console, 'log').mockImplementation((value?: unknown) => {
     if (typeof value === 'string') lines.push(value);
@@ -182,7 +183,12 @@ test('a slow metadata lookup never delays the batch that demanded it', async () 
       command: 'ingest',
       fromBlock: 90n,
       toBlock: 200n,
-      readerFactory: gate.factory,
+      readerFactory: (env, limits) => ({
+        ...gate.factory(env, limits),
+        beginDrain: () => {
+          drainStarted = true;
+        },
+      }),
     }),
   );
   try {
@@ -192,6 +198,8 @@ test('a slow metadata lookup never delays the batch that demanded it', async () 
     // the log line and the query can arrive in either order — both are before the provider answers.
     await until(() => lines.some((line) => line.includes('"batch-timing"')));
     await until(() => gate.started() === 1);
+    // Finalization has a deadline before it waits for the metadata provider.
+    await until(() => drainStarted);
     expect(gate.completed()).toBe(0);
   } finally {
     gate.open();
@@ -506,40 +514,54 @@ test('metadata that lands with no new block repairs the pools it re-priced, with
   spy.mockRestore();
 });
 
-test('an evidence-write failure stops the worker and is never read as a token without decimals', async () => {
-  const db = setup();
-  const failure = new RpcFailure('evidence-write');
-  const queue = metadataQueueFor(db);
-  const worker = createMetadataWorker({
-    db,
-    reader: {
-      getAnchor: async () => {
-        throw failure;
+test.each([
+  ['evidence-write', 'anchor'],
+  ['evidence-write', 'call'],
+  ['aborted', 'anchor'],
+  ['aborted', 'call'],
+])(
+  '%s during metadata %s stops the worker without recording a token failure',
+  async (kind, phase) => {
+    const db = setup();
+    const failure = new RpcFailure(kind!);
+    const queue = metadataQueueFor(db);
+    const worker = createMetadataWorker({
+      db,
+      reader: {
+        getAnchor: async (block) => {
+          if (phase === 'anchor') throw failure;
+          return anchorOf(block, hash(10));
+        },
+        request: async () => {
+          throw failure;
+        },
       },
-      request: async () => toHex(6, { size: 32 }),
-    },
-    scopeId: SCOPE,
-    owner: 'run',
-    canStart: () => true,
-    nowMs: () => 0,
-  });
-  enqueueTokenMetadata(db, [{ address: addr(1), blockNumber: 10n }], { nowMs: 0, scopeId: SCOPE });
-  worker.kick();
-  await worker.drain();
-  // The error belongs to the run, not to the token: it is kept for the main loop to report, and the
-  // worker starts nothing more.
-  expect(worker.fatalError()).toBe(failure);
-  expect(worker.attempted()).toBe(1);
-  expect(worker.prepareDrain().results).toEqual([]);
-  worker.kick();
-  await worker.drain();
-  expect(worker.attempted()).toBe(1);
-  // Nothing was recorded as a token failure: an evidence write that did not happen is not evidence
-  // that this token has no decimals. The demand is still held by the lease that went out.
-  expect(count(db, 'select count(*) as n from token_metadata_failures')).toBe(0);
-  expect(count(db, 'select count(*) as n from token_metadata')).toBe(0);
-  expect(queue.stats(SCOPE, 0)).toEqual({ eligible: 0, retryWaiting: 0, inflight: 1 });
-});
+      scopeId: SCOPE,
+      owner: 'run',
+      canStart: () => true,
+      nowMs: () => 0,
+    });
+    enqueueTokenMetadata(db, [{ address: addr(1), blockNumber: 10n }], {
+      nowMs: 0,
+      scopeId: SCOPE,
+    });
+    worker.kick();
+    await worker.drain();
+    // The error belongs to the run, not to the token: it is kept for the main loop to report, and the
+    // worker starts nothing more.
+    expect(worker.fatalError()).toBe(failure);
+    expect(worker.attempted()).toBe(1);
+    expect(worker.prepareDrain().results).toEqual([]);
+    worker.kick();
+    await worker.drain();
+    expect(worker.attempted()).toBe(1);
+    // Nothing was recorded as a token failure: an evidence write that did not happen is not evidence
+    // that this token has no decimals. The demand is still held by the lease that went out.
+    expect(count(db, 'select count(*) as n from token_metadata_failures')).toBe(0);
+    expect(count(db, 'select count(*) as n from token_metadata')).toBe(0);
+    expect(queue.stats(SCOPE, 0)).toEqual({ eligible: 0, retryWaiting: 0, inflight: 1 });
+  },
+);
 
 test('a shutdown stops new lookups and leaves the interrupted demand recoverable', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'lp-metadata-stop-'));

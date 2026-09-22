@@ -136,7 +136,7 @@ function remember(
 function critical(error: unknown): void {
   const failure = classifyRpcError(error);
   if (
-    ['budget', 'deadline', 'reader-closed', 'evidence-write'].includes(failure.kind) ||
+    ['budget', 'deadline', 'aborted', 'reader-closed', 'evidence-write'].includes(failure.kind) ||
     failure.evidenceFailure ||
     (error instanceof Error && error.constructor.name === 'ShutdownRequested')
   )

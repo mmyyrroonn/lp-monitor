@@ -67,6 +67,35 @@ test('absolute deadline cancels an active trickle even though body idle timeout 
   }
 }, 2000);
 
+test.each([0, 60_000])(
+  'an oversized declared body releases its connection with idle timeout %i',
+  async (timeoutMs) => {
+    let closed = false;
+    const server = await localRpc((res) => {
+      res.on('close', () => {
+        closed = true;
+      });
+      res.writeHead(200, {
+        'Content-Type': 'application/json',
+        'Content-Length': 11 * 1024 * 1024,
+      });
+      res.write('{"jsonrpc":"2.0","id":1,"result":"');
+    });
+    const reader = createChainReader(server.env, { timeoutMs, maxRetries: 0 });
+    try {
+      await expect(reader.request('eth_chainId', [])).rejects.toMatchObject({
+        kind: 'range-limit',
+      });
+      // A rejected request owns no connection, even before the reader itself closes.
+      await expect.poll(() => closed, { timeout: 1000 }).toBe(true);
+      expect(reader.meter.summary()).toMatchObject({ calls: 1, activeRpc: 0, queueDepth: 0 });
+    } finally {
+      await reader.close();
+      await server.stop();
+    }
+  },
+);
+
 test('a slow progressing response within the absolute budget still succeeds', async () => {
   const server = await localRpc((res) => {
     res.writeHead(200, { 'Content-Type': 'application/json' });

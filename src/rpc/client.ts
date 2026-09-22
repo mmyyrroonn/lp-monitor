@@ -34,6 +34,7 @@ export interface ReaderOptions extends EvidenceOptions {
 }
 export interface EvidenceReader extends ChainReader {
   request(method: string, params: readonly unknown[]): Promise<unknown>;
+  beginDrain?(): void;
   flush?(): Promise<void>;
   close?(): Promise<void>;
   meter: RequestMeter;
@@ -51,7 +52,7 @@ const hex = (value: unknown, bytes?: number): Hex => {
 export function createChainReader(
   env: RuntimeEnv,
   options: ReaderOptions = {},
-): EvidenceReader & { flush(): Promise<void>; close(): Promise<void> } {
+): EvidenceReader & { beginDrain(): void; flush(): Promise<void>; close(): Promise<void> } {
   const meter = new RequestMeter(options.maxCalls === undefined ? 150 : options.maxCalls);
   const limiter = new RateLimiter(options.perSecond ?? 5, options.maxConcurrentRpc ?? 2);
   const backfillLimiter = new RateLimiter(options.maxBackfillRpcRps ?? 1, 1);
@@ -79,6 +80,15 @@ export function createChainReader(
     deadlineTimer = undefined;
     options.signal?.removeEventListener('abort', cancel);
   };
+  let drainDeadlineMs = Infinity;
+  const beginDrain = () => {
+    drainDeadlineMs = Math.min(
+      drainDeadlineMs,
+      options.deadlineMs ?? Infinity,
+      Date.now() + 30_000,
+    );
+    if (!lifetime.signal.aborted) armDeadline(drainDeadlineMs);
+  };
   lifetime.signal.addEventListener('abort', disposeLifetime, { once: true });
   options.signal?.addEventListener('abort', cancel, { once: true });
   if (options.signal?.aborted) cancel();
@@ -93,93 +103,104 @@ export function createChainReader(
   // watchdog below spends the same number idling between body chunks. A second knob would ask the
   // operator for two answers to one question -- "how long may this provider make no progress".
   const timeoutMs = options.timeoutMs ?? 10000;
-  const client = createPublicClient({
-    transport: http(env.httpRpcUrl, {
-      retryCount: 0,
-      timeout: timeoutMs,
-      batch: false,
-      fetchFn: async (input, init) => {
-        const abort = new AbortController();
-        // viem disarms its own timeout the instant the headers land: withTimeout clears its timer
-        // in a finally around the fetch that awaits them. Nothing below is bounded by it, so a body
-        // that stops producing data holds its socket until undici's 300s default -- long enough to
-        // stall a strictly serial follow loop for minutes. Carry our own signal into the real fetch
-        // so the watchdog can abandon the connection rather than merely stop reading it.
-        const signal = AbortSignal.any([
-          lifetime.signal,
-          abort.signal,
-          ...(init?.signal ? [init.signal] : []),
-        ]);
-        const response = await (options.fetchFn ?? fetch)(input, { ...init, signal });
-        let errorBody: ((failure: RpcFailure) => void) | undefined;
-        let watchdog: NodeJS.Timeout | undefined;
-        const disarm = () => {
-          if (watchdog !== undefined) clearTimeout(watchdog);
-          watchdog = undefined;
-        };
-        const cleanup = () => {
-          disarm();
-          signal.removeEventListener('abort', cleanup);
-        };
-        signal.addEventListener('abort', cleanup, { once: true });
-        if (signal.aborted) cleanup();
-        // An idle budget, not a total one: the timer restarts on every chunk, so a legitimately
-        // slow multi-megabyte getLogs response is never killed for taking long, only for going
-        // quiet. A non-positive timeout means "no timeout" exactly as it does in viem.
-        const arm = () => {
-          if (timeoutMs <= 0) return;
-          disarm();
-          watchdog = setTimeout(() => {
+  async function rpcRequest(method: string, params: readonly unknown[]): Promise<unknown> {
+    const attemptAbort = new AbortController();
+    const client = createPublicClient({
+      transport: http(env.httpRpcUrl, {
+        retryCount: 0,
+        timeout: timeoutMs,
+        batch: false,
+        fetchFn: async (input, init) => {
+          const abort = new AbortController();
+          // viem disarms its own timeout the instant the headers land: withTimeout clears its timer
+          // in a finally around the fetch that awaits them. Nothing below is bounded by it, so a body
+          // that stops producing data holds its socket until undici's 300s default -- long enough to
+          // stall a strictly serial follow loop for minutes. Carry our own signal into the real fetch
+          // so the watchdog can abandon the connection rather than merely stop reading it.
+          const signal = AbortSignal.any([
+            lifetime.signal,
+            attemptAbort.signal,
+            abort.signal,
+            ...(init?.signal ? [init.signal] : []),
+          ]);
+          const response = await (options.fetchFn ?? fetch)(input, { ...init, signal });
+          let errorBody: ((failure: RpcFailure) => void) | undefined;
+          let watchdog: NodeJS.Timeout | undefined;
+          const disarm = () => {
+            if (watchdog !== undefined) clearTimeout(watchdog);
             watchdog = undefined;
-            const failure = new RpcFailure('timeout-or-network', 'unknown', true);
-            try {
-              // Error our readable first, so the caller classifies the failure we chose rather than
-              // whatever the abort surfaces. Then abort regardless: erroring alone would leave the
-              // underlying body read running and its connection ESTABLISHED, which is the symptom.
-              errorBody?.(failure);
-            } finally {
-              abort.abort(failure);
-            }
-          }, timeoutMs);
-          // A watchdog must never be the reason the process stays up. The socket it is watching
-          // already holds the loop open while the read is genuinely outstanding, so unref costs it
-          // nothing but lets a recorder shut down without waiting out a timer nothing will observe.
-          (watchdog as { unref?: () => void }).unref?.();
-        };
-        const watched: BodyTransformer = {
-          start(controller) {
-            errorBody = (failure) => controller.error(failure);
-            arm();
-          },
-          transform(chunk, controller) {
-            meter.addBytes(chunk.byteLength);
-            controller.enqueue(chunk);
-            arm();
-          },
-          flush() {
-            cleanup();
-          },
-          cancel() {
-            // The reader went away or the upstream errored: no further chunk can arrive, so the
-            // watchdog has nothing left to time and the connection nothing left to serve.
-            cleanup();
-            abort.abort();
-          },
-        };
-        const body = response.body?.pipeThrough(
-          new TransformStream<Uint8Array, Uint8Array>(watched),
-          { signal },
-        );
-        if (!body) cleanup();
-        return new Response(body ?? null, {
-          status: response.status,
-          statusText: response.statusText,
-          headers: response.headers,
-        });
-      },
-      maxResponseBodySize: 10 * 1024 * 1024,
-    }),
-  });
+          };
+          const cleanup = () => {
+            disarm();
+            signal.removeEventListener('abort', cleanup);
+          };
+          signal.addEventListener('abort', cleanup, { once: true });
+          if (signal.aborted) cleanup();
+          // An idle budget, not a total one: the timer restarts on every chunk, so a legitimately
+          // slow multi-megabyte getLogs response is never killed for taking long, only for going
+          // quiet. A non-positive timeout means "no timeout" exactly as it does in viem.
+          const arm = () => {
+            if (timeoutMs <= 0) return;
+            disarm();
+            watchdog = setTimeout(() => {
+              watchdog = undefined;
+              const failure = new RpcFailure('timeout-or-network', 'unknown', true);
+              try {
+                // Error our readable first, so the caller classifies the failure we chose rather than
+                // whatever the abort surfaces. Then abort regardless: erroring alone would leave the
+                // underlying body read running and its connection ESTABLISHED, which is the symptom.
+                errorBody?.(failure);
+              } finally {
+                abort.abort(failure);
+              }
+            }, timeoutMs);
+            // A watchdog must never be the reason the process stays up. The socket it is watching
+            // already holds the loop open while the read is genuinely outstanding, so unref costs it
+            // nothing but lets a recorder shut down without waiting out a timer nothing will observe.
+            (watchdog as { unref?: () => void }).unref?.();
+          };
+          const watched: BodyTransformer = {
+            start(controller) {
+              errorBody = (failure) => controller.error(failure);
+              arm();
+            },
+            transform(chunk, controller) {
+              meter.addBytes(chunk.byteLength);
+              controller.enqueue(chunk);
+              arm();
+            },
+            flush() {
+              cleanup();
+            },
+            cancel() {
+              // The reader went away or the upstream errored: no further chunk can arrive, so the
+              // watchdog has nothing left to time and the connection nothing left to serve.
+              cleanup();
+              abort.abort();
+            },
+          };
+          const body = response.body?.pipeThrough(
+            new TransformStream<Uint8Array, Uint8Array>(watched),
+            { signal },
+          );
+          if (!body) cleanup();
+          return new Response(body ?? null, {
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+          });
+        },
+        maxResponseBodySize: 10 * 1024 * 1024,
+      }),
+    });
+    try {
+      return await client.request({ method, params } as never, { retryCount: 0 });
+    } finally {
+      // The transport may reject before reading the body (for example an oversized
+      // Content-Length). Every settled attempt releases its fetch/pipe/watchdog.
+      attemptAbort.abort();
+    }
+  }
   async function performRequest(method: string, params: readonly unknown[]): Promise<unknown> {
     if (!(methods as readonly string[]).includes(method))
       throw new RpcFailure('read-only-method-denied');
@@ -206,7 +227,7 @@ export function createChainReader(
             meter.recordConcurrency(active);
             transport = meter.trackAttempt(method, attempt > 0, async () => {
               try {
-                return await client.request({ method, params } as never, { retryCount: 0 });
+                return await rpcRequest(method, params);
               } finally {
                 active--;
                 meter.recordConcurrency(active);
@@ -292,10 +313,10 @@ export function createChainReader(
   return {
     request,
     flush,
+    beginDrain,
     close: async () => {
       closed = true;
-      if (!lifetime.signal.aborted)
-        armDeadline(Math.min(options.deadlineMs ?? Infinity, Date.now() + 30_000));
+      beginDrain();
       try {
         await flush();
         await writer.close();

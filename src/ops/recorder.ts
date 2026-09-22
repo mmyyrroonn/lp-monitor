@@ -1604,6 +1604,8 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
   } finally {
     closeBatchWorkCounts();
     try {
+      // Start the shared finalization clock before waiting for metadata, not after it.
+      reader.beginDrain?.();
       // A run that ends on its own first finishes the metadata it queued: a one-shot ingest reaches
       // no poll gap, and its last batch committed before the lookups it kicked were even out, so the
       // observations it paid for would never land. A run that is stopping does not — a prompt exit
@@ -1627,6 +1629,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         primary = error;
         exitCode = error instanceof RpcFailure ? 3 : 1;
       }
+      if (exitCode === 0) exitCode = error instanceof RpcFailure ? 3 : 1;
     }
     let measurements: ReturnType<RuntimeTelemetry['finish']> | null = null;
     try {
