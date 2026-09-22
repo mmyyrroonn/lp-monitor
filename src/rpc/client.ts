@@ -23,6 +23,7 @@ type BodyTransformer = Transformer<Uint8Array, Uint8Array> & { cancel?: () => vo
 export interface ReaderOptions extends EvidenceOptions {
   maxCalls?: number | null;
   deadlineMs?: number;
+  signal?: AbortSignal;
   maxConcurrentRpc?: number;
   maxBackfillRpcRps?: number;
   perSecond?: number;
@@ -60,7 +61,30 @@ export function createChainReader(
   let closed = false;
   if (options.deadlineMs !== undefined && !Number.isFinite(options.deadlineMs))
     throw new RangeError('Invalid RPC deadline');
+  const lifetime = new AbortController();
+  let deadlineTimer: NodeJS.Timeout | undefined;
+  const cancel = () => lifetime.abort(new RpcFailure('aborted'));
+  const armDeadline = (deadlineMs: number) => {
+    if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+    const remaining = deadlineMs - Date.now();
+    if (remaining <= 0) {
+      lifetime.abort(new RpcFailure('deadline'));
+      return;
+    }
+    deadlineTimer = setTimeout(() => armDeadline(deadlineMs), Math.min(remaining, 2_147_483_647));
+    deadlineTimer.unref();
+  };
+  const disposeLifetime = () => {
+    if (deadlineTimer !== undefined) clearTimeout(deadlineTimer);
+    deadlineTimer = undefined;
+    options.signal?.removeEventListener('abort', cancel);
+  };
+  lifetime.signal.addEventListener('abort', disposeLifetime, { once: true });
+  options.signal?.addEventListener('abort', cancel, { once: true });
+  if (options.signal?.aborted) cancel();
+  if (!lifetime.signal.aborted && options.deadlineMs !== undefined) armDeadline(options.deadlineMs);
   const assertRequestAllowed = () => {
+    lifetime.signal.throwIfAborted();
     meter.assertAvailable();
     if (options.deadlineMs !== undefined && Date.now() >= options.deadlineMs)
       throw new RpcFailure('deadline');
@@ -81,7 +105,11 @@ export function createChainReader(
         // that stops producing data holds its socket until undici's 300s default -- long enough to
         // stall a strictly serial follow loop for minutes. Carry our own signal into the real fetch
         // so the watchdog can abandon the connection rather than merely stop reading it.
-        const signal = init?.signal ? AbortSignal.any([init.signal, abort.signal]) : abort.signal;
+        const signal = AbortSignal.any([
+          lifetime.signal,
+          abort.signal,
+          ...(init?.signal ? [init.signal] : []),
+        ]);
         const response = await (options.fetchFn ?? fetch)(input, { ...init, signal });
         let errorBody: ((failure: RpcFailure) => void) | undefined;
         let watchdog: NodeJS.Timeout | undefined;
@@ -89,6 +117,12 @@ export function createChainReader(
           if (watchdog !== undefined) clearTimeout(watchdog);
           watchdog = undefined;
         };
+        const cleanup = () => {
+          disarm();
+          signal.removeEventListener('abort', cleanup);
+        };
+        signal.addEventListener('abort', cleanup, { once: true });
+        if (signal.aborted) cleanup();
         // An idle budget, not a total one: the timer restarts on every chunk, so a legitimately
         // slow multi-megabyte getLogs response is never killed for taking long, only for going
         // quiet. A non-positive timeout means "no timeout" exactly as it does in viem.
@@ -123,18 +157,20 @@ export function createChainReader(
             arm();
           },
           flush() {
-            disarm();
+            cleanup();
           },
           cancel() {
             // The reader went away or the upstream errored: no further chunk can arrive, so the
             // watchdog has nothing left to time and the connection nothing left to serve.
-            disarm();
+            cleanup();
             abort.abort();
           },
         };
         const body = response.body?.pipeThrough(
           new TransformStream<Uint8Array, Uint8Array>(watched),
+          { signal },
         );
+        if (!body) cleanup();
         return new Response(body ?? null, {
           status: response.status,
           statusText: response.statusText,
@@ -152,9 +188,10 @@ export function createChainReader(
       queued++;
       meter.recordQueueWait(0, queued);
       const queuedAt = Date.now();
-      const release = await limiter.enter();
+      let release: (() => void) | undefined;
       let dispatched = false;
       try {
+        release = await limiter.enter(lifetime.signal);
         assertRequestAllowed();
         let transport!: Promise<unknown>;
         await limiter.acquire(
@@ -177,6 +214,7 @@ export function createChainReader(
             });
           },
           meter.isBackfill ? backfillLimiter : undefined,
+          lifetime.signal,
         );
         const at = new Date().toISOString();
         const started = Date.now();
@@ -185,7 +223,9 @@ export function createChainReader(
           result = await transport;
           if (result === undefined) throw new RpcFailure('malformed-response');
         } catch (error) {
-          const failure = classifyRpcError(error);
+          const failure = classifyRpcError(
+            lifetime.signal.aborted ? lifetime.signal.reason : error,
+          );
           // The backoff below exists to space out the retry that follows it. When the budget is
           // spent the error is thrown instead, and delaying every other call sharing this limiter
           // buys nothing: the caller is already in charge of when to come back.
@@ -228,14 +268,16 @@ export function createChainReader(
           queued--;
           meter.recordQueueWait(Date.now() - queuedAt, queued);
         }
-        release();
+        release?.();
       }
     }
   }
   const pending = new Set<Promise<unknown>>();
   function request(method: string, params: readonly unknown[]): Promise<unknown> {
     if (closed) return Promise.reject(new RpcFailure('reader-closed'));
-    const work = performRequest(method, params);
+    const work = performRequest(method, params).catch((error: unknown) => {
+      throw lifetime.signal.aborted ? lifetime.signal.reason : error;
+    });
     pending.add(work);
     void work.then(
       () => pending.delete(work),
@@ -252,8 +294,15 @@ export function createChainReader(
     flush,
     close: async () => {
       closed = true;
-      await flush();
-      await writer.close();
+      if (!lifetime.signal.aborted)
+        armDeadline(Math.min(options.deadlineMs ?? Infinity, Date.now() + 30_000));
+      try {
+        await flush();
+        await writer.close();
+      } finally {
+        disposeLifetime();
+        lifetime.signal.removeEventListener('abort', disposeLifetime);
+      }
     },
     meter,
     sourceAlias: env.providerAlias,

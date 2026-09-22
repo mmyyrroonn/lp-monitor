@@ -8,10 +8,12 @@ export class ShutdownRequested extends Error {
 
 /** Stop between ranges/transactions after finishing pending I/O; never exit the process. */
 export function createShutdownController(target: Pick<EventEmitter, 'on' | 'off'> = process) {
+  const abort = new AbortController();
   let reason: string | null = null;
   const waiters = new Set<() => void>();
   const request = (why: string) => {
     reason ??= why;
+    abort.abort();
     for (const wake of waiters) wake();
   };
   const interrupt = () => request('SIGINT');
@@ -19,6 +21,7 @@ export function createShutdownController(target: Pick<EventEmitter, 'on' | 'off'
   target.on('SIGINT', interrupt);
   target.on('SIGTERM', terminate);
   return {
+    signal: abort.signal,
     get requested() {
       return reason !== null;
     },
