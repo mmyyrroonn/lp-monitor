@@ -40,6 +40,15 @@ jobs:
         run: |
           set -o pipefail
           pnpm install --frozen-lockfile 2>&1 | tee artifacts/ci/install.log
+      # The integration tests spawn committed tools under artifacts/p6 and
+      # artifacts/p5 that import from dist/. A fresh checkout has no dist/, so the
+      # tests job must build the artifact it exercises before running them.
+      - name: Build the artifact under test
+        if: matrix.check == 'tests'
+        shell: bash
+        run: |
+          set -o pipefail
+          pnpm build 2>&1 | tee artifacts/ci/build-prerequisite.log
       - name: Run ${{ matrix.check }}
         shell: bash
         run: |
