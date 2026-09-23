@@ -49,3 +49,24 @@ test('storage audit makes missing artifact input explicit', () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test('storage audit reports broken accepted-range foreign keys', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lp-storage-integrity-'));
+  const path = join(dir, 'db.sqlite');
+  const db = openDatabase(path);
+  db.pragma('foreign_keys=OFF');
+  db.prepare('insert into accepted_ranges values(?,?,?,?,?,?)').run('s', 'missing', 'f', 1, 2, 1);
+  db.close();
+  try {
+    expect(auditStorage(path)).toMatchObject({
+      integrity: {
+        ok: false,
+        foreignKeyViolations: [
+          expect.objectContaining({ table: 'accepted_ranges', parent: 'ingest_batches' }),
+        ],
+      },
+    });
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

@@ -151,7 +151,7 @@ function shardFromFragment(
   };
 }
 
-async function executePlan(
+export async function executePlan(
   reader: Pick<ChainReader, 'getLogs'>,
   plan: readonly PlannedFilter[],
   guard: number,
@@ -171,12 +171,9 @@ async function executePlan(
   const shards: FetchShardManifest[] = [];
   const errors: string[] = [];
   const failureKinds: string[] = [];
-  let complete = true;
-  let sequence = sequenceStart;
-  for (const planned of plan) {
-    let result: FetchResult;
+  const fetchOne = async (planned: PlannedFilter): Promise<FetchResult> => {
     try {
-      result = await fetchBoundedLogs(reader, planned.filter, guard, maxRangeBlocks, {
+      return await fetchBoundedLogs(reader, planned.filter, guard, maxRangeBlocks, {
         captureCriticalFailures: true,
       });
     } catch (error) {
@@ -185,12 +182,33 @@ async function executePlan(
         error instanceof DiscoveryRecoveryStop
           ? new RpcFailure(error.kind)
           : classifyRpcError(error);
-      result = failedResult(
+      return failedResult(
         planned.filter,
         failure.kind,
         failure.evidenceFailure?.kind ?? failure.kind,
       );
     }
+  };
+  const results = new Array<FetchResult>(plan.length);
+  let next = 0;
+  const worker = async (): Promise<void> => {
+    for (;;) {
+      const index = next++;
+      if (index >= plan.length) return;
+      results[index] = await fetchOne(plan[index]!);
+    }
+  };
+  const settled = await Promise.allSettled(
+    Array.from({ length: Math.min(2, plan.length) }, () => worker()),
+  );
+  const rejected = settled.find((result) => result.status === 'rejected');
+  if (rejected !== undefined && rejected.status === 'rejected') throw rejected.reason;
+
+  let complete = true;
+  let sequence = sequenceStart;
+  for (let index = 0; index < plan.length; index++) {
+    const planned = plan[index]!;
+    const result = results[index]!;
     complete &&= result.complete;
     for (const failure of result.failures) errors.push(failure.reason);
     failureKinds.push(...result.failureKinds);
@@ -198,9 +216,8 @@ async function executePlan(
     const familyLogs = logsByFamily.get(planned.family) ?? [];
     familyLogs.push(...result.logs);
     logsByFamily.set(planned.family, familyLogs);
-    for (const fragment of result.fragments) {
+    for (const fragment of result.fragments)
       shards.push(shardFromFragment(planned.id, fragment, sequence++));
-    }
   }
   return {
     complete,

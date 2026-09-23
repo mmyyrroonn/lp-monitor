@@ -91,20 +91,25 @@ describe('dashboard heat blocks', () => {
     expect(microsToDollars(1_000_000n)).toBe(1);
     expect(microsToDollars(4_318_357_708n)).toBeCloseTo(4318.36, 1);
   });
-  it('sums closed minutes into a block and keeps the block closed', () => {
+  it('sums a fully closed block', () => {
     const blocks = aggregateHeatBlocks(
       [
         minute(0, { txCount: 3, usdMicros: '1000000' }),
         minute(60, { txCount: 7, usdMicros: '2000000' }),
       ],
       [0],
-      600,
+      120,
     );
     expect(blocks).toEqual([
       {
         startSec: 0,
         status: 'closed',
         closedMinutes: 2,
+        expectedMinutes: 2,
+        missingMinutes: 0,
+        partialMinutes: 0,
+        futureMinutes: 0,
+        inProgress: false,
         txCount: 10,
         usdMicros: 3000000n,
         reasons: [],
@@ -131,9 +136,13 @@ describe('dashboard heat blocks', () => {
       [0],
       600,
     );
-    expect(blocks).toEqual([
-      { startSec: 0, status: 'gap', closedMinutes: 0, txCount: 0, usdMicros: 0n, reasons: [] },
-    ]);
+    expect(blocks[0]).toMatchObject({
+      status: 'gap',
+      closedMinutes: 0,
+      missingMinutes: 10,
+      usdMicros: null,
+    });
+    expect(blocks[0]?.reasons).toEqual(['coverage-gap', 'missing-minute', 'warming-up']);
   });
   it('propagates one unpriced minute into a null block amount without losing the count', () => {
     const blocks = aggregateHeatBlocks(
@@ -144,7 +153,7 @@ describe('dashboard heat blocks', () => {
       [0],
       600,
     );
-    expect(blocks[0]).toMatchObject({ status: 'closed', txCount: 7, usdMicros: null });
+    expect(blocks[0]).toMatchObject({ status: 'partial', txCount: 7, usdMicros: null });
   });
   it('keeps one-minute blocks at one minute and carries their coverage reasons', () => {
     const blocks = aggregateHeatBlocks(
@@ -160,6 +169,11 @@ describe('dashboard heat blocks', () => {
         startSec: 0,
         status: 'closed',
         closedMinutes: 1,
+        expectedMinutes: 1,
+        missingMinutes: 0,
+        partialMinutes: 0,
+        futureMinutes: 0,
+        inProgress: false,
         txCount: 4,
         usdMicros: 8000000n,
         reasons: [],
@@ -168,8 +182,13 @@ describe('dashboard heat blocks', () => {
         startSec: 60,
         status: 'gap',
         closedMinutes: 0,
+        expectedMinutes: 1,
+        missingMinutes: 1,
+        partialMinutes: 0,
+        futureMinutes: 0,
+        inProgress: false,
         txCount: 0,
-        usdMicros: 0n,
+        usdMicros: null,
         reasons: ['coverage-gap'],
       },
     ]);

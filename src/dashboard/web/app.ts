@@ -9,6 +9,9 @@ import type {
 } from '../types.js';
 import {
   aggregateHeatBlocks,
+  comparableHeatValue,
+  heatBlockClass,
+  heatCoverageLabel,
   classifyHeat,
   closedMinuteStarts,
   selectableCutoff,
@@ -19,8 +22,6 @@ import {
   escapeHtml as e,
   favoriteKey,
   formatMicros,
-  heatIntensity,
-  microsToDollars,
   nextColumnSort,
   overviewMinutes,
   requestNotice,
@@ -124,6 +125,9 @@ const badge = (t: DashboardTokenSummary) => {
 const reasonText: Record<string, string> = {
   'coverage-missing': '缺少覆盖证据',
   'coverage-gap': '采集覆盖不完整',
+  'missing-minute': '缺少分钟证据',
+  'incomplete-minute': '分钟证据不完整',
+  'warming-up': '覆盖仍在积累',
   'boundary-time-unknown': '边界交易时间不确定',
   'pool-lifetime-incomplete': '池建立前历史不足',
   'watermark-partial': '本分钟尚未完整',
@@ -411,16 +415,17 @@ function renderHeatmap() {
   // One block row per token, built once so the ranking and the paint read the same numbers.
   const blocksByToken = new Map<string, HeatBlock[]>();
   for (const t of listTokens())
-    blocksByToken.set(t.address, aggregateHeatBlocks(seriesOf(t), blockStarts, blockSeconds));
+    blocksByToken.set(
+      t.address,
+      aggregateHeatBlocks(
+        seriesOf(t),
+        blockStarts,
+        blockSeconds,
+        snapshot?.sourceChainTimeSec ?? undefined,
+      ),
+    );
   const peak = (blocks: HeatBlock[]): number =>
-    heatMetric === 'count'
-      ? Math.max(0, ...blocks.filter((b) => b.status === 'closed').map((b) => b.txCount))
-      : Math.max(
-          0,
-          ...blocks
-            .filter((b) => b.status === 'closed' && b.usdMicros !== null)
-            .map((b) => microsToDollars(b.usdMicros!)),
-        );
+    Math.max(0, ...blocks.map((b) => comparableHeatValue(b, heatMetric) ?? 0));
   const all = listTokens().sort(
     (a, b) =>
       peak(blocksByToken.get(b.address)!) - peak(blocksByToken.get(a.address)!) ||
@@ -433,19 +438,15 @@ function renderHeatmap() {
     return;
   }
   const maximum = Math.max(1, ...tokens.map((t) => peak(blocksByToken.get(t.address)!)));
-  const valueOf = (b: HeatBlock): number | null =>
-    heatMetric === 'count' ? b.txCount : b.usdMicros === null ? null : microsToDollars(b.usdMicros);
   const caption = (t: DashboardTokenSummary, b: HeatBlock): string => {
     const head = `${t.symbol} · ${time(b.startSec)}`;
     const reasonTail = b.reasons.length ? ` · ${reasons(b.reasons)}` : '';
-    if (b.status === 'gap') return `${head} · 缺少完整数据${reasonTail}`;
-    if (b.status === 'partial') {
-      const unit = blockMinutes > 1 ? '本块尚未完整' : '本分钟尚未完整';
-      const done =
-        blockMinutes > 1
-          ? ` · 已完整 ${b.closedMinutes}/${blockMinutes} 分钟 · ${number(b.txCount)} 笔`
+    if (b.status !== 'closed') {
+      const amount =
+        heatMetric === 'amount' && b.closedMinutes > 0
+          ? ` · 已观测 USDG ${b.usdMicros === null ? '未计价' : formatMicros(b.usdMicros.toString())}`
           : '';
-      return `${head} · ${unit}${done}${reasonTail}`;
+      return `${head} · ${heatCoverageLabel(b)}${amount}${reasonTail}`;
     }
     const counts =
       `${number(b.txCount)} 笔` +
@@ -462,17 +463,7 @@ function renderHeatmap() {
         const blocks = blocksByToken.get(t.address)!;
         return `<div class="heat-row"><button class="heat-name" data-token="${e(t.address)}" title="${e(t.symbol)} ${e(t.address)}">${e(t.symbol)}</button><div class="heat-cells">${blocks
           .map((b) => {
-            const intensity = b.status === 'closed' ? heatIntensity(valueOf(b), maximum) : null;
-            const cls =
-              b.status === 'gap'
-                ? 'gap'
-                : b.status === 'partial'
-                  ? 'partial'
-                  : heatMetric === 'amount' && b.usdMicros === null
-                    ? 'unpriced'
-                    : intensity === null || intensity === 0
-                      ? ''
-                      : `h${Math.max(1, Math.ceil(intensity * 4))}`;
+            const cls = heatBlockClass(b, heatMetric, maximum);
             const at = b.startSec + blockSeconds - 1;
             const text = caption(t, b);
             return `<button class="heat-cell ${cls} ${historyAt === at ? 'selected' : ''}" data-at="${at}" ${!selectableCutoff(at, snapshot?.availableFromSec ?? null, snapshot?.sourceChainTimeSec ?? null) ? 'disabled' : ''} aria-label="${e(text)}" title="${e(text)}"></button>`;

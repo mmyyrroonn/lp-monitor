@@ -263,6 +263,28 @@ test('a stuck round is abandoned: the old summary stays and the reader is droppe
   expect(workers).toHaveLength(1);
 });
 
+test('a restarted worker gets the initialization budget for its first cold refresh', async () => {
+  const { worker, coordinator, workers } = harness({
+    refreshTimeoutMs: 20,
+    initTimeoutMs: 80,
+    restartCooldownMs: 5,
+  });
+  await Promise.resolve();
+  worker.emit('message', { type: 'summary', key: 'live', summary: summary('g1') });
+  worker.onRefresh = null;
+  coordinator.refresh();
+
+  const deadline = Date.now() + 100;
+  while (workers.length < 2 && Date.now() < deadline) await delay(1);
+  expect(workers.length).toBeGreaterThanOrEqual(2);
+  const replacement = workers[1]!;
+  await delay(35);
+  expect(replacement.terminateCount).toBe(0);
+
+  replacement.emit('message', { type: 'summary', key: 'live', summary: summary('g2') });
+  expect(coordinator.latest().generation).toBe('g2');
+});
+
 test('a restart storm is impossible: one reader per cooldown, no more', async () => {
   const { coordinator, workers } = harness({
     refreshTimeoutMs: 5,

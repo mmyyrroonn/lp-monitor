@@ -160,6 +160,12 @@ test('a batch accepted in its own transaction answers later reads without decodi
   expect(ranges.decodes).toBe(0);
 });
 
+test('bulk proof reads preserve individual proof results and explicit misses', () => {
+  const f = fixture();
+  const bulk = f.proofs.readMany(['a', 'missing']);
+  expect(bulk.get('a')).toEqual(f.proofs.read('a'));
+  expect(bulk.get('missing')).toBeNull();
+});
 test('a bounded horizon decodes neither the proven window batch nor an old batch outside it', () => {
   const f = fixture();
   // An accepted batch from before the proof table existed, outside this read's window.

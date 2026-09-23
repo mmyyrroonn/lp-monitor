@@ -1,5 +1,15 @@
 # Robinhood RWA monitor
 
+## 当前代码验证
+
+[GitHub CI](https://github.com/mmyyrroonn/lp-monitor/actions/workflows/ci.yml) 对每个提交分别运行格式/脚本检查、语义 lint、类型检查、测试和构建；任一失败都不会取消其他检查，最终 `verify` 要求全部成功。每个检查上传包含 commit SHA、运行编号、安装与检查日志的产物，测试另附 JUnit。请核对具体 SHA 的结果，不能把旧提交的通过状态作为当前代码的验收。
+
+本地对应命令为 `pnpm lint`、`pnpm lint:semantic`、`pnpm typecheck`、`pnpm test`、`pnpm build`。历史 `artifacts/` 和验收文档只证明当时的代码与输入；离线单元/集成测试不代表长时实链运行、RPC 容量或提醒收益已经验证。长时性能采集仍是需要指定范围与预算的单独验收。
+
+语义 lint 使用锁定版本的 [Oxlint 类型检查规则](https://oxc.rs/docs/guide/usage/linter/type-aware)，首批覆盖 RPC 与停止控制中的未处理/误用 Promise、finally 中覆盖原异常的控制流；不安全类型断言先覆盖限速器、请求计量和停止控制。RPC 原始响应解析处的断言尚未全部纳入，后续按模块扩展。计时器、监听器和 socket 的释放仍由取消/超时集成测试与代码审查验证，lint 不证明资源一定释放。
+
+Phase A 的本地验收结果见 [验收记录](docs/reviews/2026-09-22-phase-a-acceptance.md)；启用清理前请阅读 [retention 预览、pin 与回滚说明](docs/retention.md)。
+
 ## 2026-09-13 实时启动边界
 
 默认 `follow` 每次启动从启动时最新块开始，复用本地池登记并发现后续新池；不扫描部署历史、不从旧游标追赶、不预热历史窗口。终端输出 `live-start` 及起始块。重启跳过的区间保持缺口，旧数据不删除，窗口需随新数据积累。

@@ -13,6 +13,7 @@ import { BatchCoverageStore, type BatchCoverageProof } from '../storage/batch-co
 import { SqliteRangeStore } from '../storage/raw-store.js';
 import { countWork } from '../ops/work-counters.js';
 import { readBatch } from '../storage/payload-store.js';
+import { readRetentionExpiration } from '../storage/retention-state.js';
 
 export interface MetricCoverage {
   scopeId: string;
@@ -159,12 +160,13 @@ export function acceptedMetricRanges(
   // A coverage proof is the verdict acceptRange reached when it stored this batch, so a reader
   // that finds one skips decoding the batch and reading its stored payload text.
   const proofs = new BatchCoverageStore(db);
+  const proofByBatch = proofs.readMany([...groups.keys()]);
   for (const [batchId, accepted] of groups) {
     const row = db
       .prepare('select id from ingest_batches where id=? and scope_id=?')
       .get(batchId, scopeId) as { id: string } | undefined;
     if (!row) continue;
-    const proof = proofs.read(batchId);
+    const proof = proofByBatch.get(batchId) ?? null;
     const stored = proof === null ? shardRows(db, batchId) : null;
     // One cache entry per batch behind the window, whether its verdict came from a proof or from
     // decoding it: the signature is whatever that verdict was derived from.
@@ -320,6 +322,7 @@ export function readMetricCoverage(
     return false;
   };
   const result: MetricCoverage[] = [];
+  const expiration = readRetentionExpiration(db, scopeId);
   for (let minute = first; minute <= current; minute += 60) {
     const left = map.get(minute),
       right = map.get(minute + 60);
@@ -330,6 +333,12 @@ export function readMetricCoverage(
     if (left && right && !compatible(left, right)) reasons.push('conflicting-minute-boundaries');
     const fromBlock = left?.firstBlock ?? null,
       toBlock = minute === current ? watermark.number : right ? right.firstBlock - 1n : null;
+    if (
+      expiration &&
+      (minute < Math.max(expiration.raw_before_sec, expiration.live_before_sec) ||
+        (fromBlock !== null && fromBlock < BigInt(expiration.raw_before_block)))
+    )
+      reasons.push('retention-expired');
     if (minute + 60 > watermark.timestampSec || (right && right.at.number > watermark.number))
       reasons.push('watermark-partial');
     if (fromBlock !== null && toBlock !== null) {

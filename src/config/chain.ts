@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { z } from 'zod';
 import { CHAIN_ID } from '../domain/chain.js';
 import { ConfigError } from './env.js';
+import { validateRetentionConfig } from './retention.js';
 const address = z
   .templateLiteral(['0x', z.string()])
   .refine((v) => /^0x[0-9a-fA-F]{40}$/.test(v))
@@ -143,8 +144,11 @@ const schema = z
 export type ChainConfig = z.infer<typeof schema>;
 export function loadChainConfig(path: string): ChainConfig {
   try {
-    return schema.parse(JSON.parse(readFileSync(path, 'utf8')));
+    const config = schema.parse(JSON.parse(readFileSync(path, 'utf8')));
+    validateRetentionConfig(config);
+    return config;
   } catch (error) {
+    if (error instanceof ConfigError) throw error;
     if (error instanceof z.ZodError) {
       const fields = [
         ...new Set(

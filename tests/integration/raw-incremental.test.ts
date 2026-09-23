@@ -223,3 +223,22 @@ describe('bounded incremental raw storage', () => {
     expect(timesPlan[0]?.detail).toContain('raw_logs_height');
   });
 });
+test('live time ref reads avoid decoding raw event payloads', () => {
+  const database = openDatabase(':memory:');
+  databases.push(database);
+  const raw = new SqliteRangeStore(database);
+  const first = log(1, 10n);
+  const second = log(2, 110n);
+  raw.acceptRange(
+    batch('refs', 0n, 120n, [first, second], null, [{ ref: second, time: time(120) }]),
+  );
+  const before = raw.activeLogRefsWithTime('scope', { fromBlock: 0n, toBlock: 120n });
+  database
+    .prepare("update raw_logs set topics_json='not-json',data=?")
+    .run('0x' + 'ab'.repeat(100_000));
+  expect(raw.activeLogRefsWithTime('scope', { fromBlock: 0n, toBlock: 120n })).toEqual(before);
+  expect(before.map((row) => [rawLogKey(row.ref), row.time])).toEqual([
+    [rawLogKey(first), undefined],
+    [rawLogKey(second), time(120)],
+  ]);
+});

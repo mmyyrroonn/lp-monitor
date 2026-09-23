@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import Database from 'better-sqlite3';
 import { ConfigError } from '../config/env.js';
+import { warmLegacyCoverageProofs } from './batch-coverage.js';
 
 function loadMigration(name: string): string {
   try {
@@ -30,6 +31,8 @@ const migration = [
   '012-batch-coverage.sql',
   '013-live-workset.sql',
   '014-metadata-queue.sql',
+  '016-batch-coverage-dependencies.sql',
+  '017-retention-safety.sql',
 ]
   .map(loadMigration)
   .join('\n');
@@ -101,6 +104,7 @@ export function openDatabase(
     database.exec(
       "update pools set protocol = json_extract(payload_json, '$.pool.protocol') where protocol is null",
     );
+    warmLegacyCoverageProofs(database);
     return database;
   } catch (error) {
     database.close();

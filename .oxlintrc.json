@@ -1,0 +1,16 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": ["typescript"],
+  "categories": { "correctness": "off" },
+  "rules": {
+    "typescript/no-floating-promises": "error",
+    "typescript/no-misused-promises": "error",
+    "no-unsafe-finally": "error"
+  },
+  "overrides": [
+    {
+      "files": ["src/rpc/rate-limit.ts", "src/rpc/request-meter.ts", "src/ops/shutdown.ts"],
+      "rules": { "typescript/no-unsafe-type-assertion": "error" }
+    }
+  ]
+}

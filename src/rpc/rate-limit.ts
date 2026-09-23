@@ -88,8 +88,10 @@ export class RateLimiter {
     beforeWait?: () => void,
     onAcquired?: () => void,
     additional?: RateLimiter,
+    signal?: AbortSignal,
   ): Promise<void> {
     const result = this.tail.then(async () => {
+      signal?.throwIfAborted();
       this.relaxIfIdle(Date.now());
       additional?.relaxIfIdle(Date.now());
       beforeWait?.();
@@ -104,7 +106,23 @@ export class RateLimiter {
         );
         const remaining = until - Date.now();
         if (remaining <= 0) break;
-        await new Promise((resolve) => setTimeout(resolve, remaining));
+        await new Promise<void>((resolve, reject) => {
+          const cleanup = () => {
+            clearTimeout(timer);
+            signal?.removeEventListener('abort', cancel);
+          };
+          const cancel = () => {
+            cleanup();
+            reject(signal?.reason);
+          };
+          const timer = setTimeout(() => {
+            cleanup();
+            resolve();
+          }, remaining);
+          signal?.addEventListener('abort', cancel, { once: true });
+          if (signal?.aborted) cancel();
+        });
+        signal?.throwIfAborted();
       }
       // Commit the call only at the actual slot, before the next queued acquisition.
       onAcquired?.();
@@ -115,9 +133,23 @@ export class RateLimiter {
     this.tail = result.catch(() => {});
     return result;
   }
-  async enter(): Promise<() => void> {
+  async enter(signal?: AbortSignal): Promise<() => void> {
+    signal?.throwIfAborted();
     if (this.active >= this.maxConcurrent)
-      await new Promise<void>((resolve) => this.waiters.push(resolve));
+      await new Promise<void>((resolve, reject) => {
+        const ready = () => {
+          signal?.removeEventListener('abort', cancel);
+          resolve();
+        };
+        const cancel = () => {
+          const index = this.waiters.indexOf(ready);
+          if (index !== -1) this.waiters.splice(index, 1);
+          signal?.removeEventListener('abort', cancel);
+          reject(signal?.reason);
+        };
+        this.waiters.push(ready);
+        signal?.addEventListener('abort', cancel, { once: true });
+      });
     else this.active++;
     let released = false;
     return () => {

@@ -14,6 +14,12 @@ export interface StorageAudit {
   rawPayloadBytes: number;
   compressedObjectBytes: number;
   coverageHours: number | null;
+  integrity: {
+    ok: boolean;
+    sqliteChecks: string[];
+    foreignKeyViolations: { table: string; rowid: number | null; parent: string; fkid: number }[];
+    orphanedLiveRows: number;
+  };
   notes: string[];
 }
 
@@ -95,6 +101,7 @@ export function auditStorage(databasePath: string, artifactDirectory?: string): 
   const notes: string[] = [];
   const db = openDatabase(path, { readonly: true });
   try {
+    db.exec('begin');
     const tableNames = (
       db
         .prepare(
@@ -130,6 +137,35 @@ export function auditStorage(databasePath: string, artifactDirectory?: string): 
     notes.push(
       'Coverage hours use the persisted scope cursor range and are not an all-chain estimate',
     );
+    const sqliteChecks = (db.pragma('quick_check') as { quick_check: string }[]).map(
+      (row) => row.quick_check,
+    );
+    const foreignKeyViolations = db.pragma(
+      'foreign_key_check',
+    ) as StorageAudit['integrity']['foreignKeyViolations'];
+    let orphanedLiveRows = 0;
+    for (const table of ['live_events', 'live_inputs', 'live_quality_errors']) {
+      if (hasTable(db, table))
+        orphanedLiveRows += Number(
+          db
+            .prepare(
+              `select count(*) from ${table} l
+        where not exists(select 1 from raw_logs r where r.id=l.raw_log_id)`,
+            )
+            .pluck()
+            .get(),
+        );
+    }
+    const integrity = {
+      ok:
+        sqliteChecks.length === 1 &&
+        sqliteChecks[0] === 'ok' &&
+        foreignKeyViolations.length === 0 &&
+        orphanedLiveRows === 0,
+      sqliteChecks,
+      foreignKeyViolations,
+      orphanedLiveRows,
+    };
     return {
       sampledAtMs: Date.now(),
       databaseBytes: fileBytes(path),
@@ -140,6 +176,7 @@ export function auditStorage(databasePath: string, artifactDirectory?: string): 
       rawPayloadBytes,
       compressedObjectBytes,
       coverageHours,
+      integrity,
       notes,
     };
   } finally {

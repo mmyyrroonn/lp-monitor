@@ -7,6 +7,9 @@ import { previewSignalEvaluationRetention } from '../signals/project.js';
 import { openDatabase } from '../storage/database.js';
 import { saveJson } from './files.js';
 import { auditStorage, compactStorage } from './storage-audit.js';
+import { previewRawRetention } from '../storage/retention.js';
+import { pinRetention, releaseRetentionPin } from '../storage/retention-state.js';
+import { existsSync, statSync } from 'node:fs';
 
 /**
  * What the recorder's own retention would delete, counted on a read-only connection.
@@ -61,6 +64,10 @@ export async function runStorageCli(args: string[]): Promise<number> {
         out: { type: 'string' },
         scope: { type: 'string' },
         keep: { type: 'string' },
+        raw: { type: 'boolean' },
+        'max-rows': { type: 'string' },
+        id: { type: 'string' },
+        kind: { type: 'string' },
       },
     });
   } catch {
@@ -82,7 +89,7 @@ export async function runStorageCli(args: string[]): Promise<number> {
       saveJson(output, result, dirname(output));
     }
     console.log(encodeJson(result));
-    return 0;
+    return result.integrity.ok ? 0 : 1;
   }
   if (command === 'retention') {
     const db = parsed.values.db;
@@ -96,17 +103,53 @@ export async function runStorageCli(args: string[]): Promise<number> {
     const scope = parsed.values.scope;
     if (scope !== undefined && (typeof scope !== 'string' || !scope.trim()))
       throw new ConfigError('Invalid retention scope');
-    const result = retentionPreview(
-      db,
-      scope === undefined ? undefined : String(scope),
-      keepPerPool,
-    );
+    let result;
+    if (parsed.values.raw) {
+      if (scope !== undefined || parsed.values.keep !== undefined)
+        throw new ConfigError(
+          'Raw retention preview uses every persisted consumer; --scope and --keep are not supported',
+        );
+      const maxRows =
+        parsed.values['max-rows'] === undefined ? 50_000 : Number(parsed.values['max-rows']);
+      if (!Number.isSafeInteger(maxRows) || maxRows < 1)
+        throw new ConfigError('Invalid retention batch size');
+      const source = openDatabase(resolve(db), { readonly: true });
+      try {
+        result = previewRawRetention(source, maxRows);
+      } finally {
+        source.close();
+      }
+    } else {
+      if (parsed.values['max-rows'] !== undefined)
+        throw new ConfigError('--max-rows requires --raw');
+      result = retentionPreview(db, scope === undefined ? undefined : String(scope), keepPerPool);
+    }
     if (parsed.values.out !== undefined) {
       if (typeof parsed.values.out !== 'string') throw new ConfigError('Invalid storage output');
       const output = resolve(parsed.values.out);
       saveJson(output, result, dirname(output));
     }
     console.log(encodeJson(result));
+    return 0;
+  }
+  if (command === 'pin' || command === 'unpin') {
+    const path = parsed.values.db;
+    const id = parsed.values.id;
+    if (typeof path !== 'string' || !path.trim() || !existsSync(path) || !statSync(path).isFile())
+      throw new ConfigError('Retention pin requires an existing --db');
+    if (typeof id !== 'string' || !id.trim()) throw new ConfigError('Retention pin requires --id');
+    const kind = parsed.values.kind;
+    if (command === 'pin' && kind !== 'history' && kind !== 'replay')
+      throw new ConfigError('Retention pin requires --kind history|replay');
+    const db = openDatabase(resolve(path));
+    try {
+      if (command === 'pin') pinRetention(db, id, kind as 'history' | 'replay');
+      else if (!releaseRetentionPin(db, id))
+        throw new ConfigError('Active retention pin not found');
+      console.log(encodeJson({ id, status: command === 'pin' ? 'active' : 'released' }));
+    } finally {
+      db.close();
+    }
     return 0;
   }
   if (command === 'compact') {
