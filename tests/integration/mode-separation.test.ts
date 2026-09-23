@@ -8,6 +8,9 @@ import { loadMetricMetadata } from '../../src/metrics/metadata.js';
 import { parseSignalConfig } from '../../src/signals/config.js';
 import { runRecorder, type RecorderOptions } from '../../src/ops/recorder.js';
 import { openDatabase } from '../../src/storage/database.js';
+import { loadAssetVersion } from '../../src/registry/assets.js';
+import { computeWatchScopeId } from '../../src/ingest/filter-plan.js';
+import { DashboardWorkerHarness } from '../helpers/dashboard-worker.js';
 import { recorderFixture } from '../helpers/recorder-fixture.js';
 
 const dirs: string[] = [];
@@ -143,6 +146,42 @@ test('monitor starts from a record-only database using local raw instead of new 
       after.close();
     }
   } finally {
+    rmSync(dir, { recursive: true, force: true });
+    dirs.splice(dirs.indexOf(dir), 1);
+  }
+});
+
+test('monitor-none serves the read-only snapshot worker without opening a notification sink', async () => {
+  vi.spyOn(console, 'log').mockImplementation(() => {});
+  const dir = workspace();
+  const opts = monitorOptions(dir, 'none');
+  const config = loadChainConfig('config/robinhood.json');
+  const assets = loadAssetVersion('config/watchlist.amc.json');
+  const deployments = { v3Factory: config.v3Factory, v4Manager: config.v4Manager };
+  const harness = new DashboardWorkerHarness();
+  try {
+    expect(await runRecorder(opts)).toBe(0);
+    await harness.start({
+      dbPath: opts.databasePath,
+      scopeId: computeWatchScopeId(assets, 'operations', deployments),
+      registryScopeId: computeWatchScopeId(assets, 'discovery-only', deployments),
+      configVersion: config.version,
+      assetVersion: assets.version,
+      assets: assets.assets,
+      usdg: config.tokens.USDG,
+      metadata: opts.metricMetadata!,
+    });
+    harness.send({ type: 'refresh', key: 'live' });
+    const response = await harness.next(
+      (value) => value.type === 'summary' || value.type === 'failed',
+    );
+    expect(response.type).toBe('summary');
+    if (response.type === 'summary') {
+      expect(response.summary.apiVersion).toBe(2);
+      expect(response.summary.selectedEndSec).toBeGreaterThan(0);
+    }
+  } finally {
+    await harness.terminate();
     rmSync(dir, { recursive: true, force: true });
     dirs.splice(dirs.indexOf(dir), 1);
   }

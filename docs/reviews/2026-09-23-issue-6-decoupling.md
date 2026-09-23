@@ -46,7 +46,7 @@
 | `pnpm typecheck` | 退出 0 |
 | `pnpm lint`（check-scripts + prettier） | 退出 0 |
 | `pnpm lint:semantic` | 退出 0 |
-| `pnpm test` | 退出 0（1388 tests / 162 files） |
+| `pnpm test` | 退出 0（1389 tests / 162 files） |
 | `pnpm build` + `node dist/cli.js --help` | 退出 0 |
 
 ## 迁移与回滚
