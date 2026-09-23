@@ -293,7 +293,11 @@ export async function exportReplayDataset(
         if (!Number.isSafeInteger(batch.observedAtMs) || batch.observedAtMs < 0)
           observedOrderComplete = false;
         const path = `segments/${String(index).padStart(6, '0')}.json.gz`;
-        const absolute = join(temporary, path.replaceAll('/', '\\'));
+        // The manifest states this path in POSIX spelling, and a reader resolves it with the same
+        // spelling on every host. `join` normalises it for the filesystem the export runs on;
+        // rewriting the separator here would bury one Windows-named file inside `segments/`
+        // everywhere else, and the manifest path would no longer resolve to what the export wrote.
+        const absolute = join(temporary, path);
         relativeArtifact(temporary, absolute);
         const compressed = gzipSync(logical, { level: 9 });
         writeFileSync(absolute, compressed, { flag: 'wx' });

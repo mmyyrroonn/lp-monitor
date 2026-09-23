@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { gunzipSync } from 'node:zlib';
 import { expect, test } from 'vitest';
 import { batch, metricInput, registration, swap } from '../helpers/alert-fixture.js';
 import { encodeJson } from '../../src/domain/json.js';
@@ -56,6 +57,49 @@ test('replay export publishes portable v2 gzip segments and reader needs no sour
     expect(after).toBe(before);
     rmSync(sourcePath);
     expect(readReplayManifest(result.manifestPath).batches).toHaveLength(1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('every manifest segment path resolves to the gzip artifact it describes', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'lp-replay-export-segments-'));
+  const sourcePath = join(dir, 'source.sqlite');
+  const output = join(dir, 'dataset');
+  const source = openDatabase(sourcePath);
+  try {
+    new SqliteRangeStore(source).acceptRange(batch('one', [swap(60)]));
+  } finally {
+    source.close();
+  }
+  try {
+    await exportReplayDataset({
+      databasePath: sourcePath,
+      outputDirectory: output,
+      scopeId: 's',
+      fromBlock: 60n,
+      toBlock: 4800n,
+      mode: 'chain-time',
+      cohortMode: 'as-of',
+      inputSnapshot: snapshot(),
+    });
+    const manifest = JSON.parse(readFileSync(join(output, 'manifest.json'), 'utf8')) as {
+      batches: { id: string }[];
+      segments: { path: string; logicalSha256: string; bytes: { logical: number } }[];
+    };
+    expect(manifest.segments).toHaveLength(1);
+    // The manifest states one POSIX path; the export has to have written exactly that file on the
+    // host it ran on. A host-specific separator here leaves the renamed dataset unreadable to the
+    // reader that resolves the manifest's own path.
+    expect(manifest.segments[0]!.path).toBe('segments/000000.json.gz');
+    const artifact = join(output, manifest.segments[0]!.path);
+    expect(existsSync(artifact)).toBe(true);
+    const logical = gunzipSync(readFileSync(artifact));
+    expect(createHash('sha256').update(logical).digest('hex')).toBe(
+      manifest.segments[0]!.logicalSha256,
+    );
+    expect(logical.byteLength).toBe(manifest.segments[0]!.bytes.logical);
+    expect(JSON.parse(logical.toString('utf8'))).toMatchObject({ id: manifest.batches[0]!.id });
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
