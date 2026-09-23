@@ -36,9 +36,13 @@ const help = `Robinhood read-only P0/P1/P2/P3/P4/P5/P6 CLI
   pnpm lp inspect-pool --db data/recorder.sqlite --pool amc-usdg-v3
   P2 commands are offline; no RPC environment required.
   pnpm lp ingest --config config/robinhood.json --from-block N --to-block N
-  pnpm lp follow --config config/robinhood.json --duration 10m
-  P4: follow --notify local [--signals config/signals.initial.json] [--metadata PATH]
-  Local alerts: console and <db>.alerts.jsonl; default follow only records.
+  pnpm lp follow --config config/robinhood.json --duration 10m [--mode record|monitor] [--notify none|local]
+  P4/P6: follow runs one of three explicit combinations (default is record):
+    --mode record  --notify none   record raw/derived inputs only; no live projection or signals
+    --mode monitor --notify none   project, evaluate and keep the signal ledger; send nothing
+    --mode monitor --notify local  the above, plus the local console and <db>.alerts.jsonl sink
+  Legacy follow --notify local still maps to monitor/local; --signals implies nothing and
+  requires monitor mode. Local alerts: console and <db>.alerts.jsonl; default follow only records.
   Default follow starts at the latest block on every launch; no historical discovery or catch-up.
   Known pools only; unregistered historical pools remain unknown. Explicit --from-block keeps historical discovery.
   Live follow incrementally projects changed logs and retains bounded metric windows; 2s polling is not a latency guarantee.

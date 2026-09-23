@@ -82,7 +82,7 @@ test('real zero timestamp recorder minute and initial warmup calls retain catego
     rmSync(dir, { recursive: true, force: true });
   }
 });
-test('a no-alert drain cannot fabricate a sink delivery timestamp', async () => {
+test('a no-alert round measures computation without fabricating an outbox or delivery timestamp', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'p6-empty-delivery-'));
   const opts = setup(dir);
   vi.spyOn(AlertOutbox.prototype, 'deliverPending').mockResolvedValue({ sent: 0, failed: 0 });
@@ -92,9 +92,10 @@ test('a no-alert drain cannot fabricate a sink delivery timestamp', async () => 
     const result = manifest(opts);
     expect(result.telemetry.batchTimings[0].deliveredAtMs).toBeNull();
     expect(result.telemetry.report.latency.totalDeliveryMs.sampleSize).toBe(0);
-    expect(result.telemetry.batchTimings[0].notifyAttemptCompletedAtMs).toBeGreaterThanOrEqual(
-      result.telemetry.batchTimings[0].outboxDurableAtMs,
-    );
+    // Delivery is asynchronous now: the batch reports when its computation landed, never a sink
+    // completion it did not wait for.
+    expect(result.telemetry.batchTimings[0].computationMs).toBeGreaterThanOrEqual(0);
+    expect(result.telemetry.report.latency.localProcessingMs.sampleSize).toBeGreaterThan(0);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -131,7 +132,9 @@ test('delivery failures recover after subsequent real successful sink delivery',
     const result = manifest(opts);
     expect(result.alertDelivery).toMatchObject({ failed: 1, status: 'ok' });
     expect(result.alertDelivery.sent).toBeGreaterThan(0);
-    expect(result.telemetry.batchTimings[0].deliveredAtMs).not.toBeNull();
+    // Delivery is decoupled from the batch: the batch's own timing carries no sink timestamp, and
+    // the delivery health that recovered is the run-level summary.
+    expect(result.telemetry.batchTimings[0].deliveredAtMs).toBeNull();
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

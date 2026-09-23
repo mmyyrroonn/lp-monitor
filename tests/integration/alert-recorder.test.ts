@@ -120,7 +120,7 @@ test.each([
             hash: '0x00000000000000000000000000000000000000000000000000000000000000c8',
             timestampSec: 1200,
           },
-          observedAtMs: 1200000,
+          observedAtMs: Date.now(),
           watermarkSec: 1200,
           reasons: [],
           metrics: {

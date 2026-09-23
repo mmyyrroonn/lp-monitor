@@ -24,7 +24,7 @@ pnpm lp dashboard --db data/recorder.sqlite --port 8787
 
 ## 实时数据与旧库
 
-普通模式要求存在新鲜的增量投影。当前带指标的采集入口为既有 `follow --notify local`；该选项同时启用已有本机提醒。运行方式与预算见 README，前端本身不替用户启用它。仅有原始日志或旧的 `project --rebuild` 游标时，普通模式会明确提示投影缺失或过期。
+普通模式要求存在新鲜的增量投影。生成投影的入口是 `follow --mode monitor`：`--notify none` 只维护投影与信号账本、不发送消息，`--notify local` 同时启用已有本机提醒。因此无需开启通知即可为看板提供数据；运行方式与预算见 README 与[运行模式](modes.md)，前端本身不替用户启用它。仅有原始日志或旧的 `project --rebuild` 游标时，普通模式会明确提示投影缺失或过期；record-only 模式不运行新的计算轮次，页面不会把它当成已赶上最新来源。
 
 如果已有数据库只有旧版离线投影，可显式采用旧库只读快照：
 

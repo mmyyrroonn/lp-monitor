@@ -27,6 +27,8 @@ pnpm lp follow --config config/robinhood.json --watchlist config/watchlist.stock
 
 完成 catalogue 后可直接复用同一数据库启动默认 latest-only follow；follow 仍不追赶未登记的旧池，历史补采必须显式使用 ingest 或 history。目录报告中的协议版本、源名单 hash、供应商完整性假设、排除协议和 missing 必须随报告一起审阅。
 
+`follow` 提供三种明确组合（默认 record-only，旧 `--notify local` 保持兼容）：`--mode record|monitor` 与 `--notify none|local`，其中 monitor-none 维护投影与信号账本但不发送、不积压普通提醒，monitor-local 才写入本地 outbox。投递已与采集解耦：批次不再等待 sink，静默/重新启用、启用代次与发送前复核语义见 [运行模式](docs/modes.md)。
+
 ## 2026-09-13 代币热度前端
 
 新增本机只读监控台：`pnpm dashboard --db data/recorder.sqlite`，打开 `http://127.0.0.1:8787`。支持热度排行、分钟热力图、历史分钟回看、代币/池详情、自选和运行状态。数据缺失或过期明确标注；不会自动启动采集。已有旧版数据库可显式使用 `--legacy-snapshot`，需要匹配原观察名单并通过来源核验。完整参数、统计口径和边界见[前端使用说明](docs/dashboard.md)。
@@ -195,17 +197,18 @@ P0 身份快照中的 decimals 自记录块向后沿用；若与已知同高度�
 ## P4 本机提醒
 
 ```powershell
-pnpm lp follow --config config/robinhood.json --duration 10m --notify local
+pnpm lp follow --config config/robinhood.json --duration 10m --mode monitor --notify local
+# 等价旧写法：follow --notify local
 # 可选：--signals config/signals.initial.json --metadata config/metric-metadata.json
 pnpm build
 node artifacts/p4/verify-acceptance.mjs
 ```
 
-follow 默认只记录；--notify local 才在每个完整范围事务中更新P2/P3与信号，并在提交后输出控制台和数据库路径后追加 .alerts.jsonl 的文件。只接受local，不接受聊天/email/webhook地址。初始参数与开关见config/signals.initial.json：金额是USDG估值micro单位，20k为20000000000；更改阈值会改变配置hash并重检旧提醒。
+follow 默认只记录（record/none）；`--mode monitor --notify local` 才在每个完整范围事务中更新P2/P3与信号，并在提交后异步输出控制台和数据库路径后追加 .alerts.jsonl 的文件。只接受local，不接受聊天/email/webhook地址。`--mode monitor --notify none` 做同样的投影和信号账本维护，但不打开本地 sink、不生成可投递普通 pending；silent 期间的普通提醒在重新启用后不会补发，只有已发送身份的必要撤回会补发。发送前复核 revision、active 与数据年龄（普通机会 15 分钟过期），完整合同见[运行模式](docs/modes.md)。初始参数与开关见config/signals.initial.json：金额是USDG估值micro单位，20k为20000000000；更改阈值会改变配置hash并重检旧提醒。
 
 候选使用滚动过去1分钟；热度确认使用滚动过去5分钟，两种确认规则独立留痕。连续确认/降温比较相邻、不重叠的5分钟区间；15分钟和1小时用于统计，不新增提醒门槛。300秒冷却不屏蔽同口径翻倍升级或再热；缺口不判降温。样本不足/零基线/未知量保持null或unknown；原币不能套估值阈值。流动性动作与Swap后L仅作附注，不等于已验证撤资或LP收益。
 
-每条提醒有稳定id、递增revision和provisional标记。历史事件/时间/覆盖/登记修正会撤回受影响证据并重评当前状态；修复范围尚未恢复时也能保留撤回。文件写完而sent未落盘时允许重试，JSONL消费者应以id/revision识别重复。旧pending修订被新修订替代后跳过；普通backfill/synthetic不会投递到live sink。重启先重检历史锚点，再恢复旧live队列，旧历史不会自动提升为实时提醒。
+每条提醒有稳定id、递增revision和provisional标记。历史事件/时间/覆盖/登记修正会撤回受影响证据并重评当前状态；修复范围尚未恢复时也能保留撤回。文件写完而sent未落盘时允许重试，JSONL消费者应以id/revision识别重复。旧pending修订被新修订替代后跳过；普通backfill/synthetic不会投递到live sink。重启先重检历史锚点，再恢复旧live队列，旧历史不会自动提升为实时提醒。发送复核会跳过已过期普通机会；撤回的资格独立于普通 TTL。
 
 实时每批使用增量投影和有界窗口；2秒是轮询等待，不代表端到端延迟承诺。P5历史限制及P6未完成的长时验收见最新实施状态。离线验收保留源库，历史样本提醒数为0；合成示例包含状态序列，liquidity-watch仅用于格式展示。详见[P4验收](docs/reviews/2026-09-09-p4-acceptance.md)与[示例](artifacts/p4/rendered.txt)。
 新池出生分钟只要已扫前缀完整，即可用已观测partial量判断绝对候选；出生前及不完整出生分钟仍不进入历史基线。该P4适配使metric version变为p3-v3，未修改链配置或ABI。

@@ -23,6 +23,11 @@ import { StaleMetricProjectionError } from '../storage/metric-store.js';
 import { SqliteProjectionStore } from '../storage/projection-store.js';
 import { registryCacheFor, type PreparedRegistry } from '../storage/registry-cache.js';
 import {
+  beginCommitBoundary,
+  endCommitBoundary,
+  withCommitBoundary,
+} from '../storage/commit-boundary.js';
+import {
   buildMetricsReport,
   type MetricInput,
   type MetricsReport,
@@ -482,350 +487,378 @@ export function projectSignals(
   timings?: BatchTimings,
   selection?: SignalSelectionContext,
 ): AlertRecord[] {
-  let claimed = false;
-  const records = db
-    .transaction(() => {
-      if (
-        !liveChanges &&
-        db.prepare('select 1 from live_projection_cursors where scope_id=?').get(input.scopeId)
-      ) {
+  const armedRound: { workspace: LiveWorksetStore | null } = { workspace: null };
+  const boundary = beginCommitBoundary(db);
+  let records: AlertRecord[];
+  try {
+    records = db
+      .transaction(() => {
         if (
-          db.prepare('select 1 from live_dirty_logs where scope_id=? limit 1').get(input.scopeId) &&
-          !new SqliteProjectionStore(db).read(
+          !liveChanges &&
+          db.prepare('select 1 from live_projection_cursors where scope_id=?').get(input.scopeId)
+        ) {
+          if (
+            db
+              .prepare('select 1 from live_dirty_logs where scope_id=? limit 1')
+              .get(input.scopeId) &&
+            !new SqliteProjectionStore(db).read(
+              input.scopeId,
+              input.registryScopeId,
+              input.configVersion,
+            )
+          )
+            throw new StaleMetricProjectionError();
+          liveChanges = new LiveProjectionStore(db).sync(
             input.scopeId,
             input.registryScopeId,
             input.configVersion,
-          )
-        )
-          throw new StaleMetricProjectionError();
-        liveChanges = new LiveProjectionStore(db).sync(
-          input.scopeId,
-          input.registryScopeId,
-          input.configVersion,
-        );
-      }
-      const evaluator = createSignalEvaluator(config);
-      // Retain the existing coverage horizon limit. Larger sample requirements
-      // remain insufficient evidence instead of crashing an accepted configuration.
-      const historyMinutes = Math.min(
-        10080,
-        Math.max(
-          180,
-          config.candidate.samples + 10,
-          config.confirmRelative.samples * 5 + 10,
-          config.cooling.buckets * 5 + 10,
-        ),
-      );
-      // Selecting here rather than inside the build is what keeps the selection and the read on one
-      // window: `sinceSec` is the same expression over the same accepted tip that the build derives
-      // its own lower bound from, so a pool the workset keeps is a pool the report can still see
-      // events for, and one it retires is one the read already stopped returning.
-      const tip = liveChanges ? new SqliteRangeStore(db).acceptedTip(input.scopeId) : null;
-      const sinceSec = tip ? Math.floor(tip.timestampSec / 60) * 60 - historyMinutes * 60 : null;
-      const eventIndex = liveChanges ? eventIndexFor(db, input.scopeId) : null;
-      const workspace = eventIndex ? liveWorksetFor(db, input.scopeId, eventIndex) : null;
-      const registry = workspace
-        ? (selection?.registry?.view ??
-          registryCacheFor(db, input.registryScopeId, input.scopeId).prepare().view)
-        : null;
-      // Read for the selection alone. The build runs a sync of its own, so a read taken after it
-      // could name a repair this round has not reached yet; reading before it errs towards
-      // reconsidering the pools with memory, which is the direction that cannot lose a reminder.
-      const selectionCursor = statement(db, 'select * from signal_cursors where scope_id=?').get(
-        input.scopeId,
-      ) as Cursor | undefined;
-      const selectionRepair = statement(
-        db,
-        'select min_block from live_pending_signal_repairs where scope_id=?',
-      ).get(input.scopeId) as { min_block: number } | undefined;
-      const selected =
-        liveChanges && workspace && eventIndex && registry && tip && sinceSec !== null
-          ? selectWorkset({
-              workspace,
-              context,
-              liveChanges,
-              changedPoolIds:
-                selection?.registry?.changedPoolIds ?? new Set(liveChanges.affectedPoolIds),
-              cursor: selectionCursor,
-              repair: selectionRepair,
-              tip,
-              sinceSec,
-            })
-          : null;
-      const report = buildMetricsReport(
-        db,
-        input,
-        liveChanges
-          ? {
-              live: {
-                historyMinutes,
-                ...(selected && registry && eventIndex
-                  ? {
-                      poolIds: selected,
-                      registry,
-                      eventIndex,
-                      // The round that accepted this batch already moved the window. Handing back its
-                      // own delta is what lets the report invalidate a quote it revised instead of
-                      // reading the sync it runs itself, which sees an empty journal by then.
-                      changes: liveChanges,
-                    }
-                  : {}),
-              },
-              timings,
-            }
-          : { timings },
-      );
-      const configHash = digest({
-        signal: evaluator.version,
-        chain: input.configVersion,
-        metadata: input.metadata,
-        usdg: input.usdg,
-        assets: input.assets.assets,
-        metricVersion: report.version,
-      });
-      const old = statement(db, 'select * from signal_cursors where scope_id=?').get(
-        input.scopeId,
-      ) as Cursor | undefined;
-      const oldEvidence = old ? decodeSignalState<Evidence>(old.evidence_json) : undefined;
-      const pendingRepair = statement(
-        db,
-        'select min_block from live_pending_signal_repairs where scope_id=?',
-      ).get(input.scopeId) as { min_block: number } | undefined;
-      if (
-        old &&
-        !oldEvidence?.branchRecovery &&
-        old.config_hash === configHash &&
-        old.source_hash === report.sourceHash &&
-        !pendingRepair
-      )
-        return [];
-      const evidence = readEvidence(db, input, report, liveChanges?.registry);
-      let repair: bigint | null = null;
-      const affected = new Set<string>();
-      let branchChanged = false;
-      if (old) {
-        if (old.config_hash !== configHash) {
-          repair = 0n;
-          affected.add('*');
-        } else {
-          repair = repairedFrom(
-            decodeSignalState<Evidence>(old.evidence_json),
-            evidence,
-            BigInt(old.block_number),
-            affected,
           );
-          if (
-            report.at.number < BigInt(old.block_number) ||
-            (report.at.number === BigInt(old.block_number) && report.at.hash !== old.block_hash)
-          ) {
-            branchChanged = true;
+        }
+        const evaluator = createSignalEvaluator(config);
+        // Retain the existing coverage horizon limit. Larger sample requirements
+        // remain insufficient evidence instead of crashing an accepted configuration.
+        const historyMinutes = Math.min(
+          10080,
+          Math.max(
+            180,
+            config.candidate.samples + 10,
+            config.confirmRelative.samples * 5 + 10,
+            config.cooling.buckets * 5 + 10,
+          ),
+        );
+        // Selecting here rather than inside the build is what keeps the selection and the read on one
+        // window: `sinceSec` is the same expression over the same accepted tip that the build derives
+        // its own lower bound from, so a pool the workset keeps is a pool the report can still see
+        // events for, and one it retires is one the read already stopped returning.
+        const tip = liveChanges ? new SqliteRangeStore(db).acceptedTip(input.scopeId) : null;
+        const sinceSec = tip ? Math.floor(tip.timestampSec / 60) * 60 - historyMinutes * 60 : null;
+        const eventIndex = liveChanges ? eventIndexFor(db, input.scopeId) : null;
+        const workspace = eventIndex ? liveWorksetFor(db, input.scopeId, eventIndex) : null;
+        const registry = workspace
+          ? (selection?.registry?.view ??
+            registryCacheFor(db, input.registryScopeId, input.scopeId).prepare().view)
+          : null;
+        // Read for the selection alone. The build runs a sync of its own, so a read taken after it
+        // could name a repair this round has not reached yet; reading before it errs towards
+        // reconsidering the pools with memory, which is the direction that cannot lose a reminder.
+        const selectionCursor = statement(db, 'select * from signal_cursors where scope_id=?').get(
+          input.scopeId,
+        ) as Cursor | undefined;
+        const selectionRepair = statement(
+          db,
+          'select min_block from live_pending_signal_repairs where scope_id=?',
+        ).get(input.scopeId) as { min_block: number } | undefined;
+        const selected =
+          liveChanges && workspace && eventIndex && registry && tip && sinceSec !== null
+            ? selectWorkset({
+                workspace,
+                context,
+                liveChanges,
+                // Both sides of what moved have to be reconsidered: the registry identities that
+                // changed before this round, and the pools whose projected events this round
+                // revised or removed. Forwarding the prepared view alone would drop the event side.
+                changedPoolIds: new Set([
+                  ...(selection?.registry?.changedPoolIds ?? []),
+                  ...liveChanges.affectedPoolIds,
+                ]),
+                cursor: selectionCursor,
+                repair: selectionRepair,
+                tip,
+                sinceSec,
+              })
+            : null;
+        const report = buildMetricsReport(
+          db,
+          input,
+          liveChanges
+            ? {
+                live: {
+                  historyMinutes,
+                  ...(selected && registry && eventIndex
+                    ? {
+                        poolIds: selected,
+                        registry,
+                        eventIndex,
+                        // The round that accepted this batch already moved the window. Handing back its
+                        // own delta is what lets the report invalidate a quote it revised instead of
+                        // reading the sync it runs itself, which sees an empty journal by then.
+                        changes: liveChanges,
+                      }
+                    : {}),
+                },
+                timings,
+              }
+            : { timings },
+        );
+        const configHash = digest({
+          signal: evaluator.version,
+          chain: input.configVersion,
+          metadata: input.metadata,
+          usdg: input.usdg,
+          assets: input.assets.assets,
+          metricVersion: report.version,
+        });
+        const old = statement(db, 'select * from signal_cursors where scope_id=?').get(
+          input.scopeId,
+        ) as Cursor | undefined;
+        const oldEvidence = old ? decodeSignalState<Evidence>(old.evidence_json) : undefined;
+        const pendingRepair = statement(
+          db,
+          'select min_block from live_pending_signal_repairs where scope_id=?',
+        ).get(input.scopeId) as { min_block: number } | undefined;
+        if (
+          old &&
+          !oldEvidence?.branchRecovery &&
+          old.config_hash === configHash &&
+          old.source_hash === report.sourceHash &&
+          !pendingRepair
+        )
+          return [];
+        const evidence = readEvidence(db, input, report, liveChanges?.registry);
+        let repair: bigint | null = null;
+        const affected = new Set<string>();
+        let branchChanged = false;
+        if (old) {
+          if (old.config_hash !== configHash) {
+            repair = 0n;
             affected.add('*');
-            repair = repair === null || report.at.number < repair ? report.at.number : repair;
+          } else {
+            repair = repairedFrom(
+              decodeSignalState<Evidence>(old.evidence_json),
+              evidence,
+              BigInt(old.block_number),
+              affected,
+            );
+            if (
+              report.at.number < BigInt(old.block_number) ||
+              (report.at.number === BigInt(old.block_number) && report.at.hash !== old.block_hash)
+            ) {
+              branchChanged = true;
+              affected.add('*');
+              repair = repair === null || report.at.number < repair ? report.at.number : repair;
+            }
           }
         }
-      }
-      if (liveChanges?.repairFrom !== null && liveChanges?.repairFrom !== undefined) {
-        repair =
-          repair === null || liveChanges.repairFrom < repair ? liveChanges.repairFrom : repair;
-        // A revised quote can affect downstream pools; conservatively invalidate
-        // provisional dependencies from this block even after hot-window expiry.
-        affected.add('*');
-      }
-      if (pendingRepair) {
-        const block = BigInt(pendingRepair.min_block);
-        repair = repair === null || block < repair ? block : repair;
-        affected.add('*');
-      }
-      if (oldEvidence?.branchRecovery) {
-        branchChanged = true;
-        affected.add('*');
-        repair = 0n;
-      }
-      const records =
-        repair === null
-          ? []
-          : retractSignals(
+        if (liveChanges?.repairFrom !== null && liveChanges?.repairFrom !== undefined) {
+          repair =
+            repair === null || liveChanges.repairFrom < repair ? liveChanges.repairFrom : repair;
+          // A revised quote can affect downstream pools; conservatively invalidate
+          // provisional dependencies from this block even after hot-window expiry.
+          affected.add('*');
+        }
+        if (pendingRepair) {
+          const block = BigInt(pendingRepair.min_block);
+          repair = repair === null || block < repair ? block : repair;
+          affected.add('*');
+        }
+        if (oldEvidence?.branchRecovery) {
+          branchChanged = true;
+          affected.add('*');
+          repair = 0n;
+        }
+        const records =
+          repair === null
+            ? []
+            : retractSignals(
+                db,
+                input.scopeId,
+                context,
+                'source-history-revised',
+                repair,
+                affected.has('*') ? undefined : affected,
+              );
+        const epoch =
+          old && !branchChanged && old.config_hash === configHash
+            ? old.epoch
+            : digest({
+                configHash,
+                scopeId: input.scopeId,
+                ...(branchChanged ? { branch: report.at.hash } : {}),
+              });
+        const present = presentationIndex(report, input);
+        // One measured stage around the real per-pool evaluation and outbox work; the
+        // report's own stages (registry/coverage/valuation/windows) are measured
+        // separately inside buildMetricsReport, so no interval is counted twice.
+        const evaluatedPoolIds: string[] = [];
+        const auditPayloads = new Map<string, string>();
+        const evaluateWindows = () => {
+          for (const w of report.windows) {
+            evaluatedPoolIds.push(w.poolId);
+            const row = statement(
               db,
-              input.scopeId,
-              context,
-              'source-history-revised',
-              repair,
-              affected.has('*') ? undefined : affected,
-            );
-      const epoch =
-        old && !branchChanged && old.config_hash === configHash
-          ? old.epoch
-          : digest({
-              configHash,
-              scopeId: input.scopeId,
-              ...(branchChanged ? { branch: report.at.hash } : {}),
+              'select payload_json from signal_snapshots where scope_id=? and pool_id=?',
+            ).get(input.scopeId, w.poolId) as { payload_json: string } | undefined;
+            const previous =
+              row && !branchChanged
+                ? decodeSignalState<SignalSnapshot>(row.payload_json)
+                : initialSignalSnapshot();
+            const coverage = w.rolling
+              ? w.rolling['1m'].status === 'closed'
+                ? 'complete'
+                : w.rolling['1m'].status === 'gap'
+                  ? 'gap'
+                  : 'warming'
+              : w.partialCurrent?.status === 'partial'
+                ? 'complete'
+                : w.partialCurrent?.status === 'gap'
+                  ? 'gap'
+                  : 'warming';
+            // Reconsider a corrected entry bucket under the existing episode and
+            // logical cooldown. Only material escalation can bypass that cooldown;
+            // unchanged quantities cannot reappear as a fresh historical reminder.
+            const correctedEntry =
+              repair !== null &&
+              !branchChanged &&
+              (affected.has('*') || affected.has(w.poolId)) &&
+              previous.lastAlertScale === '5m' &&
+              previous.lastFiveEndSec !== null &&
+              previous.lastAlertSec === previous.lastFiveEndSec;
+            const evaluationPrevious = correctedEntry
+              ? { ...previous, lastFiveEndSec: previous.lastFiveEndSec! - 300 }
+              : previous;
+            const decision = evaluator.evaluate(evaluationPrevious, {
+              pool: w.pool,
+              batchId: context.batchId,
+              observedAtMs: context.observedAtMs,
+              endAnchor: report.at,
+              watermarkSec: report.at.timestampSec,
+              metrics: w,
+              coverage,
+              epoch,
+              presentation: present(w.poolId, report.at.timestampSec).presentation,
             });
-      const present = presentationIndex(report, input);
-      // One measured stage around the real per-pool evaluation and outbox work; the
-      // report's own stages (registry/coverage/valuation/windows) are measured
-      // separately inside buildMetricsReport, so no interval is counted twice.
-      const evaluatedPoolIds: string[] = [];
-      const auditPayloads = new Map<string, string>();
-      const evaluateWindows = () => {
-        for (const w of report.windows) {
-          evaluatedPoolIds.push(w.poolId);
-          const row = statement(
+            const snapshotChanged = !isDeepStrictEqual(previous, decision.nextSnapshot);
+            if (snapshotChanged || !row)
+              statement(
+                db,
+                `insert into signal_snapshots(scope_id,pool_id,payload_json) values(?,?,?)
+           on conflict(scope_id,pool_id) do update set payload_json=excluded.payload_json`,
+              ).run(input.scopeId, w.poolId, encodeSignalState(decision.nextSnapshot));
+            const drafts =
+              decision.alertDrafts ?? (decision.alertDraft ? [decision.alertDraft] : []);
+            // Audit material state transitions, matched decisions and historical
+            // evaluations. Quiet pools do not append a receipt for every poll.
+            const auditChanged = !isDeepStrictEqual(
+              {
+                ...previous,
+                lastFiveEndSec: decision.nextSnapshot.lastFiveEndSec,
+                lastHeatSec: decision.nextSnapshot.lastHeatSec,
+              },
+              decision.nextSnapshot,
+            );
+            if (auditChanged || drafts.length > 0)
+              statement(
+                db,
+                `insert into signal_evaluations(scope_id,batch_id,source_hash,pool_id,payload_json) values(?,?,?,?,?)
+           on conflict(scope_id,batch_id,source_hash,pool_id) do nothing`,
+              ).run(
+                input.scopeId,
+                context.batchId,
+                report.sourceHash,
+                w.poolId,
+                compactSignalJson(
+                  db,
+                  {
+                    matches: decision.matches,
+                    evaluations: decision.evaluations,
+                    at: report.at,
+                    observedAtMs: context.observedAtMs,
+                    coverage,
+                  },
+                  auditPayloads,
+                ),
+              );
+            for (const draft of drafts) {
+              const evidenceAt = present(
+                w.poolId,
+                draft.logicalTimeSec ?? draft.watermarkSec,
+                draft.metrics.partialCurrent === null,
+              );
+              const record = commitSignalDecision(
+                db,
+                input.scopeId,
+                { ...decision, alertDraft: { ...draft, presentation: evidenceAt.presentation } },
+                draft.historical && context.captureMode === 'live'
+                  ? 'backfill'
+                  : context.captureMode,
+                {
+                  metricSourceHash: report.sourceHash,
+                  projectionSourceHash: report.projectionSourceHash,
+                  metricVersion: report.version,
+                  chainConfigVersion: report.configVersion,
+                  assetVersion: report.assetVersion,
+                  metadataVersion: report.metadata.version,
+                  evidenceEventIds: evidenceAt.evidenceEventIds,
+                },
+              );
+              if (record) records.push(record);
+            }
+          }
+        };
+        measureStage(timings, 'signals', evaluateWindows);
+        if (workspace && selected !== null) {
+          // Membership is a claim about the durable snapshots, not about what this round reached: a
+          // pool keeps its place while the state machine still has something to read back. The
+          // snapshot is re-read here rather than taken from the decision, because a branch change
+          // evaluates every pool from the initial state and leaves the stored one untouched.
+          const retained = new Set(workspace.members());
+          const stored = statement(
             db,
             'select payload_json from signal_snapshots where scope_id=? and pool_id=?',
-          ).get(input.scopeId, w.poolId) as { payload_json: string } | undefined;
-          const previous =
-            row && !branchChanged
-              ? decodeSignalState<SignalSnapshot>(row.payload_json)
-              : initialSignalSnapshot();
-          const coverage = w.rolling
-            ? w.rolling['1m'].status === 'closed'
-              ? 'complete'
-              : w.rolling['1m'].status === 'gap'
-                ? 'gap'
-                : 'warming'
-            : w.partialCurrent?.status === 'partial'
-              ? 'complete'
-              : w.partialCurrent?.status === 'gap'
-                ? 'gap'
-                : 'warming';
-          // Reconsider a corrected entry bucket under the existing episode and
-          // logical cooldown. Only material escalation can bypass that cooldown;
-          // unchanged quantities cannot reappear as a fresh historical reminder.
-          const correctedEntry =
-            repair !== null &&
-            !branchChanged &&
-            (affected.has('*') || affected.has(w.poolId)) &&
-            previous.lastAlertScale === '5m' &&
-            previous.lastFiveEndSec !== null &&
-            previous.lastAlertSec === previous.lastFiveEndSec;
-          const evaluationPrevious = correctedEntry
-            ? { ...previous, lastFiveEndSec: previous.lastFiveEndSec! - 300 }
-            : previous;
-          const decision = evaluator.evaluate(evaluationPrevious, {
-            pool: w.pool,
-            batchId: context.batchId,
-            observedAtMs: context.observedAtMs,
-            endAnchor: report.at,
-            watermarkSec: report.at.timestampSec,
-            metrics: w,
-            coverage,
-            epoch,
-            presentation: present(w.poolId, report.at.timestampSec).presentation,
-          });
-          const snapshotChanged = !isDeepStrictEqual(previous, decision.nextSnapshot);
-          if (snapshotChanged || !row)
-            statement(
-              db,
-              `insert into signal_snapshots(scope_id,pool_id,payload_json) values(?,?,?)
-           on conflict(scope_id,pool_id) do update set payload_json=excluded.payload_json`,
-            ).run(input.scopeId, w.poolId, encodeSignalState(decision.nextSnapshot));
-          const drafts = decision.alertDrafts ?? (decision.alertDraft ? [decision.alertDraft] : []);
-          // Audit material state transitions, matched decisions and historical
-          // evaluations. Quiet pools do not append a receipt for every poll.
-          const auditChanged = !isDeepStrictEqual(
-            {
-              ...previous,
-              lastFiveEndSec: decision.nextSnapshot.lastFiveEndSec,
-              lastHeatSec: decision.nextSnapshot.lastHeatSec,
-            },
-            decision.nextSnapshot,
           );
-          if (auditChanged || drafts.length > 0)
-            statement(
-              db,
-              `insert into signal_evaluations(scope_id,batch_id,source_hash,pool_id,payload_json) values(?,?,?,?,?)
-           on conflict(scope_id,batch_id,source_hash,pool_id) do nothing`,
-            ).run(
-              input.scopeId,
-              context.batchId,
-              report.sourceHash,
-              w.poolId,
-              compactSignalJson(
-                db,
-                {
-                  matches: decision.matches,
-                  evaluations: decision.evaluations,
-                  at: report.at,
-                  observedAtMs: context.observedAtMs,
-                  coverage,
-                },
-                auditPayloads,
-              ),
-            );
-          for (const draft of drafts) {
-            const evidenceAt = present(
-              w.poolId,
-              draft.logicalTimeSec ?? draft.watermarkSec,
-              draft.metrics.partialCurrent === null,
-            );
-            const record = commitSignalDecision(
-              db,
-              input.scopeId,
-              { ...decision, alertDraft: { ...draft, presentation: evidenceAt.presentation } },
-              draft.historical && context.captureMode === 'live' ? 'backfill' : context.captureMode,
-              {
-                metricSourceHash: report.sourceHash,
-                projectionSourceHash: report.projectionSourceHash,
-                metricVersion: report.version,
-                chainConfigVersion: report.configVersion,
-                assetVersion: report.assetVersion,
-                metadataVersion: report.metadata.version,
-                evidenceEventIds: evidenceAt.evidenceEventIds,
-              },
-            );
-            if (record) records.push(record);
+          for (const poolId of evaluatedPoolIds) {
+            const row = stored.get(input.scopeId, poolId) as { payload_json: string } | undefined;
+            if (row && snapshotHasMemory(decodeSignalState<SignalSnapshot>(row.payload_json)))
+              retained.add(poolId);
+            else retained.delete(poolId);
           }
+          workspace.retain(retained);
         }
-      };
-      measureStage(timings, 'signals', evaluateWindows);
-      if (workspace && selected !== null) {
-        // Membership is a claim about the durable snapshots, not about what this round reached: a
-        // pool keeps its place while the state machine still has something to read back. The
-        // snapshot is re-read here rather than taken from the decision, because a branch change
-        // evaluates every pool from the initial state and leaves the stored one untouched.
-        const retained = new Set(workspace.members());
-        const stored = statement(
+        // Armed for every round that has a workset, `null` included: a round that selected nothing
+        // has to clear whatever an earlier attempt left armed, or it would answer for a round that
+        // never committed. What is armed here becomes standing only once the round is durable.
+        if (workspace) {
+          armedRound.workspace = workspace;
+          workspace.arm(selected !== null ? (tip?.timestampSec ?? null) : null);
+        }
+        statement(
           db,
-          'select payload_json from signal_snapshots where scope_id=? and pool_id=?',
-        );
-        for (const poolId of evaluatedPoolIds) {
-          const row = stored.get(input.scopeId, poolId) as { payload_json: string } | undefined;
-          if (row && snapshotHasMemory(decodeSignalState<SignalSnapshot>(row.payload_json)))
-            retained.add(poolId);
-          else retained.delete(poolId);
-        }
-        workspace.retain(retained);
-      }
-      // Armed for every round that has a workset, `null` included: a round that selected nothing
-      // has to clear whatever an earlier attempt left armed, or it would answer for a round that
-      // never committed. What is armed here becomes standing only once the round is durable.
-      if (workspace) {
-        claimed = true;
-        workspace.arm(selected !== null ? (tip?.timestampSec ?? null) : null);
-      }
-      statement(
-        db,
-        `insert into signal_cursors(scope_id,config_hash,source_hash,epoch,block_number,block_hash,evidence_json) values(?,?,?,?,?,?,?)
+          `insert into signal_cursors(scope_id,config_hash,source_hash,epoch,block_number,block_hash,evidence_json) values(?,?,?,?,?,?,?)
       on conflict(scope_id) do update set config_hash=excluded.config_hash,source_hash=excluded.source_hash,epoch=excluded.epoch,block_number=excluded.block_number,block_hash=excluded.block_hash,evidence_json=excluded.evidence_json`,
-      ).run(
-        input.scopeId,
-        configHash,
-        report.sourceHash,
-        epoch,
-        report.at.number.toString(),
-        report.at.hash,
-        encodeSignalState(evidence),
-      );
-      statement(db, 'delete from live_pending_signal_repairs where scope_id=?').run(input.scopeId);
-      return records;
-    })
-    .immediate();
-  // The standing watermark may only move for a round whose work is durable, so it moves here and
-  // not inside the transaction. Called from inside a larger one — the recorder's, which also writes
-  // the accepted range and the projection cursor — this waits for that transaction's own commit
-  // instead, and the store is the same shared one the round selected through.
-  if (claimed && !db.inTransaction)
-    liveWorksetFor(db, input.scopeId, eventIndexFor(db, input.scopeId)).commit();
+        ).run(
+          input.scopeId,
+          configHash,
+          report.sourceHash,
+          epoch,
+          report.at.number.toString(),
+          report.at.hash,
+          encodeSignalState(evidence),
+        );
+        statement(db, 'delete from live_pending_signal_repairs where scope_id=?').run(
+          input.scopeId,
+        );
+        return records;
+      })
+      .immediate();
+  } catch (error) {
+    endCommitBoundary(db, 'rollback');
+    throw error;
+  }
+  // The standing watermark may only move for a round whose work is durable, so it moves at the
+  // outer boundary and not inside the transaction. Called from inside a larger one — the recorder's,
+  // which also writes the accepted range and the projection cursor — the effect is handed to that
+  // transaction's boundary instead, and it runs when the outermost level commits. A rollback
+  // disarms whatever this round claimed, so its retry sees exactly what the failed attempt saw.
+  if (armedRound.workspace) {
+    const armed = armedRound.workspace;
+    boundary.afterCommit(() => armed.commit());
+    boundary.onRollback(() => armed.disarm());
+  }
+  // A caller who wrapped this call in a transaction of their own — without sharing this boundary —
+  // owns the durability of every write above, and we cannot observe when they settle it. Nothing
+  // is published as durable; the conservative rollback disarms the round and the next one reselects
+  // from the committed rows. A caller who did share a boundary keeps the effects for its own end.
+  endCommitBoundary(db, boundary.outermost && db.inTransaction ? 'rollback' : 'commit');
   return records;
 }
 export function commitAcceptedSignalBatch(
@@ -851,44 +884,46 @@ export function commitAcceptedSignalBatch(
 ) {
   if (batch.scopeId !== input.scopeId) throw new Error('Signal batch scope mismatch');
   const { timings } = options;
-  return db
-    .transaction(() => {
-      options.applyMetadata?.();
-      // The accepted-range write and the live-cursor sync are the projection stage;
-      // projectSignals measures its own leaves separately.
-      const changes = measureStage(timings, 'projection', () =>
-        new SqliteRangeStore(db).acceptRange(batch, { startNewSegment: options.startNewSegment }),
-      );
-      const liveChanges = measureStage(timings, 'projection', () =>
-        new LiveProjectionStore(db).sync(
-          input.scopeId,
-          input.registryScopeId,
-          input.configVersion,
-          options.registry,
-        ),
-      );
-      const alerts = projectSignals(
-        db,
-        input,
-        config,
-        {
-          batchId: batch.id,
-          observedAtMs: batch.observedAtMs,
-          captureMode: batch.captureMode,
-        },
-        liveChanges,
-        timings,
-      );
-      return { changes, alerts };
-    })
-    .immediate();
-  // This is the transaction `projectSignals` ran inside, so this is where the round it selected
-  // becomes durable and its watermark may stand. Doing it any earlier — from inside the round —
-  // would let a rolled back batch answer for a watermark it never got to evaluate against. A
-  // caller that nests this inside a bigger transaction is that transaction's to report, and the
-  // round stays armed until it does.
-  if (!db.inTransaction)
-    liveWorksetFor(db, input.scopeId, eventIndexFor(db, input.scopeId)).commit();
+  // The workset commit a nested round arms is settled by the outermost boundary this call opens;
+  // a caller that nests it inside a bigger transaction settles it through that transaction's own
+  // boundary instead. The result is returned, not the boundary's effect: SQL commit lands before
+  // any after-commit effect, which is exactly what makes the effect post-commit work.
+  return withCommitBoundary(db, () =>
+    db
+      .transaction(() => {
+        options.applyMetadata?.();
+        // The accepted-range write and the live-cursor sync are the projection stage;
+        // projectSignals measures its own leaves separately.
+        const changes = measureStage(timings, 'projection', () =>
+          new SqliteRangeStore(db).acceptRange(batch, {
+            startNewSegment: options.startNewSegment,
+          }),
+        );
+        const liveChanges = measureStage(timings, 'projection', () =>
+          new LiveProjectionStore(db).sync(
+            input.scopeId,
+            input.registryScopeId,
+            input.configVersion,
+            options.registry,
+          ),
+        );
+        const alerts = projectSignals(
+          db,
+          input,
+          config,
+          {
+            batchId: batch.id,
+            observedAtMs: batch.observedAtMs,
+            captureMode: batch.captureMode,
+          },
+          liveChanges,
+          timings,
+          options.registry ? { registry: options.registry } : undefined,
+        );
+        return { changes, alerts };
+      })
+      .immediate(),
+  );
 }
 
 /** Objects the stored batches reference, in every scope. */

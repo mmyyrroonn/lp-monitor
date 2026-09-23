@@ -123,19 +123,26 @@ test('delivery failures are visible in progress and the final durable summary', 
   }
 });
 
-test.each(['signals', 'metadata'])(
-  'rejects ignored --%s without notify before RPC',
-  async (option) => {
-    const factory = vi.fn();
-    await expect(
-      runRecorderCli(['follow', '--duration', '1s', '--' + option, 'unused'], {
-        environment: {},
-        readerFactory: factory,
-      }),
-    ).rejects.toThrow('requires --notify local');
-    expect(factory).not.toHaveBeenCalled();
-  },
-);
+test('signals requires monitor mode; metadata is an acquisition input that may stand alone', async () => {
+  const factory = vi.fn();
+  // Signal rules are what monitor mode loads. A bare follow is record-only, so it must say
+  // `--mode monitor` rather than accept a configuration it would never use.
+  await expect(
+    runRecorderCli(['follow', '--duration', '1s', '--signals', 'unused'], {
+      environment: {},
+      readerFactory: factory,
+    }),
+  ).rejects.toThrow('--mode monitor');
+  // Metadata is no longer gated on the delivery switch: a missing file is the only failure here,
+  // and it happens before any RPC.
+  await expect(
+    runRecorderCli(['follow', '--duration', '1s', '--metadata', 'unused'], {
+      environment: {},
+      readerFactory: factory,
+    }),
+  ).rejects.toThrow();
+  expect(factory).not.toHaveBeenCalled();
+});
 
 test('signal errors distinguish missing file, invalid JSON and schema paths without input values', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'p4-review-config-'));
@@ -161,7 +168,7 @@ test('signal errors distinguish missing file, invalid JSON and schema paths with
   }
 });
 
-test('catch-up batches remain historical and cannot drain ordinary live backlog before reaching head', async () => {
+test('catch-up batches remain historical and a live run is what reaches head', async () => {
   const f = setup();
   try {
     const config = JSON.parse(readFileSync('config/robinhood.json', 'utf8'));
@@ -170,9 +177,6 @@ test('catch-up batches remain historical and cannot drain ordinary live backlog 
     const configPath = join(f.dir, 'chain.json');
     writeFileSync(configPath, JSON.stringify(config));
     const commit = vi.spyOn(signals, 'commitAcceptedSignalBatch');
-    const deliver = vi
-      .spyOn(AlertOutbox.prototype, 'deliverPending')
-      .mockResolvedValue({ sent: 0, failed: 0 });
     expect(
       await runRecorderCli([...f.args, '--config', configPath, '--notify', 'local'], f.options),
     ).toBe(0);
@@ -180,9 +184,6 @@ test('catch-up batches remain historical and cannot drain ordinary live backlog 
     expect(modes.length).toBeGreaterThan(1);
     expect(modes.slice(0, -1).every((mode) => mode === 'backfill')).toBe(true);
     expect(modes.at(-1)).toBe('live');
-    expect(deliver.mock.calls.slice(1).map((call) => call[2])).toEqual(
-      modes.map((mode) => (mode === 'live' ? undefined : 'retracted')),
-    );
   } finally {
     f.cleanup();
   }

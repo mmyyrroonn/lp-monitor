@@ -33,6 +33,7 @@ const migration = [
   '014-metadata-queue.sql',
   '016-batch-coverage-dependencies.sql',
   '017-retention-safety.sql',
+  '018-delivery-policy.sql',
 ]
   .map(loadMigration)
   .join('\n');

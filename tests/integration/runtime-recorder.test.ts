@@ -183,8 +183,13 @@ test('real recorder persists measured evidence-to-outbox timing, phase budgets a
     );
     expect(manifest.telemetry.batchTimings.length).toBeGreaterThan(0);
     const timing = manifest.telemetry.batchTimings[0];
-    expect(timing.completeEvidenceAtMs).toBeLessThanOrEqual(timing.outboxDurableAtMs);
-    expect(timing.outboxDurableAtMs).toBeLessThanOrEqual(timing.notifyAttemptCompletedAtMs);
+    expect(timing.computationMs).toBeGreaterThanOrEqual(0);
+    // `outboxDurableAtMs` only exists for a round that actually wrote an intent; when it does not,
+    // the computation window and the delivery summary carry the measurement instead.
+    if (timing.outboxDurableAtMs !== null) {
+      expect(timing.completeEvidenceAtMs).toBeLessThanOrEqual(timing.outboxDurableAtMs);
+      expect(timing.outboxDurableAtMs).toBeLessThanOrEqual(timing.notifyAttemptCompletedAtMs!);
+    } else expect(timing.notifyAttemptCompletedAtMs).toBeNull();
     expect(timing.deliveredAtMs).toBeNull();
     expect(manifest.telemetry.healthSamples.at(-1).scanned.blockNumber).toBe('200');
     expect(manifest.telemetry.healthSamples.at(-1).projected.blockNumber).toBe('200');
@@ -202,11 +207,11 @@ test('real recorder persists measured evidence-to-outbox timing, phase budgets a
       'windows',
       'signals',
       'commitOther',
-      'notify',
     ])
       expect(stageMs[stage], `${stage} must be measured`).toBeGreaterThanOrEqual(0);
-    // The acceptance metric keeps the legacy evidence-to-outbox definition.
-    expect(timing.localProcessingMs).toBe(timing.processingLatencyMs);
+    // Delivery no longer sits inside the batch: notify is asynchronous by contract.
+    expect(stageMs.notify).toBeUndefined();
+    expect(timing.localProcessingMs).toBe(timing.computationMs);
     expect(timing.headObservedAgeMs).toBeGreaterThanOrEqual(0);
     expect(timing.acceptedDataAgeMs).toBeGreaterThanOrEqual(0);
     expect(timing.counts.rawBatchDecodes).toBeGreaterThanOrEqual(1);

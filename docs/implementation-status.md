@@ -1,5 +1,9 @@
 # 实施状态与窗口交接
 
+## 2026-09-23 Issue #6：采集、实时投影与通知解耦
+
+按 #6 的 PR A–E 实施：事务/缓存提交边界（workset 不可达 commit、PreparedRegistry 贯穿选池、外层回滚失效）、record-only 增量快路径、显式 `--mode record|monitor` × `--notify none|local` 三组合与静默投递策略（迁移 018）、进程内单 owner 异步 dispatcher（批次不再等待 sink），以及三模式离线联测与文档。详细范围、验证命令、迁移/回滚见[实施记录](reviews/2026-09-23-issue-6-decoupling.md)与[运行模式](modes.md)。本轮为离线验证：未连接真实 RPC、未重放生产库、未做长时实链运行。
+
 ## 2026-09-13 计划：完整股票池目录、低开销存储与热度研究
 
 用户确认采用完整池目录、有限代表性历史和实时采集制定热度标准，不建设整链归档。已保存[主实施计划](superpowers/plans/2026-09-13-stock-pool-heat-research.md)及[设计](superpowers/specs/2026-09-13-stock-pool-heat-research-design.md)，并拆成目录恢复、存储压缩、历史与研究三个子计划。

@@ -69,6 +69,8 @@ export interface BatchTimingSample {
   rpcAcquisitionMs: number | null;
   /** Time when a COMPLETE range and all required minute evidence were available. */
   completeEvidenceAtMs: number | null;
+  /** Evidence available to this batch's transaction landing: the actual computation window. */
+  computationMs?: number | null;
   outboxDurableAtMs: number | null;
   deliveredAtMs: number | null;
 }
@@ -228,13 +230,16 @@ export function aggregateOpsReport(input: OpsReportInput) {
     finishedAtMs: input.finishedAtMs,
     latency: {
       localProcessingMs: percentile(
-        input.batchTimings.flatMap((x) =>
-          x.completeEvidenceAtMs !== null &&
-          x.outboxDurableAtMs !== null &&
-          x.outboxDurableAtMs >= x.completeEvidenceAtMs
+        input.batchTimings.flatMap((x) => {
+          if (x.completeEvidenceAtMs === null) return [];
+          // The computation window is measured for every computed batch. The outbox-durable pair is
+          // the fallback for runs recorded before that field existed, and only describes rounds
+          // that actually wrote intents.
+          if (x.computationMs != null && x.computationMs >= 0) return [x.computationMs];
+          return x.outboxDurableAtMs !== null && x.outboxDurableAtMs >= x.completeEvidenceAtMs
             ? [x.outboxDurableAtMs - x.completeEvidenceAtMs]
-            : [],
-        ),
+            : [];
+        }),
       ),
       rpcAcquisitionMs: percentile(
         input.batchTimings.flatMap((x) =>

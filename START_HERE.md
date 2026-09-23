@@ -71,15 +71,17 @@ P5交付与限制见 [验收说明](docs/reviews/2026-09-10-p5-acceptance.md) �
 ## 本机入口
 
 ```powershell
-# 默认只记录；启用提醒必须显式指定本机渠道
-pnpm lp follow --config config/robinhood.json --duration 10m --notify local
+# 默认只记录；监控但不发送：--mode monitor --notify none
+# 启用本机提醒：
+pnpm lp follow --config config/robinhood.json --duration 10m --mode monitor --notify local
+# 旧写法 --notify local 仍等价；三组合与静默语义见 docs/modes.md
 # 离线历史与合成验收，不连接RPC
 pnpm build
 node artifacts/p4/verify-acceptance.mjs
 pnpm lp metrics --db data/p4-acceptance.sqlite --watchlist config/watchlist.amc.json --rwa AMC --window 5m
 ```
 
-JSONL写入数据库路径加.alerts.jsonl。配置见config/signals.initial.json，金额阈值以USDG估值的micro单位表达。每条规则有enabled/threshold/version；默认60个完整1m或12个完整5m基线；不足/零中位数保留null。实时仅输出过去1m、5m、15m和1h的滚动窗口，以已采集链上时间为终点；边界时间或覆盖不确定则不可用。
+JSONL写入数据库路径加.alerts.jsonl；`--notify none` 不打开该 sink。投递在提交后异步进行，不再等待 sink；发送前复核 revision/active/数据年龄。配置见config/signals.initial.json，金额阈值以USDG估值的micro单位表达。每条规则有enabled/threshold/version；默认60个完整1m或12个完整5m基线；不足/零中位数保留null。实时仅输出过去1m、5m、15m和1h的滚动窗口，以已采集链上时间为终点；边界时间或覆盖不确定则不可用。
 
 P4历史输入有603笔Swap、34笔未计价、29个闭合分钟、1827个登记池；该样本提醒为0。本轮无新RPC。合成提醒示例与真实历史结果分开，liquidity-watch只有格式示例。阈值未经过P5效果验证。
 
@@ -93,7 +95,7 @@ P4历史输入有603笔Swap、34笔未计价、29个闭合分钟、1827个登记
 
 历史minute-close决策必须避免前视；实录按保存批次与observedAt复算，同一evaluateSignal核心可复用。保留两条确认规则独立命中结果、未计价/缺口/零基线、池出生前历史限制与右截尾。不得将离线回放接入实时通知sink。
 
-首版提醒均为provisional。P4对历史修正采取证据失效撤回并重评当前状态，尚不是精确历史策略重演。默认follow只记录；--notify local下每批原子更新信号。2026-09-12已改为增量投影和有界窗口；2秒仍只是轮询等待，实际长时延迟验收未补跑。
+首版提醒均为provisional。P4对历史修正采取证据失效撤回并重评当前状态，尚不是精确历史策略重演。默认follow只记录；monitor两种子模式下每批原子更新信号，none只维护账本不发消息。2026-09-12已改为增量投影和有界窗口；2秒仍只是轮询等待，实际长时延迟验收未补跑。
 
 不连接钱包、不执行交易、不启动永久服务；原research、tooling、.agents和缓存保留。历史部署起点、公共RPC完整性假设继续保留，毛交易费估计不是账户收益。
 

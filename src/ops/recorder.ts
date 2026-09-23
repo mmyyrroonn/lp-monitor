@@ -23,8 +23,11 @@ import { LiveProjectionStore } from '../storage/live-projection.js';
 import { pruneLiveWindow, pruneRawBatches, pruneRawLogs } from '../storage/retention.js';
 import { readRetentionSafety, registerRetentionConsumer } from '../storage/retention-state.js';
 import { registryCacheFor } from '../storage/registry-cache.js';
+import { withCommitBoundary } from '../storage/commit-boundary.js';
 import { OperationFilterIndex } from '../ingest/operation-filter-index.js';
 import { AlertOutbox } from '../notify/outbox.js';
+import { AlertDispatcher } from '../notify/dispatcher.js';
+import { setDeliveryMode } from '../notify/delivery-policy.js';
 import { createConsoleSink } from '../notify/console.js';
 import { createJsonlSink } from '../notify/jsonl.js';
 import type { FollowStore } from '../ingest/follow.js';
@@ -148,9 +151,14 @@ function discoveryFailureKinds(batch: {
   ];
 }
 
+export type RecorderMode = 'record' | 'monitor';
+export type DeliveryMode = 'none' | 'local';
+
 export interface RecorderOptions {
   command: 'ingest' | 'follow';
-  notify?: 'local';
+  /** Explicit run mode. Absent keeps the historical inference: `notify: 'local'` is monitor. */
+  mode?: RecorderMode;
+  notify?: DeliveryMode;
   signalConfig?: SignalConfig;
   metricMetadata?: MetricMetadata;
   config: ChainConfig;
@@ -173,18 +181,16 @@ export interface RecorderOptions {
 }
 export async function runRecorder(options: RecorderOptions): Promise<number> {
   const { config, env } = options;
+  const mode: RecorderMode = options.mode ?? (options.notify === 'local' ? 'monitor' : 'record');
+  const delivery: DeliveryMode = options.notify ?? 'none';
+  if (mode === 'record' && delivery === 'local')
+    throw new ConfigError('notify local requires monitor mode');
+  if (options.command !== 'follow' && mode === 'monitor')
+    throw new ConfigError('monitor mode is supported only for follow');
+  if (mode === 'monitor' && (!options.signalConfig || !options.metricMetadata))
+    throw new ConfigError('monitor mode requires validated signal/metadata configuration');
   const requiredRetention = validateRetentionConfig(config, options.signalConfig);
   const latestStart = options.command === 'follow' && options.fromBlock === undefined;
-  if (
-    options.notify !== undefined &&
-    (options.notify !== 'local' ||
-      options.command !== 'follow' ||
-      !options.signalConfig ||
-      !options.metricMetadata)
-  )
-    throw new ConfigError(
-      'notify local requires follow and validated signal/metadata configuration',
-    );
   const assets = loadAssetVersion(options.watchlistPath);
   const seedMetadata = options.metricMetadata ?? loadMetricMetadata('config/metric-metadata.json');
   const deployments = { v3Factory: config.v3Factory, v4Manager: config.v4Manager };
@@ -210,8 +216,13 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       });
   })();
   const store = new SqliteRangeStore(db);
+  // Write the explicit delivery mode before any signal is evaluated, so the intents a run creates
+  // are always governed by the mode it recorded. Entering `none` suppresses undelivered intents;
+  // re-enabling from `none` promotes only withdrawals owed to identities that were really sent.
+  const deliveryState =
+    mode === 'monitor' ? setDeliveryMode(db, scopeId, delivery, Date.now()) : null;
   const metricInput: MetricInput | null =
-    options.notify === 'local' && options.metricMetadata
+    mode === 'monitor' && options.metricMetadata
       ? {
           scopeId,
           registryScopeId: discoveryScope,
@@ -222,65 +233,66 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         }
       : null;
   const outbox = new AlertOutbox(db);
-  const fileSink = createJsonlSink(options.databasePath + '.alerts.jsonl');
-  const consoleSink = createConsoleSink();
   const alertDelivery = { sent: 0, failed: 0, status: 'ok' as 'ok' | 'degraded' };
-  const drain = async (retractionsOnly = false) => {
-    if (options.notify !== 'local')
-      return { sent: 0, failed: 0, deliveredAtMs: null as number | null };
-    let deliveredAtMs: number | null = null;
-    const delivered = await outbox.deliverPending(
-      async (alert) => {
+  let dispatcher: AlertDispatcher | null = null;
+  if (mode === 'monitor' && delivery === 'local') {
+    const fileSink = createJsonlSink(options.databasePath + '.alerts.jsonl');
+    const consoleSink = createConsoleSink();
+    dispatcher = new AlertDispatcher({
+      db,
+      outbox,
+      scopeId,
+      sink: async (alert) => {
         await fileSink(alert);
         await consoleSink(alert);
-        deliveredAtMs = Date.now();
       },
-      scopeId,
-      retractionsOnly ? 'retracted' : undefined,
-    );
-    alertDelivery.sent += delivered.sent;
-    alertDelivery.failed += delivered.failed;
-    if (delivered.failed > 0) alertDelivery.status = 'degraded';
-    else if (delivered.sent > 0) alertDelivery.status = 'ok';
-    if (delivered.sent > 0 || delivered.failed > 0)
-      console.log(
-        encodeJson({
-          event: 'alert-delivery',
-          runId: id,
-          ...delivered,
-          status: alertDelivery.status,
-          retractionsOnly,
-        }),
-      );
-    return { ...delivered, deliveredAtMs };
-  };
+      onPass: (summary) => {
+        const stats = dispatcher!.stats;
+        alertDelivery.sent = stats.sent;
+        alertDelivery.failed = stats.failed;
+        alertDelivery.status = stats.status === 'degraded' ? 'degraded' : 'ok';
+        console.log(
+          encodeJson({
+            event: 'alert-delivery',
+            runId: id,
+            ...summary,
+            status: alertDelivery.status,
+          }),
+        );
+      },
+    });
+  }
+  /** Ask the dispatcher to run; never awaited on the acquisition path. */
+  const wakeDelivery = (retractionsOnly = false) => dispatcher?.wake({ retractionsOnly });
   const recoveryContext = () => ({
     batchId: 'recovery-' + randomUUID(),
     observedAtMs: Date.now(),
     captureMode: 'live' as const,
   });
   const recover = (targetScope: string, anchor: BlockAnchor | null) =>
-    db.transaction(() => {
-      const changes = anchor
-        ? store.invalidateAfter(targetScope, anchor)
-        : store.resetForWarmup(targetScope);
-      db.prepare('delete from token_metadata where block_number>?').run(
-        Number(anchor?.number ?? -1n),
-      );
-      db.prepare('delete from token_metadata_failures').run();
-      if (options.notify === 'local')
-        signalStage('recovery', () =>
-          retractSignals(
-            db,
-            scopeId,
-            recoveryContext(),
-            'scope-rechecking',
-            // Registry revalidation follows; every active reminder is provisional again.
-            0n,
-          ),
+    withCommitBoundary(db, () =>
+      db.transaction(() => {
+        const changes = anchor
+          ? store.invalidateAfter(targetScope, anchor)
+          : store.resetForWarmup(targetScope);
+        db.prepare('delete from token_metadata where block_number>?').run(
+          Number(anchor?.number ?? -1n),
         );
-      return changes;
-    })();
+        db.prepare('delete from token_metadata_failures').run();
+        if (mode === 'monitor')
+          signalStage('recovery', () =>
+            retractSignals(
+              db,
+              scopeId,
+              recoveryContext(),
+              'scope-rechecking',
+              // Registry revalidation follows; every active reminder is provisional again.
+              0n,
+            ),
+          );
+        return changes;
+      })(),
+    );
   const followStore: FollowStore = {
     acceptedTip: (scope) => store.acceptedTip(scope),
     checkpoints: (scope) => store.checkpoints(scope),
@@ -320,6 +332,10 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     discoveryBatches: 0,
     operationBatches: 0,
   };
+  // The pipeline the run actually ran, kept apart so a record-only run cannot look like a monitor
+  // run that happened to be quiet, and a monitor round that decided nothing cannot look like one
+  // that wrote an intent.
+  const pipelineCounts = { projectedRounds: 0, signalRounds: 0, outboxDurableRounds: 0 };
   // The open per-batch counter scope is tracked here so a batch that fails midway
   // cannot leave the process counting into a scope nobody will read.
   let batchWorkCounts: ReturnType<typeof openWorkCounts> | null = null;
@@ -440,7 +456,9 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     if (drain.results.length === 0) return;
     let counts = { resolved: 0, failed: 0, stale: 0 };
     try {
-      counts = db.transaction(() => storeReadyMetadata(drain.results))();
+      counts = withCommitBoundary(db, () =>
+        db.transaction(() => storeReadyMetadata(drain.results))(),
+      );
     } catch (error) {
       drain.rollback();
       throw error;
@@ -464,23 +482,25 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     if (drain.results.length === 0) return;
     const counts = { resolved: 0, failed: 0, stale: 0 };
     try {
-      db.transaction(() => {
-        Object.assign(counts, storeReadyMetadata(drain.results));
-        // Nothing a round could repair: a failure and a lease that moved are not observations.
-        if (counts.resolved === 0 || !metricInput || !options.signalConfig) return;
-        const liveChanges = new LiveProjectionStore(db).sync(
-          scopeId,
-          discoveryScope,
-          config.version,
-        );
-        projectSignals(
-          db,
-          metricInput,
-          options.signalConfig,
-          { batchId: 'metadata-' + randomUUID(), observedAtMs: Date.now(), captureMode: 'live' },
-          liveChanges,
-        );
-      })();
+      withCommitBoundary(db, () =>
+        db.transaction(() => {
+          Object.assign(counts, storeReadyMetadata(drain.results));
+          // Nothing a round could repair: a failure and a lease that moved are not observations.
+          if (counts.resolved === 0 || !metricInput || !options.signalConfig) return;
+          const liveChanges = new LiveProjectionStore(db).sync(
+            scopeId,
+            discoveryScope,
+            config.version,
+          );
+          projectSignals(
+            db,
+            metricInput,
+            options.signalConfig,
+            { batchId: 'metadata-' + randomUUID(), observedAtMs: Date.now(), captureMode: 'live' },
+            liveChanges,
+          );
+        })(),
+      );
       drain.ack();
     } catch (error) {
       // The results are not lost: their demands are still queued, and the same snapshot is offered
@@ -704,7 +724,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
     });
     telemetry.transition('starting');
     // Retry only already-established withdrawals before any new RPC can fail.
-    await drain(true);
+    await dispatcher?.drainNow(true);
     shutdown.throwIfRequested();
     const initial = await endpointReader.getAnchor('latest');
     if (options.targetBlock !== undefined) {
@@ -816,7 +836,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         if (match) recordChanges(recover(discoveryScope, match), 'discovery-reorg');
         else recordChanges(recover(discoveryScope, null), 'discovery-rebuild');
         // Invalidation is committed: withdrawals must survive registry outages.
-        await drain(true);
+        await dispatcher?.drainNow(true);
         tip = store.acceptedTip(discoveryScope);
       };
       const waitForRetry = async (
@@ -949,7 +969,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         if (match) recordChanges(recover(discoveryScope, match), 'discovery-reorg');
         else recordChanges(recover(discoveryScope, null), 'discovery-rebuild');
         // Invalidation is committed: withdrawals must survive provider outages.
-        await drain(true);
+        await dispatcher?.drainNow(true);
       };
       const confirmTargetOnce = async (): Promise<boolean> => {
         recomputeMissing();
@@ -997,7 +1017,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         (missingRanges[0]![0] <= tip.number || missingRanges[0]![0] > tip.number + 1n)
       ) {
         recordChanges(recover(discoveryScope, null), 'discovery-rebuild');
-        await drain(true);
+        await dispatcher?.drainNow(true);
         tip = store.acceptedTip(discoveryScope);
         recomputeMissing();
       }
@@ -1143,26 +1163,28 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           latest.timestampSec === priorTip.timestampSec
         ) {
           signalStage('startup', () =>
-            db.transaction(() => {
-              const liveChanges = new LiveProjectionStore(db).sync(
-                scopeId,
-                discoveryScope,
-                config.version,
-              );
-              projectSignals(
-                db,
-                metricInput,
-                options.signalConfig!,
-                {
-                  ...recoveryContext(),
-                  captureMode: 'live',
-                },
-                liveChanges,
-              );
-            })(),
+            withCommitBoundary(db, () =>
+              db.transaction(() => {
+                const liveChanges = new LiveProjectionStore(db).sync(
+                  scopeId,
+                  discoveryScope,
+                  config.version,
+                );
+                projectSignals(
+                  db,
+                  metricInput,
+                  options.signalConfig!,
+                  {
+                    ...recoveryContext(),
+                    captureMode: 'live',
+                  },
+                  liveChanges,
+                );
+              })(),
+            ),
           );
           telemetry.markProjectionFresh();
-          await drain();
+          await dispatcher?.drainNow();
         }
       }
       const start =
@@ -1193,6 +1215,12 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           // worker start the next token now that the wire is free.
           maintainMetadata();
           metadataWorker.kick();
+          // A metadata-only repair can create or supersede intents too; hand them to the
+          // dispatcher on the same cadence as new blocks.
+          wakeDelivery();
+          // The poll gap is also the retry schedule: a failed sink is re-attempted here even when
+          // no new blocks arrive, without a busy loop.
+          dispatcher?.retryDue(5_000);
           retentionStage(db, 'signal-evaluations', maintainSignalEvaluations);
           retentionStage(db, 'live-window', maintainLiveRetention);
           retentionStage(db, 'raw', maintainRawRetention);
@@ -1208,7 +1236,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
         },
         onChanges: recordChanges,
         onRecovery: async () => {
-          await drain(true);
+          await dispatcher?.drainNow(true);
           if (latestStart) return;
           // Revalidate historical registry evidence before applying a new branch.
           const head = await endpointReader.getAnchor('latest');
@@ -1237,25 +1265,14 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           // batch's own discoveries join them for the round they were found in. It is settled on
           // every path out of this batch — `publish` after the accepted transaction, `discard` for
           // everything else — so a rolled back or abandoned batch leaves no trace in the catalogue.
-          const registryContext =
-            metricInput && options.signalConfig
-              ? registryCacheFor(db, discoveryScope, scopeId)
-              : null;
-          const prepared = registryContext?.prepare() ?? null;
+          // Record-only batches use the same incremental context: collecting operations must not be
+          // the price of deciding to send a message, and the catalogue must not be re-read either.
+          const registryContext = registryCacheFor(db, discoveryScope, scopeId);
+          const prepared = registryContext.prepare();
           try {
             // A worker stopped by a critical error reports it here, at the next safe point, rather
             // than leaving the run to continue with metadata it will never get.
             throwIfMetadataFatal();
-            // Only a run without a registry context still needs the whole catalogue in memory; the
-            // referenced path plans its requests from the shared templates instead.
-            const pools =
-              prepared === null
-                ? timings.measure(
-                    'registry',
-                    () =>
-                      new PoolRegistry([...store.pools(discoveryScope), ...store.pools(scopeId)]),
-                  )
-                : null;
             // The acquisition stage wraps the fetch alone; rpcAcquisitionMs below keeps
             // its legacy wider window so existing reports stay comparable.
             const batch = await timings.measureAsync('rpcAcquisition', () =>
@@ -1267,9 +1284,8 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
                   end,
                   previous,
                   assets,
-                  pools: pools ?? undefined,
-                  registry: prepared ?? undefined,
-                  operationFilters: prepared === null ? undefined : operationFilters,
+                  registry: prepared,
+                  operationFilters,
                   ...deployments,
                   logResponseGuard: config.logResponseGuard,
                   maxLogsPerResponse: config.maxLogsPerResponse,
@@ -1413,34 +1429,35 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
             // never make them durable in a cache the outer transaction could still roll back.
             // `stage` is what puts the batch's registrations in the view the projection decodes
             // against; the batch's round is published only after it commits.
-            prepared?.stage(timed.poolRegistrations ?? []);
+            prepared.stage(timed.poolRegistrations ?? []);
             // The snapshot is taken before the transaction and acked only after it commits: what
             // completes while this batch is being stored stays in the buffer for the next one.
             const metadataDrain = metadataWorker.prepareDrain();
             const metadataCounts = { resolved: 0, failed: 0, stale: 0 };
             let changes: RangeChangeSet;
+            let committedAlerts = 0;
             try {
-              changes =
-                metricInput && options.signalConfig
-                  ? signalStage('accepted-batch', () =>
-                      commitAcceptedSignalBatch(db, metricInput, options.signalConfig!, timed, {
-                        startNewSegment: latestStart && from === start,
-                        timings,
-                        registry: prepared ?? undefined,
-                        applyMetadata: () =>
-                          Object.assign(metadataCounts, storeReadyMetadata(metadataDrain.results)),
-                      }),
-                    ).changes
-                  : (() => {
-                      const accepted = store.acceptRange(timed, {
-                        startNewSegment: latestStart && from === start,
-                      });
-                      // No signal transaction to hang the write on: without a metric input there is
-                      // no round to read it, so the observation lands in a short transaction of its
-                      // own, one commit after the range that was missing it.
-                      Object.assign(metadataCounts, storeReadyMetadata(metadataDrain.results));
-                      return accepted;
-                    })();
+              if (metricInput && options.signalConfig) {
+                const committed = signalStage('accepted-batch', () =>
+                  commitAcceptedSignalBatch(db, metricInput, options.signalConfig!, timed, {
+                    startNewSegment: latestStart && from === start,
+                    timings,
+                    registry: prepared,
+                    applyMetadata: () =>
+                      Object.assign(metadataCounts, storeReadyMetadata(metadataDrain.results)),
+                  }),
+                );
+                changes = committed.changes;
+                committedAlerts = committed.alerts.length;
+              } else {
+                changes = store.acceptRange(timed, {
+                  startNewSegment: latestStart && from === start,
+                });
+                // No signal transaction to hang the write on: without a metric input there is
+                // no round to read it, so the observation lands in a short transaction of its
+                // own, one commit after the range that was missing it.
+                Object.assign(metadataCounts, storeReadyMetadata(metadataDrain.results));
+              }
             } catch (error) {
               metadataDrain.rollback();
               throw error;
@@ -1448,21 +1465,53 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
             metadataDrain.ack();
             countMetadata(metadataCounts);
             logMetadata();
-            prepared?.publish();
-            operationFilters.publish();
+            // Publish is post-commit work: the accepted range is already durable, so a context that
+            // fails to fold its staged rows must be invalidated and reported, never turned into a
+            // rolled back batch that a retry would fetch again.
+            try {
+              prepared.publish();
+              operationFilters.publish();
+            } catch (error) {
+              registryContext.invalidate();
+              operationFilters.discard();
+              if (!result.failures.includes('post-commit-cache'))
+                result.failures.push('post-commit-cache');
+              console.error(
+                encodeJson({
+                  event: 'post-commit-cache-failure',
+                  runId: id,
+                  batchId: batch.id,
+                  committed: true,
+                  category: error instanceof Error ? error.name : 'unknown',
+                }),
+              );
+            }
             throwIfMetadataFatal();
-            const outboxDurableAtMs = metricInput ? Date.now() : null;
+            const outboxDurableAtMs = metricInput && committedAlerts > 0 ? Date.now() : null;
+            if (metricInput) {
+              pipelineCounts.projectedRounds += 1;
+              pipelineCounts.signalRounds += 1;
+              if (committedAlerts > 0) pipelineCounts.outboxDurableRounds += 1;
+            }
             const writeLatencyMs = rawWriteMs + Date.now() - commitAt;
             if (metricInput) telemetry.markProjectionFresh();
             const processingLatencyMs =
               completeEvidenceAtMs !== null && outboxDurableAtMs !== null
                 ? outboxDurableAtMs - completeEvidenceAtMs
                 : null;
-            if (processingLatencyMs !== null) reader.meter.recordProcessing(processingLatencyMs);
-            const delivery = await timings.measureAsync('notify', () =>
-              drain(batch.captureMode !== 'live'),
-            );
-            const localProcessingMs = processingLatencyMs;
+            // Actual computation is measured whether or not this round produced an intent: a
+            // monitor round that decided nothing still paid for projection, valuation and signals.
+            const computationMs =
+              completeEvidenceAtMs !== null ? Date.now() - completeEvidenceAtMs : null;
+            if (computationMs !== null) reader.meter.recordProcessing(computationMs);
+            else if (processingLatencyMs !== null)
+              reader.meter.recordProcessing(processingLatencyMs);
+            // A committed batch wakes the dispatcher and moves on: acquisition never waits for a
+            // sink. A catch-up batch asks only for withdrawals already established, so an ordinary
+            // backlog cannot be announced before the run has reached the head that makes it current.
+            wakeDelivery(batch.captureMode !== 'live');
+            const delivery = { sent: 0, failed: 0, deliveredAtMs: null as number | null };
+            const localProcessingMs = computationMs ?? processingLatencyMs;
             const headObservedAgeMs =
               telemetry.headObservedAtMs === null ? null : Date.now() - telemetry.headObservedAtMs;
             // Wall-clock age of the data this batch accepted, next to the stage
@@ -1477,10 +1526,11 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
               logs: batch.logs.length,
               rpcAcquisitionMs,
               completeEvidenceAtMs,
+              computationMs,
               outboxDurableAtMs,
               acquisitionStartedAtMs: acquisitionAt,
               headObservedAtMs: telemetry.headObservedAtMs,
-              notifyAttemptCompletedAtMs: metricInput ? Date.now() : null,
+              notifyAttemptCompletedAtMs: outboxDurableAtMs,
               deliveredAtMs: delivery.deliveredAtMs,
               writeLatencyMs,
               processingLatencyMs,
@@ -1523,7 +1573,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           } finally {
             // Every path out of this batch settles the context it prepared. `discard` after a
             // `publish` is already settled and does nothing, so the success path is untouched.
-            prepared?.discard();
+            prepared.discard();
             operationFilters.discard();
             ingestDepth--;
             // Back to a safe point with an idle acquisition side: the metadata chain may pick up
@@ -1619,6 +1669,10 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       // write itself, so what is dropped is dropped on the queue's terms and stays leasable.
       await metadataWorker.stop();
       flushMetadata();
+      // Stop delivery first: no new claim may start while the database is being closed, and the
+      // one in-flight sink write is allowed to finish rather than raced against the close. A run
+      // that ended on its own drains what it can; a requested stop releases promptly.
+      await dispatcher?.stop({ drain: !shutdown.requested });
       await reader.close?.();
     } catch (error) {
       const failure = classifyRpcError(error);
@@ -1660,6 +1714,13 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       logResponseGuard: config.logResponseGuard,
       ...result,
       alertDelivery,
+      delivery:
+        dispatcher?.stats ??
+        ({ sent: 0, failed: 0, status: 'disabled', lastDeliveredAtMs: null } as const),
+      processingMode: mode,
+      deliveryMode: mode === 'monitor' ? delivery : 'none',
+      deliveryPolicy: deliveryState?.policy ?? null,
+      pipeline: pipelineCounts,
       counts,
       meter: reader.meter.summary(),
       acceptedTip: store.acceptedTip(scopeId),
@@ -1694,7 +1755,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
           }
         : null,
       replayInputs:
-        options.notify === 'local'
+        mode === 'monitor'
           ? {
               signalConfig: options.signalConfig,
               metricMetadata: options.metricMetadata,

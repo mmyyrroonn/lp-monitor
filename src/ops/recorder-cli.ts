@@ -27,6 +27,7 @@ export async function runRecorderCli(
       strict: true,
       options: {
         config: { type: 'string' },
+        mode: { type: 'string' },
         notify: { type: 'string' },
         signals: { type: 'string' },
         metadata: { type: 'string' },
@@ -84,24 +85,40 @@ export async function runRecorderCli(
       Number(budget) < 1)
   )
     throw new ConfigError('Invalid RPC budget');
-  if (values.notify !== undefined && (values.notify !== 'local' || command !== 'follow'))
+  if (values.mode !== undefined && values.mode !== 'record' && values.mode !== 'monitor')
+    throw new ConfigError('--mode must be record or monitor');
+  if (values.notify !== undefined && values.notify !== 'none' && values.notify !== 'local')
+    throw new ConfigError('--notify must be none or local');
+  // The explicit mode is what permits signal work; the delivery switch only decides whether the
+  // result may be sent. The old `--notify local` spelling still maps to monitor/local, so existing
+  // scripts keep running, while a bare `follow` stays record-only.
+  const mode =
+    values.mode === 'monitor' || (values.mode === undefined && values.notify === 'local')
+      ? ('monitor' as const)
+      : ('record' as const);
+  const notify = values.notify === 'local' ? ('local' as const) : ('none' as const);
+  if (command === 'ingest' && values.notify === 'local')
     throw new ConfigError('notify local is supported only for follow');
-  if (values.notify !== 'local' && (values.signals !== undefined || values.metadata !== undefined))
-    throw new ConfigError('--signals/--metadata requires --notify local');
-  const notifications =
-    values.notify === 'local'
-      ? {
-          notify: 'local' as const,
-          signalConfig: loadValidatedJson(
-            String(values.signals ?? 'config/signals.initial.json'),
-            'signal configuration',
-            parseSignalConfig,
-          ),
-          metricMetadata: loadMetricMetadata(
-            String(values.metadata ?? 'config/metric-metadata.json'),
-          ),
-        }
-      : {};
+  if (command === 'ingest' && mode === 'monitor')
+    throw new ConfigError('monitor mode is supported only for follow');
+  if (mode === 'record' && values.notify === 'local')
+    throw new ConfigError('notify local requires --mode monitor');
+  if (values.signals !== undefined && mode !== 'monitor')
+    throw new ConfigError('--signals requires --mode monitor');
+  // Metadata is an acquisition and valuation input, not a delivery permission: it may be provided
+  // with the default signals file under monitor mode, or for the record path's metadata queue.
+  const signalConfig =
+    mode === 'monitor'
+      ? loadValidatedJson(
+          String(values.signals ?? 'config/signals.initial.json'),
+          'signal configuration',
+          parseSignalConfig,
+        )
+      : undefined;
+  const metricMetadata =
+    mode === 'monitor' || values.metadata !== undefined
+      ? loadMetricMetadata(String(values.metadata ?? 'config/metric-metadata.json'))
+      : undefined;
   const config = loadChainConfig(String(values.config ?? 'config/robinhood.json'));
   if (config.overlapBlocks >= config.maxRangeBlocks)
     throw new ConfigError('overlapBlocks must be smaller than maxRangeBlocks');
@@ -109,7 +126,10 @@ export async function runRecorderCli(
   const { runRecorder } = await import('./recorder.js');
   return runRecorder({
     command: command as 'ingest' | 'follow',
-    ...notifications,
+    mode,
+    notify,
+    ...(signalConfig ? { signalConfig } : {}),
+    ...(metricMetadata ? { metricMetadata } : {}),
     config,
     env,
     watchlistPath: String(values.watchlist ?? 'config/watchlist.stocks.json'),

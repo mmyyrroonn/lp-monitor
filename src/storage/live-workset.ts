@@ -130,6 +130,32 @@ export class LiveWorksetStore implements LiveWorkset {
   }
 
   /**
+   * The watermark the last durable round selected against, or null before one has committed.
+   *
+   * Exposed for diagnostics and tests: it is the whole difference between reconsidering every pool
+   * with signal memory and reconsidering only what moved.
+   */
+  get standingWatermarkSec(): number | null {
+    return this.#lastWatermarkSec;
+  }
+
+  /** The watermark a round has armed but not yet made durable; null when nothing is pending. */
+  get armedWatermarkSec(): number | null {
+    return this.#armedWatermarkSec;
+  }
+
+  /**
+   * Forget an armed watermark whose transaction failed.
+   *
+   * `arm` says what a round selected against; only a durable round may turn that into the standing
+   * watermark. A boundary that rolls back calls this so the retry of the same batch sees exactly
+   * the state the failed attempt saw, rather than answering for a round that never committed.
+   */
+  disarm(): void {
+    this.#armedWatermarkSec = null;
+  }
+
+  /**
    * The round that armed this watermark is durable; it is the standing one from here.
    *
    * This is deliberately neither something `select` nor `arm` does on its own. The standing

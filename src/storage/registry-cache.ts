@@ -4,6 +4,7 @@ import { countWork } from '../ops/work-counters.js';
 import type { PoolRegistration } from '../registry/pools.js';
 import { mergeRegistration, poolRegistrationId, registrationsEqual } from '../registry/pools.js';
 import { decodeStoredRegistration } from './registration-codec.js';
+import { registerRollbackInvalidation } from './commit-boundary.js';
 import {
   registryChangesAfter,
   registryJournalAvailable,
@@ -167,6 +168,11 @@ export class RegistryCache {
   }
 
   prepare(): PreparedRegistry {
+    // A context taken inside an open transaction can consume journal rows that transaction still
+    // has to commit. SQL rollback will not roll this in-memory advance back, so the transaction's
+    // boundary is told to invalidate this context if it fails. Outside a transaction every row read
+    // here is already durable, and there is nothing to undo.
+    if (this.database.inTransaction) registerRollbackInvalidation(this.database, this);
     // A load and an incremental advance each run inside one SQLite read snapshot, so the revision
     // a reader remembers always belongs to the rows it just read.
     const state = this.database.transaction((): PreparedState => {
