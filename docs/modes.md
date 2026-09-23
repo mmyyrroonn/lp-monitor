@@ -41,6 +41,8 @@ pnpm lp follow --config config/robinhood.json --db data/recorder.sqlite --durati
 
 发送前复核权威 revision、`active`、`CaptureMode` 与数据年龄：普通机会超过 15 分钟过期终止；撤回使用独立资格规则（只要求它是该身份的当前 revision）。
 
+投递是**至少一次**语义：sink 写成功但 `sent` 状态未落盘时，同一 id/revision 会重试；本地版仍是 console + JSONL 一个逻辑 sink，不声称每渠道 exactly-once，消费者按 id/revision 去重。
+
 ## 投递退出采集等待链
 
 - 每个完整批次提交后只写入意图并唤醒进程内的单 owner dispatcher，不再 `await` sink。

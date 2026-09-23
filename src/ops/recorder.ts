@@ -1717,6 +1717,7 @@ export async function runRecorder(options: RecorderOptions): Promise<number> {
       delivery:
         dispatcher?.stats ??
         ({ sent: 0, failed: 0, status: 'disabled', lastDeliveredAtMs: null } as const),
+      outboxPending: dispatcher?.pendingCount ?? 0,
       processingMode: mode,
       deliveryMode: mode === 'monitor' ? delivery : 'none',
       deliveryPolicy: deliveryState?.policy ?? null,
