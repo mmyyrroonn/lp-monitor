@@ -950,9 +950,14 @@ export async function runBenchmark(options, hooks = {}) {
     throw new Error('The dashboard server bound no port to sample');
   const port = bound.port;
   const summaryUrl = `http://127.0.0.1:${port}/api/snapshot`;
+  // One connection per probe, never a pooled one. The server retires an idle keep-alive socket
+  // after five seconds, and a round's own synchronous work (SQLite commits, artifact writes, GC)
+  // can hold this process's event loop past that. The next fetch would then write into the socket
+  // the server has already reset and fail with ECONNRESET -- a fact about socket lifetime, not
+  // about the summary. `connection: close` keeps each probe on the connection it opened.
   const httpProbe = async () => {
     const started = Date.now();
-    const response = await fetch(summaryUrl);
+    const response = await fetch(summaryUrl, { headers: { connection: 'close' } });
     const body = await response.arrayBuffer();
     return {
       status: response.status,
@@ -1503,7 +1508,12 @@ const invokedDirectly =
   process.argv[1] !== undefined && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (invokedDirectly) {
   main().catch((error) => {
-    process.stderr.write(`${error instanceof Error ? error.stack : String(error)}\n`);
+    // A failed fetch prints only "TypeError: fetch failed": undici's frames are dropped and the
+    // network fact lives in `cause`. Print it too, so a failed run names ECONNRESET, ECONNREFUSED,
+    // or the abort it actually hit instead of leaving the next reader to reproduce the race.
+    const cause =
+      error instanceof Error && error.cause instanceof Error ? `\n${error.cause.message}` : '';
+    process.stderr.write(`${error instanceof Error ? error.stack : String(error)}${cause}\n`);
     process.exitCode = 1;
   });
 }
