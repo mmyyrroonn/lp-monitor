@@ -47,6 +47,7 @@
 | `pnpm lint`（check-scripts + prettier） | 退出 0 |
 | `pnpm lint:semantic` | 退出 0 |
 | `pnpm test` | 退出 0（1389 tests / 162 files） |
+| CI run [35846355821](https://github.com/mmyyrroonn/lp-monitor/actions/runs/35846355821) | completed / success（typecheck、build、semantic、tests、format、verify 全通过） |
 | `pnpm build` + `node dist/cli.js --help` | 退出 0 |
 
 ## 迁移与回滚
